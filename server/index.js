@@ -1,4 +1,4 @@
-import { config } from './config.js';
+import { config, validarProduccion } from './config.js';
 import { crearApp } from './app.js';
 import { migrar } from './db/migrate.js';
 import { sembrar } from './db/seed.js';
@@ -6,6 +6,10 @@ import { conectar, explicarErrorConexion, pool } from './db/pool.js';
 import { asegurarAlmacenamiento } from './lib/archivos.js';
 
 async function iniciar() {
+  const faltan = validarProduccion(process.env);
+  if (faltan.length) {
+    throw Object.assign(new Error(`faltan variables de entorno en producción:\n  - ${faltan.join('\n  - ')}`), { ayuda: 'Agrégalas en Railway → Variables (plantilla: .env.railway.example).' });
+  }
   const db = await conectar();
   console.log(`[db] conectando a ${db.host || 'base local'}${db.esSupabase ? ` (Supabase${db.pooler ? ', pooler' : ''})` : ''} · SSL ${db.ssl ? 'sí' : 'no'}`);
   await pool.query('SELECT 1');
@@ -30,7 +34,7 @@ async function iniciar() {
 
 iniciar().catch((err) => {
   console.error('[api] no se pudo iniciar:', err.message);
-  const ayuda = explicarErrorConexion(err);
+  const ayuda = err.ayuda || explicarErrorConexion(err);
   if (ayuda) console.error(`[api] 👉 ${ayuda}`);
   process.exit(1);
 });

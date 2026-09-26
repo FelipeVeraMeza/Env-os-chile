@@ -87,9 +87,28 @@ export const config = {
   servirWeb: process.env.SERVE_WEB !== 'false',
 };
 
-if (entorno === 'production' && config.jwtSecret === 'solo-para-desarrollo-cambiar') {
-  console.warn('[seguridad] JWT_SECRET no está definido en producción. Defínelo en las variables de Railway.');
+// En producción no se aceptan valores de respaldo: el servidor no arranca si falta algo crítico.
+// Devuelve la lista de problemas (vacía si todo está bien).
+export function validarProduccion(env) {
+  if ((env.NODE_ENV || 'development') !== 'production') return [];
+  const faltan = [];
+  if (!env.DATABASE_URL && !(env.SUPABASE_URL && env.SUPABASE_DB_PASSWORD)) {
+    faltan.push('Base de datos: define SUPABASE_URL + SUPABASE_DB_PASSWORD (o DATABASE_URL)');
+  }
+  if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
+    faltan.push('JWT_SECRET: cadena aleatoria de 32 caracteres o más (firma sesiones y enlaces de fotos/boletas). Genera una con: npm run secreto');
+  }
+  if (!env.ADMIN_EMAIL || !env.ADMIN_PASSWORD) {
+    faltan.push('ADMIN_EMAIL y ADMIN_PASSWORD: administrador inicial');
+  } else if (env.ADMIN_PASSWORD.length < 12) {
+    faltan.push('ADMIN_PASSWORD: debe tener 12 caracteres o más');
+  }
+  if ((env.AUTH_MODE || 'demo') === 'demo' && !env.DEMO_CLAVE) {
+    faltan.push('DEMO_CLAVE: con AUTH_MODE=demo la demo publicada debe estar protegida con clave');
+  }
+  return faltan;
 }
+
 if (config.authMode === 'demo') {
   console.warn(`[seguridad] AUTH_MODE=demo: la API no exige inicio de sesión${config.demoClave ? ' (protegida con DEMO_CLAVE)' : ''}. No usar con datos reales.`);
 }
