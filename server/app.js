@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from './config.js';
@@ -38,6 +39,7 @@ export function crearApp() {
     origin: (origen, cb) => cb(null, !origen || config.corsOrigins.includes(origen) || config.corsOrigins.includes('*')),
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Demo-Usuario', 'X-Demo-Rol', 'X-Demo-Clave'],
   }));
+  app.use(compression()); // gzip: la interfaz y los JSON pesan ~70 % menos en 4G
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', async (_req, res) => {

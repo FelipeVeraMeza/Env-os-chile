@@ -63,22 +63,25 @@ Cuando respondan: nombre, logo, datos del negocio, tarifas, límites e intentos 
 | # | Mejora | Motivo |
 |---|---|---|
 | [x] D-a | **Couriers** (Blue Express, Starken, …) y **franjas horarias** editables en Ajustes | Hecho: Ajustes → Opciones del envío (una por línea). Probado con CP-67 |
-| [ ] D-b | Revisión visual completa en teléfono de cada pantalla (admin, cliente, repartidor) | RNF-01, RNF-13 |
+| [ ] D-b | Revisión visual completa en teléfono de cada pantalla (admin, cliente, repartidor) | Parcial (26/09): recorrido automático en 390 px y accesibilidad AA sin errores; falta verlo en teléfonos reales (bloque B) |
 | [ ] D-c | Actualizar documentos 02, 05, 09, 12 y 13 con lo hecho en esta etapa | Parcial (26/09): 02, 08, 12 y 13 al día (requerimientos RF-52 a RF-62 y RNF-16 a RNF-21). Faltan 05 y 09 (Supabase Storage reemplaza S3/R2, D-06) |
-| [ ] D-d | Medir carga de pantallas con perfil 4G (Lighthouse) | RNF-03 |
+| [x] D-d | Medir carga de pantallas con perfil 4G | Hecho: `npm run rendimiento`, todas < 2 s (0,9–1,7 s) |
+| [x] D-e | **Muchos usuarios a la vez**: bloqueo optimista, prueba de carga (100 clientes + 30 repartidores) y 100.000 envíos | Hecho: CP-80 a CP-83, `npm run carga` |
+| [x] D-f | **Ticket completo**: remitente, destinatario, dirección, región, etiqueta por bulto, firma, seguimiento y QR a Google Maps con la dirección | Hecho: CP-84 |
+| [x] D-g | Pruebas automáticas en cada cambio y monitoreo de `/api/health` cada 15 min (GitHub Actions) | Hecho: `.github/workflows/` |
 
 ### Etapa de desarrollo (se cotiza aparte, ver [09](09-plan-de-desarrollo.md))
 | # | Tarea | Prio. |
 |---|---|---|
-| [ ] D-01 | Pantalla de **inicio de sesión** y `AUTH_MODE=jwt` en producción | Must |
+| [~] D-01 | Pantalla de **inicio de sesión** y `AUTH_MODE=jwt` en producción | Must · pantalla lista (CP-85); falta activar `AUTH_MODE=jwt` en Railway cuando termine la demo |
 | [ ] D-02 | **Pasarela real** con webhook firmado y conciliación | Must |
 | [ ] D-03 | **Dominio .cl** apuntado a Railway con HTTPS | Must |
 | [ ] D-04 | Logo, nombre y colores definitivos | Must |
-| [ ] D-05 | Recuperación de contraseña por correo | Should |
+| [x] D-05 | Recuperación de contraseña por correo | Should · hecho (CP-87); falta configurar `SMTP_URL` |
 | [ ] D-07 | Respaldos automáticos y **restauración probada** | Must |
-| [ ] D-08 | Reembolsos al anular envíos pagados | Should |
+| [x] D-08 | Reembolsos al anular envíos pagados | Should · hecho (CP-90), manual hasta tener pasarela |
 | [ ] D-09 | Prueba en la impresora térmica del cliente | Must |
-| [ ] D-10 | Prueba de carga: 20 usuarios, 100.000 envíos | Should |
+| [x] D-10 | Prueba de carga: 20 usuarios, 100.000 envíos | Should · hecho en local; repetir contra Railway |
 | [ ] D-11 | Revisión legal: Ley 19.628 / 21.719, textos de consentimiento | Must |
 | [ ] D-12 | Autocompletado de direcciones (Google Places), si se aprueba | Could |
 

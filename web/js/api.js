@@ -21,6 +21,9 @@ export function fijarUrlApi(url) { escribirLS(LS_API, url === null ? null : url.
 export function perfilActual() { const v = Number(leerLS(LS_PERFIL)); return Number.isInteger(v) && v > 0 ? v : null; }
 export function fijarPerfil(id) { escribirLS(LS_PERFIL, id ? String(id) : null); }
 export function fijarClaveDemo(clave) { escribirLS(LS_CLAVE, clave || null); }
+// Sesión real (AUTH_MODE=jwt): el token dura 30 días en este dispositivo (RF-03).
+export function tokenActual() { return leerLS(LS_TOKEN); }
+export function fijarToken(token) { escribirLS(LS_TOKEN, token || null); }
 
 function cabeceras() {
   const h = {};
@@ -55,6 +58,11 @@ export async function api(ruta, { metodo = 'GET', json, form, blob = false } = {
   if (blob && res.ok) return res.blob();
   const tipo = res.headers.get('content-type') || '';
   const datos = tipo.includes('json') ? await res.json() : await res.text();
+  // Sesión vencida o cerrada desde otro dispositivo: se vuelve a la pantalla de ingreso.
+  if (res.status === 401 && leerLS(LS_TOKEN) && !ruta.startsWith('/api/auth/')) {
+    escribirLS(LS_TOKEN, null);
+    setTimeout(() => location.reload(), 1500);
+  }
   if (!res.ok) throw new ErrorApi(res.status, typeof datos === 'string' ? { error: datos } : datos);
   return datos;
 }

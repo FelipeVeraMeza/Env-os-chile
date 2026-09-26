@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
 import { auditar, falla, idNumerico, ruta } from '../lib/http.js';
-import { cargarEnvio, exigirAcceso, siguienteFolio } from '../lib/envios.js';
+import { cargarEnvio, exigirAcceso, exigirSinConflicto, siguienteFolio } from '../lib/envios.js';
 import { guardarArchivo, leerArchivo, subida, verificarFirma, firmarEnlace } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { MIME_BOLETA, validarReclamo } from '../lib/reglas.js';
@@ -48,9 +48,12 @@ pagos.post('/:token/confirmar', ruta(async (req, res) => {
     await db.query('UPDATE pago SET estado = $1, referencia = $2, actualizado_en = now() WHERE id = $3', [resultado, referencia, p.id]);
     if (resultado === 'aprobado') {
       if (p.estado_pago === 'pagado') throw falla(409, 'El envío ya estaba pagado');
-      await db.query(
-        `UPDATE envio SET estado_pago = 'pagado', pago_medio = 'en_linea', pago_referencia = $1, pagado_en = now(), actualizado_en = now() WHERE id = $2`,
+      // Dos pagos iniciados para el mismo envío: solo el primero en confirmarse lo marca pagado.
+      const r = await db.query(
+        `UPDATE envio SET estado_pago = 'pagado', pago_medio = 'en_linea', pago_referencia = $1, pagado_en = now(), actualizado_en = now()
+         WHERE id = $2 AND estado_pago <> 'pagado'`,
         [referencia, p.envio_id]);
+      if (!r.rowCount) throw falla(409, 'El envío ya estaba pagado');
     }
     return p.envio_id;
   });
@@ -129,7 +132,8 @@ reclamos.get('/:id', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
 reclamos.post('/:id/revision', requiereRol('admin'), ruta(async (req, res) => {
   const r = await reclamoAccesible(req);
   if (r.estado !== 'solicitado') throw falla(409, 'Solo se revisa un reclamo recién solicitado');
-  const act = await uno("UPDATE reclamo_seguro SET estado = 'en_revision' WHERE id = $1 RETURNING *", [r.id]);
+  const act = await uno("UPDATE reclamo_seguro SET estado = 'en_revision' WHERE id = $1 AND estado = 'solicitado' RETURNING *", [r.id]);
+  if (!act) throw falla(409, 'Otra persona ya tomó este reclamo');
   await auditar(req, 'revisar', 'reclamo_seguro', r.id);
   res.json(act);
 }));
@@ -145,8 +149,10 @@ reclamos.post('/:id/resolver', requiereRol('admin'), ruta(async (req, res) => {
     if (!Number.isInteger(m) || m <= 0 || m > r.monto_reclamado) throw falla(422, `El monto aprobado debe estar entre $1 y $${r.monto_reclamado.toLocaleString('es-CL')}`, { monto_aprobado: 'Fuera de rango' });
   } else throw falla(422, 'Decisión inválida');
   const act = await uno(
-    `UPDATE reclamo_seguro SET estado = $1, monto_aprobado = $2, resolucion_nota = $3, resuelto_por = $4, resuelto_en = now() WHERE id = $5 RETURNING *`,
+    `UPDATE reclamo_seguro SET estado = $1, monto_aprobado = $2, resolucion_nota = $3, resuelto_por = $4, resuelto_en = now()
+     WHERE id = $5 AND estado IN ('solicitado', 'en_revision') RETURNING *`,
     [decision === 'aprobar' ? 'aprobado' : 'rechazado', decision === 'aprobar' ? Number(monto) : null, nota || null, req.usuario.id, r.id]);
+  if (!act) throw falla(409, 'El reclamo ya fue resuelto por otra persona');
   await auditar(req, decision, 'reclamo_seguro', r.id, { monto_aprobado: act.monto_aprobado });
   res.json(act);
 }));
@@ -156,7 +162,8 @@ reclamos.post('/:id/pagar', requiereRol('admin'), ruta(async (req, res) => {
   const r = await reclamoAccesible(req);
   if (r.estado !== 'aprobado') throw falla(409, 'Solo se paga un reclamo aprobado');
   const act = await transaccion(async (db) => {
-    const { rows: [a] } = await db.query("UPDATE reclamo_seguro SET estado = 'pagado', pagado_en = now() WHERE id = $1 RETURNING *", [r.id]);
+    const { rows: [a] } = await db.query("UPDATE reclamo_seguro SET estado = 'pagado', pagado_en = now() WHERE id = $1 AND estado = 'aprobado' RETURNING *", [r.id]);
+    if (!a) throw falla(409, 'El reclamo ya fue pagado'); // evita registrar dos veces la indemnización
     await db.query(
       "INSERT INTO costo (tipo, monto, envio_id, reclamo_id, nota, creado_por) VALUES ('seguro', $1, $2, $3, $4, $5)",
       [r.monto_aprobado, r.envio_id, r.id, `Indemnización ${r.numero} (${r.folio})`, req.usuario.id]);
@@ -206,7 +213,7 @@ reportes.get('/ganancias', ruta(async (req, res) => {
     uno(`SELECT count(*)::int AS entregados, COALESCE(sum(tarifa_total), 0)::int AS ingreso
          FROM envio WHERE estado = 'entregado' AND (entregado_en ${tz})::date BETWEEN $1 AND $2`, p),
     uno(`SELECT count(*)::int AS pagados, COALESCE(sum(tarifa_total), 0)::int AS monto
-         FROM envio WHERE estado_pago = 'pagado' AND (pagado_en ${tz})::date BETWEEN $1 AND $2`, p),
+         FROM envio WHERE estado_pago IN ('pagado', 'reembolsado') AND (pagado_en ${tz})::date BETWEEN $1 AND $2`, p),
     uno(`SELECT count(*)::int AS n, COALESCE(sum(tarifa_total), 0)::int AS monto
          FROM envio WHERE estado IN ('creado','asignado','en_ruta','fallido','reagendado')`),
     uno('SELECT COALESCE(sum(monto), 0)::int AS total FROM costo WHERE fecha BETWEEN $1 AND $2', p),
@@ -223,12 +230,16 @@ reportes.get('/ganancias', ruta(async (req, res) => {
     query('SELECT tipo, sum(monto)::int AS total FROM costo WHERE fecha BETWEEN $1 AND $2 GROUP BY tipo ORDER BY total DESC', p),
   ]);
   const totalCreados = porEstado.rows.reduce((s, r) => s + r.n, 0);
+  const reembolsos = await uno(`SELECT count(*)::int AS n, COALESCE(sum(reembolso_monto), 0)::int AS monto
+    FROM envio WHERE estado_pago = 'reembolsado' AND (reembolsado_en ${tz})::date BETWEEN $1 AND $2`, p);
   const fallidosIntentos = await uno(`SELECT COALESCE(sum(intentos), 0)::int AS n FROM envio WHERE (creado_en ${tz})::date BETWEEN $1 AND $2`, p);
   res.json({
     desde, hasta,
     ingreso: tot.ingreso,
     entregados: tot.entregados,
     cobrado: cobrado.monto,
+    reembolsos: reembolsos.monto,
+    cobrado_neto: cobrado.monto - reembolsos.monto,
     pagados: cobrado.pagados,
     proyectado,
     costos: costosTot.total,

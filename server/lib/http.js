@@ -71,6 +71,13 @@ export function manejadorErrores(err, req, res, _next) {
     // Violación de una restricción de la base (CHECK / NOT NULL): es una regla de negocio.
     return res.status(409).json({ error: 'La operación viola una regla del sistema', detalles: { restriccion: err.constraint || err.column } });
   }
+  if (err?.code === '23505') {
+    // Registro duplicado (índice único): típico de dos personas haciendo lo mismo a la vez.
+    return res.status(409).json({ error: 'Ya existe un registro igual (posiblemente creado por otra persona al mismo tiempo)', detalles: { restriccion: err.constraint } });
+  }
+  if (err?.code === '40P01' || err?.code === '40001') {
+    return res.status(409).json({ error: 'Operación simultánea con otra persona. Inténtalo de nuevo.', detalles: { conflicto: true } });
+  }
   console.error(err);
   return res.status(500).json({ error: 'Error interno del servidor' });
 }

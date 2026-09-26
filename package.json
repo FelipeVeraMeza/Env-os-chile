@@ -23,18 +23,28 @@
     "datos-demo": "node scripts/datos-demo.js",
     "secreto": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "sql:supabase": "node scripts/generar-sql-supabase.js",
-    "publicar": "node scripts/publicar.js"
+    "publicar": "node scripts/publicar.js",
+    "carga": "node scripts/prueba-carga.js",
+    "e2e": "node qa/e2e/flujo-completo.js",
+    "rendimiento": "node qa/e2e/rendimiento.js",
+    "accesibilidad": "node qa/e2e/accesibilidad.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
+    "nodemailer": "^6.10.1",
     "pdfkit": "^0.15.2",
     "pg": "^8.13.1",
     "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "axe-core": "^4.13.0",
+    "playwright-core": "^1.63.0"
   }
 }

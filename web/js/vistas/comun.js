@@ -13,6 +13,22 @@ export function opcionesComunas(comunas, seleccionada) {
 }
 
 
+// Aviso al destinatario por WhatsApp (RF-55): abre el chat con el mensaje listo; no requiere API ni tiene costo.
+const MENSAJE_AVISO = {
+  creado: (e) => `Hola ${e.destinatario_nombre}, tienes un envío registrado (${e.folio}).`,
+  asignado: (e) => `Hola ${e.destinatario_nombre}, tu envío ${e.folio} ya tiene repartidor asignado.`,
+  en_ruta: (e) => `Hola ${e.destinatario_nombre}, tu envío ${e.folio} va en camino${e.horario_especial ? ` (horario ${e.franja_horaria})` : ''}. Por favor, que alguien pueda recibirlo.`,
+  reagendado: (e) => `Hola ${e.destinatario_nombre}, reprogramamos la entrega de tu envío ${e.folio}.`,
+  fallido: (e) => `Hola ${e.destinatario_nombre}, intentamos entregar tu envío ${e.folio} y no fue posible. Responde este mensaje para coordinar un nuevo intento.`,
+  entregado: (e) => `Hola ${e.destinatario_nombre}, tu envío ${e.folio} fue entregado. ¡Gracias!`,
+};
+export function avisoWhatsapp(e, negocio) {
+  const texto = (MENSAJE_AVISO[e.estado] || MENSAJE_AVISO.creado)(e);
+  const seguimiento = `${location.origin}${location.pathname}#/seguimiento/${e.folio}`;
+  const fono = String(e.destinatario_telefono || '').replace(/\D/g, '');
+  return `https://wa.me/${fono}?text=${encodeURIComponent(`${texto}\nSigue tu envío: ${seguimiento}\n${negocio?.nombre || ''}`.trim())}`;
+}
+
 export function direccionTexto(e) {
   return `${e.calle} ${e.numero}${e.depto ? `, ${e.depto}` : ''} · ${e.comuna_nombre}`;
 }

@@ -5,7 +5,7 @@
 --  CÓMO USARLO: Supabase → SQL Editor → New query → pegar TODO este archivo → Run.
 --  Se puede ejecutar más de una vez: si la base ya existe, no hace nada.
 --
---  Crea: 2 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
+--  Crea: 3 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
 --  dentro de Santiago), tarifas ($3.500 base, +$1.000 horario especial, 20 kg / 60 cm),
 --  reglas de operación (3 intentos, 5 min de espera) y el bucket privado de fotos y boletas.
 --  Los usuarios los crea la app en su primer arranque (ADMIN_EMAIL / ADMIN_PASSWORD en Railway).
@@ -273,6 +273,49 @@ BEGIN
     ALTER TABLE auditoria        ENABLE ROW LEVEL SECURITY;
     ALTER TABLE schema_migracion ENABLE ROW LEVEL SECURITY;
     INSERT INTO schema_migracion (nombre) VALUES ('002_seguridad_supabase.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
+-- Migración 003_multiusuario_y_operacion.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '003_multiusuario_y_operacion.sql') THEN
+    -- Operación con muchos usuarios a la vez y funciones operativas (septiembre 2026).
+
+    -- Un solo reclamo activo por envío, garantizado por la base aunque dos personas lo pidan a la vez.
+    CREATE UNIQUE INDEX IF NOT EXISTS reclamo_activo_unico ON reclamo_seguro (envio_id) WHERE estado <> 'rechazado';
+
+    -- Orden de la ruta que define el repartidor (RF-60).
+    ALTER TABLE envio ADD COLUMN IF NOT EXISTS orden_ruta INTEGER;
+
+    -- Reembolso del pago (RF-57): el envío queda con estado_pago = 'reembolsado'.
+    ALTER TABLE envio ADD COLUMN IF NOT EXISTS reembolso_monto INTEGER CHECK (reembolso_monto IS NULL OR reembolso_monto > 0);
+    ALTER TABLE envio ADD COLUMN IF NOT EXISTS reembolso_medio TEXT;
+    ALTER TABLE envio ADD COLUMN IF NOT EXISTS reembolso_nota TEXT;
+    ALTER TABLE envio ADD COLUMN IF NOT EXISTS reembolsado_en TIMESTAMPTZ;
+    ALTER TABLE envio ADD CONSTRAINT envio_reembolso_tope CHECK (reembolso_monto IS NULL OR reembolso_monto <= tarifa_total);
+
+    -- Derechos del titular de datos (RF-58, Ley 21.719).
+    ALTER TABLE destinatario ADD COLUMN IF NOT EXISTS anonimizado_en TIMESTAMPTZ;
+
+    -- Al cambiar la contraseña, los enlaces de restablecimiento anteriores dejan de servir (RF-02).
+    ALTER TABLE usuario ADD COLUMN IF NOT EXISTS password_cambiado_en TIMESTAMPTZ;
+
+    -- Índices para muchos usuarios y 100.000 envíos (RNF-09).
+    CREATE INDEX IF NOT EXISTS envio_comuna_idx ON envio (comuna_id);
+    CREATE INDEX IF NOT EXISTS envio_repartidor_estado_idx ON envio (repartidor_id, estado);
+    CREATE INDEX IF NOT EXISTS envio_entregado_idx ON envio (entregado_en) WHERE estado = 'entregado';
+    CREATE INDEX IF NOT EXISTS envio_pagado_idx ON envio (pagado_en) WHERE estado_pago = 'pagado';
+    CREATE INDEX IF NOT EXISTS auditoria_entidad_idx ON auditoria (entidad, entidad_id);
+    CREATE INDEX IF NOT EXISTS auditoria_fecha_idx ON auditoria (fecha DESC);
+    CREATE INDEX IF NOT EXISTS pago_envio_idx ON pago (envio_id);
+
+    -- El QR del ticket abre Google Maps con la dirección (pedido del cliente, 26-09-2026).
+    UPDATE config SET valor = jsonb_set(valor, '{qr_destino}', '"google"') WHERE clave = 'operacion' AND valor->>'qr_destino' = 'pagina';
+    INSERT INTO schema_migracion (nombre) VALUES ('003_multiusuario_y_operacion.sql');
   END IF;
 END
 $migracion$;
@@ -646,7 +689,7 @@ $comunas$;
 INSERT INTO config (clave, valor) VALUES
   ('negocio', '{"nombre":"Tu Empresa de Envíos","rut":"","telefono":"","correo":"","logo_url":""}'::jsonb),
   ('tarifas', '{"base":3500,"bulto_adicional_domicilio":3500,"bulto_adicional_punto":0,"recargo_horario_especial":1000,"peso_max_kg":20,"dim_max_cm":60}'::jsonb),
-  ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":true,"qr_destino":"pagina"}'::jsonb),
+  ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":true,"registro_clientes":false,"qr_destino":"google"}'::jsonb),
   ('ticket', '{"pie":"Conserve este ticket. Consultas y reclamos indicando el folio."}'::jsonb),
   ('listas', '{"couriers":["Blue Express","Starken","Chilexpress","Correos de Chile","Otra"],"franjas":["08:00 – 10:00","10:00 – 13:00","13:00 – 16:00","16:00 – 19:00","19:00 – 21:00","21:00 – 23:00"]}'::jsonb),
   ('pagos', '{"proveedor":"simulado"}'::jsonb)

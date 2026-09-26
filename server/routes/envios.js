@@ -8,7 +8,7 @@ import {
   validarDireccion, validarPaquete, validarTransicion, validarUbicacion, ESTADOS,
 } from '../lib/reglas.js';
 import {
-  cargarEnvio, detalleCompleto, exigirAcceso, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
+  cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
 } from '../lib/envios.js';
 import { guardarArchivo, subida } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
@@ -154,6 +154,9 @@ function prefijar(prefijo, errores) {
 }
 
 async function confirmar(db, envioId, usuarioId) {
+  // Se bloquea la fila antes de pedir folio: dos confirmaciones simultáneas no gastan dos folios.
+  const { rows: [actual] } = await db.query('SELECT estado FROM envio WHERE id = $1 FOR UPDATE', [envioId]);
+  if (actual?.estado !== 'borrador') throw falla(409, 'El envío ya fue confirmado');
   const folio = await siguienteFolio(db, 'ENV');
   await db.query(`UPDATE envio SET folio = $1, estado = 'creado', confirmado_en = now(), actualizado_en = now() WHERE id = $2`, [folio, envioId]);
   await registrarEstado(db, { envioId, anterior: 'borrador', nuevo: 'creado', usuarioId });
@@ -189,8 +192,10 @@ envios.get('/', ruta(async (req, res) => {
   const total = await uno(
     `SELECT count(*)::int AS n FROM envio e JOIN destinatario d ON d.id = e.destinatario_id
      JOIN direccion di ON di.id = e.direccion_id JOIN comuna c ON c.id = e.comuna_id ${where}`, params);
+  // orden=ruta: el orden que definió el repartidor (RF-60); lo no ordenado va al final agrupado por comuna.
+  const orden = req.query.orden === 'ruta' ? 'e.orden_ruta NULLS LAST, c.nombre, e.creado_en' : 'e.creado_en DESC, e.id DESC';
   const { rows } = await query(
-    `${SELECT_ENVIO} ${where} ORDER BY e.creado_en DESC, e.id DESC LIMIT ${limite} OFFSET ${(pagina - 1) * limite}`, params);
+    `${SELECT_ENVIO} ${where} ORDER BY ${orden} LIMIT ${limite} OFFSET ${(pagina - 1) * limite}`, params);
   res.json({ total: total.n, pagina, limite, items: rows.map((e) => presentar(e, req.usuario)) });
 }));
 
@@ -213,6 +218,24 @@ envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, re
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="envios-${new Date().toISOString().slice(0, 10)}.csv"`);
   res.send('﻿' + lineas.join('\r\n'));
+}));
+
+// El repartidor ordena su ruta del día (RF-60). Solo puede ordenar envíos que tiene asignados.
+envios.put('/ruta/orden', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [];
+  if (!ids.length || ids.length > 200 || ids.some((n) => !Number.isInteger(n) || n <= 0) || new Set(ids).size !== ids.length) {
+    throw falla(422, 'Lista de envíos inválida');
+  }
+  const repartidorId = req.usuario.rol === 'repartidor' ? req.usuario.id : Number(req.body.repartidor_id);
+  // En una transacción: si hay un envío ajeno en la lista no se cambia nada.
+  const n = await transaccion(async (db) => {
+    const r = await db.query(
+      `UPDATE envio e SET orden_ruta = o.pos FROM unnest($1::int[]) WITH ORDINALITY AS o(id, pos)
+       WHERE e.id = o.id AND e.repartidor_id = $2`, [ids, repartidorId]);
+    if (r.rowCount !== ids.length) throw falla(403, 'Solo puedes ordenar envíos asignados a ti');
+    return r.rowCount;
+  });
+  res.json({ ok: true, ordenados: n });
 }));
 
 async function envioAccesible(req) {
@@ -244,7 +267,10 @@ envios.post('/:id/asignar', requiereRol('admin'), ruta(async (req, res) => {
   }
   const nuevo = repartidorId ? 'asignado' : 'creado';
   await transaccion(async (db) => {
-    await db.query('UPDATE envio SET repartidor_id = $1, estado = $2, actualizado_en = now() WHERE id = $3', [repartidorId, nuevo, envio.id]);
+    exigirSinConflicto(await db.query(
+      `UPDATE envio SET repartidor_id = $1, estado = $2, actualizado_en = now()
+       WHERE id = $3 AND estado = $4 AND repartidor_id IS NOT DISTINCT FROM $5`,
+      [repartidorId, nuevo, envio.id, envio.estado, envio.repartidor_id]));
     if (nuevo !== envio.estado || repartidorId !== envio.repartidor_id) {
       await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo, usuarioId: req.usuario.id, motivo: repartidorId ? null : 'Repartidor desasignado' });
     }
@@ -275,7 +301,8 @@ envios.post('/:id/estado', ruta(async (req, res) => {
     if (nuevo === 'fallido') sets.push('intentos = intentos + 1', 'llegada_en = NULL');
     if (nuevo === 'reagendado') sets.push('llegada_en = NULL');
     if (nuevo === 'creado') sets.push('repartidor_id = NULL');
-    await db.query(`UPDATE envio SET ${sets.join(', ')} WHERE id = $2`, [nuevo, envio.id]);
+    exigirSinConflicto(await db.query(`UPDATE envio SET ${sets.join(', ')} WHERE id = $2 AND estado = $3 AND intentos = $4`,
+      [nuevo, envio.id, envio.estado, envio.intentos]));
     await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo, motivo: textoMotivo, usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon });
   });
   await auditar(req, 'cambiar_estado', 'envio', envio.id, { de: envio.estado, a: nuevo, motivo: textoMotivo });
@@ -309,11 +336,11 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
        VALUES ($1, 'foto_entrega', $2, $3, $4, $5, $6, $7)`,
       [envio.id, req.file.originalname, req.file.mimetype, archivo.tamano, archivo.ruta, archivo.sha256, req.usuario.id],
     );
-    await db.query(
+    exigirSinConflicto(await db.query(
       `UPDATE envio SET estado = 'entregado', entregado_en = now(), entrega_lat = $1, entrega_lon = $2, entrega_precision_m = $3,
-         entrega_receptor = $4, actualizado_en = now() WHERE id = $5`,
-      [ubic?.lat ?? null, ubic?.lon ?? null, req.body.precision ? Number(req.body.precision) : null, req.body.receptor || null, envio.id],
-    );
+         entrega_receptor = $4, actualizado_en = now() WHERE id = $5 AND estado = $6`,
+      [ubic?.lat ?? null, ubic?.lon ?? null, req.body.precision ? Number(req.body.precision) : null, req.body.receptor || null, envio.id, envio.estado],
+    ));
     await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: req.body.receptor ? `Recibe: ${req.body.receptor}` : null });
   });
   await auditar(req, 'entregar', 'envio', envio.id, { lat: ubic?.lat, lon: ubic?.lon });
@@ -361,11 +388,30 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
   if (!['transferencia', 'efectivo', 'otro'].includes(medio)) throw falla(422, 'Medio de pago inválido');
   if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
   if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'No se puede registrar pago en este estado');
-  await query(
-    `UPDATE envio SET estado_pago = 'pagado', pago_medio = $1, pago_referencia = $2, pagado_en = now(), actualizado_en = now() WHERE id = $3`,
+  exigirSinConflicto(await query(
+    `UPDATE envio SET estado_pago = 'pagado', pago_medio = $1, pago_referencia = $2, pagado_en = now(), actualizado_en = now()
+     WHERE id = $3 AND estado_pago <> 'pagado' AND estado NOT IN ('borrador', 'anulado')`,
     [medio, req.body.referencia || null, envio.id],
-  );
+  ));
   await auditar(req, 'pago_manual', 'envio', envio.id, { medio, referencia: req.body.referencia });
+  res.json(presentar(await cargarEnvio(envio.id), req.usuario));
+}));
+
+// Reembolso del pago de un envío anulado o devuelto (RF-57). La política (total o parcial) la define el cliente (C-7).
+envios.post('/:id/reembolso', requiereRol('admin'), ruta(async (req, res) => {
+  const envio = await envioAccesible(req);
+  const monto = Number(req.body?.monto ?? envio.tarifa_total);
+  const medio = req.body?.medio;
+  if (!['anulado', 'devuelto'].includes(envio.estado)) throw falla(409, 'Solo se reembolsa un envío anulado o devuelto');
+  if (envio.estado_pago !== 'pagado') throw falla(409, envio.estado_pago === 'reembolsado' ? 'El envío ya fue reembolsado' : 'El envío no está pagado');
+  const errores = {};
+  if (!Number.isInteger(monto) || monto <= 0 || monto > envio.tarifa_total) errores.monto = `Entre $1 y $${envio.tarifa_total.toLocaleString('es-CL')}`;
+  if (!['transferencia', 'efectivo', 'pasarela', 'otro'].includes(medio)) errores.medio = 'Medio inválido';
+  exigirSinErrores(errores);
+  exigirSinConflicto(await query(
+    `UPDATE envio SET estado_pago = 'reembolsado', reembolso_monto = $1, reembolso_medio = $2, reembolso_nota = $3, reembolsado_en = now(), actualizado_en = now()
+     WHERE id = $4 AND estado_pago = 'pagado'`, [monto, medio, String(req.body?.nota || '').trim() || null, envio.id]));
+  await auditar(req, 'reembolsar', 'envio', envio.id, { monto, medio });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));
 

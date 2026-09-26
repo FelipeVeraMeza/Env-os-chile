@@ -62,7 +62,8 @@ export const CONFIG_POR_DEFECTO = {
     intentos_max: 3,
     espera_max_min: 5,
     gps_obligatorio: true,
-    qr_destino: 'pagina', // pagina | google | waze
+    registro_clientes: false, // RF-56: los clientes pueden crear su cuenta solos (pregunta C-9)
+    qr_destino: 'google', // google (abre el mapa con la dirección) | pagina | waze
   },
   ticket: {
     pie: 'Conserve este ticket. Consultas y reclamos indicando el folio.',
@@ -341,6 +342,8 @@ export function enlacesMapa(d) {
   const texto = encodeURIComponent(textoDireccion(d));
   const coords = d.lat != null && d.lon != null ? `${d.lat},${d.lon}` : null;
   return {
+    // "ver" muestra la dirección marcada en Google Maps (con su botón "Cómo llegar"); "google" abre la ruta directa.
+    ver: `https://www.google.com/maps/search/?api=1&query=${coords ? encodeURIComponent(coords) : texto}`,
     google: `https://www.google.com/maps/dir/?api=1&destination=${coords ? encodeURIComponent(coords) : texto}&travelmode=driving`,
     waze: coords ? `https://waze.com/ul?ll=${encodeURIComponent(coords)}&navigate=yes` : `https://waze.com/ul?q=${texto}&navigate=yes`,
   };

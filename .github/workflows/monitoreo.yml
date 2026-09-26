@@ -1,0 +1,27 @@
+# Monitoreo (RNF-18): cada 15 minutos revisa que la app publicada y su base de datos respondan.
+# Si falla 3 veces seguidas, la ejecución queda en rojo y GitHub avisa por correo a quien administra el repositorio.
+# La URL se cambia en Settings → Secrets and variables → Actions → Variables → URL_MONITOREO.
+name: Monitoreo
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  salud:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Revisar /api/health
+        env:
+          URL: ${{ vars.URL_MONITOREO || 'https://env-os-chile-production.up.railway.app' }}
+        run: |
+          for intento in 1 2 3; do
+            respuesta=$(curl -s -m 20 "$URL/api/health" || true)
+            echo "Intento $intento: $respuesta"
+            if echo "$respuesta" | grep -q '"ok":true'; then exit 0; fi
+            sleep 20
+          done
+          echo "::error::La app no responde correctamente en $URL/api/health"
+          exit 1

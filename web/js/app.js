@@ -1,13 +1,14 @@
-import { fijarClaveDemo, fijarPerfil, fijarUrlApi, get, perfilActual, urlApi } from './api.js';
+import { fijarClaveDemo, fijarPerfil, fijarToken, fijarUrlApi, get, perfilActual, tokenActual, urlApi } from './api.js';
 import { $, errorToast, html, icono, modal, montar, raw, toast } from './ui.js';
 import * as cliente from './vistas/cliente.js';
 import * as envios from './vistas/envios.js';
 import * as repartidor from './vistas/repartidor.js';
 import * as admin from './vistas/admin.js';
 import * as publico from './vistas/publico.js';
+import * as cuenta from './vistas/cuenta.js';
 
 // Estado compartido de la aplicación.
-export const app = { conf: null, usuario: null, perfiles: [] };
+export const app = { conf: null, usuario: null, perfiles: [], refrescar: null };
 
 const MENUS = {
   cliente: [
@@ -36,6 +37,10 @@ const MENUS = {
 
 const RUTAS = [
   [/^#\/seguimiento(?:\/([\w-]+))?$/, (m) => publico.seguimiento(m[1])],
+  [/^#\/restablecer\/([\w.-]+)$/, (m) => cuenta.restablecer(m[1])],
+  [/^#\/recuperar$/, () => cuenta.recuperar()],
+  [/^#\/registro$/, () => cuenta.registro()],
+  [/^#\/cuenta$/, () => cuenta.miCuenta(), ['admin', 'cliente', 'repartidor']],
   [/^#\/envio\/(\d+)$/, (m) => envios.detalle(Number(m[1]))],
   [/^#\/envios$/, () => envios.registro()],
   [/^#\/inicio$/, () => cliente.inicio(), 'cliente'],
@@ -56,14 +61,24 @@ export function ir(hash) { if (location.hash === hash) enrutar(); else location.
 async function enrutar() {
   const hash = location.hash || '';
   const rol = app.usuario?.rol;
-  if (!rol && !hash.startsWith('#/seguimiento')) return pantallaSinPerfil();
+  const publica = /^#\/(seguimiento|restablecer|recuperar|registro)/.test(hash);
+  if (!rol && !publica) return app.conf?.auth_mode === 'jwt' ? cuenta.ingreso() : pantallaSinPerfil();
   const ruta = RUTAS.find(([re, , roles]) => re.test(hash) && (!roles || [].concat(roles).includes(rol)));
   if (!ruta) return ir(INICIO[rol] || '#/seguimiento');
   pintarMenu(hash);
   $('#modal-raiz').replaceChildren(); // al navegar se cierran hojas y modales abiertos
   const vista = $('#vista');
+  app.refrescar = null;
   try {
     await ruta[1](hash.match(ruta[0]));
+    // Pantallas que se redibujan completas al refrescar (las listas con filtros definen su propio app.refrescar).
+    if (!app.refrescar && /^#\/(ruta|inicio|envio\/\d+)$/.test(hash)) {
+      app.refrescar = async () => {
+        const y = window.scrollY;
+        await ruta[1](hash.match(ruta[0]));
+        window.scrollTo(0, y);
+      };
+    }
   } catch (err) {
     montar(vista, html`<div class="card"><h2>No se pudo cargar esta pantalla</h2><p class="sub">${err.message}</p>
       <button class="btn sec" onclick="location.reload()">Reintentar</button></div>`);
@@ -73,7 +88,7 @@ async function enrutar() {
 }
 
 function pintarMenu(hash) {
-  const items = MENUS[app.usuario?.rol] || [];
+  const items = [...(MENUS[app.usuario?.rol] || []), ...(app.usuario && app.conf?.auth_mode === 'jwt' ? [['#/cuenta', 'usuarios', 'Mi cuenta', 'solo-escritorio']] : [])];
   const ocultos = items.filter(([, , , cls]) => cls === 'solo-escritorio');
   montar($('#menu'), html`<div class="titulo-menu">${app.usuario?.nombre || ''}</div>${items.map(([h, ic, txt, cls]) => html`
     <a href="${h}" class="${[hash.startsWith(h) ? 'activo' : '', cls].filter(Boolean).join(' ')}">${icono(ic)}<span>${txt}</span></a>`)}
@@ -91,14 +106,18 @@ function pintarChip() {
 
 function hojaMas() {
   const hash = location.hash;
-  const ocultos = (MENUS[app.usuario?.rol] || []).filter(([, , , cls]) => cls === 'solo-escritorio');
+  const real = app.conf?.auth_mode === 'jwt';
+  const ocultos = [...(MENUS[app.usuario?.rol] || []), ...(real && app.usuario ? [['#/cuenta', 'usuarios', 'Mi cuenta', 'solo-escritorio']] : [])]
+    .filter(([, , , cls]) => cls === 'solo-escritorio');
   if (!ocultos.length && !app.perfiles.length) return; // nada que mostrar (p. ej. antes de ingresar la clave)
   const m = modal(html`
     ${ocultos.length ? html`<div class="hoja-titulo" style="margin-top:0">Secciones</div><div class="hoja-lista">${ocultos.map(([h, ic, txt]) => html`
       <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}</a>`)}</div>` : ''}
     ${app.perfiles.length ? html`<div class="hoja-titulo" ${ocultos.length ? '' : raw('style="margin-top:0"')}>Ver la plataforma como</div>
     <div class="hoja-lista">${app.perfiles.map((p) => html`<button class="item ${p.id === app.usuario?.id ? 'activo' : ''}" data-perfil="${p.id}">
-      <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>` : ''}`);
+      <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>` : ''}
+    ${real && app.usuario ? html`<div class="hoja-lista" style="margin-top:10px"><button class="item" id="hoja-salir">Cerrar sesión (${app.usuario.nombre})</button></div>` : ''}`);
+  m.el.querySelector('#hoja-salir')?.addEventListener('click', cuenta.cerrarSesion);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
   m.el.querySelectorAll('[data-perfil]').forEach((b) => { b.onclick = () => { m.cerrar(); cambiarPerfil(Number(b.dataset.perfil)); }; });
 }
@@ -195,15 +214,17 @@ async function iniciar() {
   if (!modoDesarrollo()) $('#btn-servidor').style.pointerEvents = 'none'; // solo muestra el punto de estado
   $('#chip-perfil').onclick = hojaMas;
   try {
+    // Configuración y perfiles se piden en paralelo (una ida y vuelta menos al abrir la app).
+    const perfilesP = get('/api/demo/usuarios').then((p) => ({ p }), (err) => ({ err }));
     const conf = await get('/api/config/publica');
     let perfiles = [];
-    try {
-      perfiles = await get('/api/demo/usuarios');
-    } catch (err) {
-      if (err.detalles?.demo_clave) return pedirClaveDemo(conf);
+    if (conf.auth_mode !== 'jwt') {
+      const r = await perfilesP;
+      if (r.err?.detalles?.demo_clave) return pedirClaveDemo(conf);
+      perfiles = r.p || [];
     }
     app.conf = conf;
-    app.perfiles = perfiles;
+    app.perfiles = conf.auth_mode === 'jwt' ? [] : perfiles;
     $('#estado-api').className = 'punto-estado ok';
     $('#marca-nombre').textContent = conf.negocio.nombre;
     document.title = `${conf.negocio.nombre} · Envíos`;
@@ -212,11 +233,30 @@ async function iniciar() {
     $('#estado-api').className = 'punto-estado error';
     errorToast(err);
   }
-  app.usuario = app.perfiles.find((p) => p.id === perfilActual()) || null;
-  pintarSelector();
+  if (app.conf?.auth_mode === 'jwt') {
+    // Inicio de sesión real: cada persona entra con su cuenta; no hay selector de perfiles.
+    document.querySelector('.chip-demo')?.remove();
+    document.querySelector('label.perfil')?.remove();
+    if (tokenActual()) {
+      try { app.usuario = await get('/api/auth/yo'); } catch { fijarToken(null); }
+    }
+    pintarChip();
+    if (!app.usuario) $('#chip-perfil').style.display = 'none';
+  } else {
+    app.usuario = app.perfiles.find((p) => p.id === perfilActual()) || null;
+    pintarSelector();
+  }
   window.addEventListener('hashchange', enrutar);
   enrutar();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+// Actualización automática (RNF-22): con muchas personas trabajando a la vez, lo que cambia otro usuario
+// (asignaciones, entregas, pagos) aparece solo cada 30 s, sin interrumpir a quien está escribiendo.
+setInterval(async () => {
+  if (document.hidden || !app.refrescar || $('#modal-raiz').children.length) return;
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || '')) return;
+  try { await app.refrescar(); } catch { /* un fallo de red puntual no interrumpe: se reintenta en el próximo ciclo */ }
+}, 30000);
 
 iniciar();

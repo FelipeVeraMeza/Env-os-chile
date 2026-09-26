@@ -32,7 +32,18 @@ Cada ejecución deja un reporte JUnit en `qa/reportes/` (evidencia para el clien
 
 ## 3. Matriz de casos de prueba automatizados
 
-Resultado de la última ejecución local (26-09-2026): **65/65 aprobados** (QA) y **40/40** (unitarias).
+Resultado de la última ejecución local (26-09-2026): **78/78 aprobados** (QA), **40/40** (unitarias), flujo completo por interfaz, carga, 4G y accesibilidad en verde.
+
+| Comando | Qué prueba |
+|---|---|
+| `npm test` | Reglas de negocio, limitador, configuración de producción, SQL de Supabase (40 pruebas) |
+| `npm run qa:local` / `qa:railway` | 78 casos CP contra la API real |
+| `npm run e2e` | Cliente, administración y repartidor **a la vez en tres teléfonos**: crear → pagar → asignar → retirar → entregar con foto y GPS → la pantalla del cliente se actualiza sola → seguimiento público. Deja capturas en `qa/reportes/e2e/` |
+| `npm run carga` | 40 clientes y 15 repartidores simultáneos (`--clientes 100 --repartidores 30` para más). Verifica 0 errores, folios únicos y que todo termine entregado |
+| `npm run rendimiento` | Cada pantalla en < 2 s con 4G simulado y teléfono lento |
+| `npm run accesibilidad` | WCAG 2.1 AA con axe-core en 11 pantallas |
+
+Todo se ejecuta solo en cada cambio con GitHub Actions (`.github/workflows/pruebas.yml`).
 
 | Caso | Descripción | Requerimiento |
 |---|---|---|
@@ -101,6 +112,19 @@ Resultado de la última ejecución local (26-09-2026): **65/65 aprobados** (QA) 
 | CP-77 | Web y API en la misma app, sin servidores ni fuentes externas | RNF-17 |
 | CP-78 | Límite de solicitudes por IP (API y seguimiento público) | RNF-16 |
 | CP-79 | Demo abierta: perfiles sin clave | RF-53 |
+| CP-80 | 5 "intento fallido" simultáneos sobre un envío: se registra uno | RNF-22 |
+| CP-81 | Dos administradores asignan a la vez: gana uno | RNF-22 |
+| CP-82 | Confirmaciones y pagos simultáneos: un folio y un cobro | RNF-22 |
+| CP-83 | 8 clientes × 5 envíos simultáneos: folios únicos | RNF-22, RNF-09 |
+| CP-84 | Ticket: una etiqueta por bulto y QR a Google Maps con la dirección | RF-20, RF-24, RF-63 |
+| CP-85 | Inicio de sesión y sesión de 30 días | RF-01, RF-03 |
+| CP-86 | Cambiar contraseña cierra las otras sesiones | RF-02, RF-65 |
+| CP-87 | Enlace de recuperación de un solo uso | RF-02 |
+| CP-88 | Registro de clientes cerrado por defecto y habilitable | RF-56 |
+| CP-89 | No se desactiva un repartidor con envíos en curso | RF-05 |
+| CP-90 | Reembolso de envíos anulados/devueltos, una vez y con tope | RF-57 |
+| CP-91 | Exportar y anonimizar un destinatario sin perder envíos | RF-58 |
+| CP-92 | El repartidor ordena su ruta; no toca envíos ajenos | RF-60 |
 
 ## 4. Criterios de aceptación (UAT con el cliente)
 

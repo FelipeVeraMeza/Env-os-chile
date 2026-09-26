@@ -96,12 +96,16 @@ Guía completa: [docs/10-despliegue.md](docs/10-despliegue.md).
 ## Pruebas
 
 ```bash
-npm test            # 29 pruebas unitarias (reglas de negocio, conexión Supabase, Storage, SQL)
-npm run verificar   # revisa variables, conexión a la base y almacenamiento antes de desplegar
-npm run qa:local    # 65 casos QA extremo a extremo (CP-01 … CP-79) contra localhost
+npm test               # 40 pruebas unitarias (reglas de negocio, limitador, Supabase, SQL)
+npm run verificar      # revisa variables, conexión a la base y almacenamiento antes de desplegar
+npm run qa:local       # 78 casos QA contra la API (CP-01 … CP-92) en localhost
+npm run e2e            # flujo completo por la interfaz: cliente, admin y repartidor a la vez
+npm run carga          # 40 clientes + 15 repartidores simultáneos (0 errores, folios únicos)
+npm run rendimiento    # cada pantalla < 2 s con 4G simulado
+npm run accesibilidad  # WCAG 2.1 AA (axe-core)
 ```
 
-Cada caso QA está trazado a un requerimiento en el [plan de QA](docs/08-plan-qa-y-criterios-de-aceptacion.md). Los reportes JUnit quedan en `qa/reportes/`.
+Todo corre solo en cada cambio (GitHub Actions) y `/api/health` se monitorea cada 15 min. Cada caso QA está trazado a un requerimiento en el [plan de QA](docs/08-plan-qa-y-criterios-de-aceptacion.md). Los reportes JUnit quedan en `qa/reportes/`.
 
 ## Estructura
 

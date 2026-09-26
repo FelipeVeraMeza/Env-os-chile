@@ -18,7 +18,12 @@ export const autenticar = ruta(async (req, _res, next) => {
     } catch {
       throw falla(401, 'Sesión inválida o expirada');
     }
-    usuario = await uno('SELECT id, nombre, correo, rol, activo FROM usuario WHERE id = $1', [payload.sub]);
+    usuario = await uno('SELECT id, nombre, correo, rol, activo, password_cambiado_en FROM usuario WHERE id = $1', [payload.sub]);
+    // Al cambiar la contraseña se cierran las sesiones abiertas antes (margen de 1 s por el redondeo de "iat").
+    if (payload.tipo || (usuario?.password_cambiado_en && payload.iat * 1000 < new Date(usuario.password_cambiado_en).getTime() - 1000)) {
+      throw falla(401, 'Tu sesión se cerró porque cambió la contraseña. Vuelve a ingresar.');
+    }
+    if (usuario) delete usuario.password_cambiado_en;
   } else if (config.authMode === 'demo') {
     exigirClaveDemo(req);
     const id = Number(req.get('x-demo-usuario'));

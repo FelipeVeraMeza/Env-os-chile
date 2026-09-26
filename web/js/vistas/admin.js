@@ -40,7 +40,7 @@ export async function panel(rango = {}) {
       <div class="card" style="margin:0"><div class="card-titulo"><h2>Sin asignar</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
         ${pendientes.items.length ? html`<div class="pila">${pendientes.items.map((e) => html`<a href="#/envio/${e.id}" class="fila entre" style="color:inherit;text-decoration:none"><span class="mono"><b>${e.folio}</b></span><span class="sub">${e.comuna_nombre}</span>${e.estado_pago === 'pagado' ? html`<span class="badge e-pagado">Pagado</span>` : html`<span class="badge e-pendiente">Por pagar</span>`}</a>`)}</div>` : html`<p class="sub">Todo asignado ✔</p>`}</div>
       <div class="card" style="margin:0"><h2>Repartidores</h2>
-        ${g.por_repartidor.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Repartidor</th><th class="num">Entregas</th><th class="num">Fallidos</th></tr></thead>
+        ${g.por_repartidor.length ? html`<div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table><thead><tr><th>Repartidor</th><th class="num">Entregas</th><th class="num">Fallidos</th></tr></thead>
           <tbody>${g.por_repartidor.map((r) => html`<tr><td>${r.repartidor}</td><td class="num">${r.entregados}</td><td class="num">${r.intentos_fallidos}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Sin actividad en el período.</p>`}</div>
       <div class="card" style="margin:0"><h2>Estado de la operación</h2>
         <div class="desglose">${[['creado', 'Creados'], ['asignado', 'Asignados'], ['en_ruta', 'En ruta'], ['entregado', 'Entregados'], ['fallido', 'Fallidos'], ['devuelto', 'Devueltos'], ['anulado', 'Anulados']].map(([k, t]) => html`<div><span>${t}</span><b>${estados[k] || 0}</b></div>`)}</div>
@@ -79,7 +79,7 @@ function graficoBarras(el, datos, desde, hasta) {
     return `<rect class="barra-hit" data-i="${i}" x="${pl + i * ancho}" y="${pt}" width="${ancho}" height="${H - pt - pb}"/><path class="barra" data-b="${i}" d="${path}"/>${etiqueta}`;
   }).join('');
   el.innerHTML = `<div class="grafico"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ingresos por día del período">${lineas.join('')}${barras}</svg></div>
-    <details style="margin-top:8px"><summary class="sub">Ver como tabla</summary><div class="tabla-wrap" style="margin-top:8px"><table><thead><tr><th>Día</th><th class="num">Envíos</th><th class="num">Ingreso</th></tr></thead>
+    <details style="margin-top:8px"><summary class="sub">Ver como tabla</summary><div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)" style="margin-top:8px"><table><thead><tr><th>Día</th><th class="num">Envíos</th><th class="num">Ingreso</th></tr></thead>
     <tbody>${serie.filter((s) => s.envios).map((s) => `<tr><td>${fecha(`${s.dia}T12:00:00`)}</td><td class="num">${s.envios}</td><td class="num">${clp(s.ingreso)}</td></tr>`).join('')}</tbody></table></div></details>`;
   const cont = $('.grafico', el);
   const tip = document.createElement('div');
@@ -129,18 +129,19 @@ export async function tarifas() {
         <div class="grid g2">
           <label class="campo">Intentos máximos de entrega<input type="number" name="intentos_max" min="1" value="${op.intentos_max}"></label>
           <label class="campo">Espera máxima en destino (min)<input type="number" name="espera_max_min" min="1" value="${op.espera_max_min}"></label>
-          <label class="campo">Al escanear el QR<select name="qr_destino">${[['pagina', 'Página con Maps y Waze (recomendado)'], ['google', 'Abrir Google Maps directo'], ['waze', 'Abrir Waze directo']].map(([v, txt]) => html`<option value="${v}" ${op.qr_destino === v ? html`selected` : ''}>${txt}</option>`)}</select></label>
+          <label class="campo">Al escanear el QR<select name="qr_destino">${[['google', 'Google Maps con la dirección (recomendado)'], ['pagina', 'Página con botones Google Maps y Waze'], ['waze', 'Abrir Waze directo']].map(([v, txt]) => html`<option value="${v}" ${op.qr_destino === v ? html`selected` : ''}>${txt}</option>`)}</select></label>
         </div>
         <label class="interruptor" style="margin-top:14px"><input type="checkbox" name="gps_obligatorio" ${op.gps_obligatorio ? html`checked` : ''}> GPS obligatorio para cerrar la entrega</label>
+        <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="registro_clientes" ${op.registro_clientes ? html`checked` : ''}> Los clientes pueden crear su cuenta solos</label>
         <p class="muted">La foto de entrega es siempre obligatoria.</p>
         <button class="btn" style="margin-top:6px">Guardar reglas</button>
       </form>
     </div>
     <div class="card">
       <div class="card-titulo"><h2>Cobertura por comuna</h2><span class="sub">${comunas.filter((c) => c.en_cobertura).length} comunas en cobertura</span></div>
-      <div class="grid g2" style="margin-bottom:12px"><input type="search" id="buscar-comuna" placeholder="Buscar comuna…">
-        <select id="region">${regiones.map((r) => html`<option ${r === 'Metropolitana' ? html`selected` : ''}>${r}</option>`)}</select></div>
-      <div class="tabla-wrap"><table><thead><tr><th>Comuna</th><th>Provincia</th><th>Cobertura</th><th class="num">Tarifa propia</th></tr></thead><tbody id="tabla-comunas"></tbody></table></div>
+      <div class="grid g2" style="margin-bottom:12px"><input type="search" id="buscar-comuna" placeholder="Buscar comuna…" aria-label="Buscar comuna">
+        <select id="region" aria-label="Región">${regiones.map((r) => html`<option ${r === 'Metropolitana' ? html`selected` : ''}>${r}</option>`)}</select></div>
+      <div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table><thead><tr><th>Comuna</th><th>Provincia</th><th>Cobertura</th><th class="num">Tarifa propia</th></tr></thead><tbody id="tabla-comunas"></tbody></table></div>
     </div>`);
 
   const pintarComunas = () => {
@@ -194,10 +195,29 @@ export async function usuarios() {
   montar(vista, html`
     <div class="encabezado"><div><h1>Usuarios</h1><p>Tres perfiles: administrador, cliente y repartidor.</p></div>
       <button class="btn" id="nuevo-u">${icono('nuevo')} Nuevo usuario</button></div>
-    <div class="tabla-wrap"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
+    <div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
       <tbody>${lista.map((u) => html`<tr><td><b>${u.nombre}</b></td><td>${u.correo}</td><td><span class="badge ${u.rol === 'admin' ? 'e-en_ruta' : u.rol === 'cliente' ? 'e-creado' : 'e-asignado'}">${ROL[u.rol]}</span></td>
         <td>${u.telefono || '—'}</td><td>${u.activo ? html`<span class="badge e-entregado">Activo</span>` : html`<span class="badge e-anulado">Inactivo</span>`}</td>
-        <td><button class="btn sec chico" data-activo="${u.id}" data-v="${u.activo ? '0' : '1'}">${u.activo ? 'Desactivar' : 'Activar'}</button></td></tr>`)}</tbody></table></div>`);
+        <td><div class="fila"><button class="btn sec chico" data-activo="${u.id}" data-v="${u.activo ? '0' : '1'}">${u.activo ? 'Desactivar' : 'Activar'}</button>
+          ${u.activo ? html`<button class="btn sec chico" data-clave="${u.id}">Enlace de contraseña</button>` : ''}</div></td></tr>`)}</tbody></table></div>`);
+  $$('[data-clave]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        const u = lista.find((x) => String(x.id) === b.dataset.clave);
+        const { enlace, vence_en_min: min } = await post(`/api/usuarios/${u.id}/restablecer`);
+        const texto = `Hola ${u.nombre}, crea tu contraseña de ${app.conf.negocio.nombre} aquí (vale ${min} minutos): ${enlace}`;
+        const fono = (u.telefono || '').replace(/\D/g, '');
+        const m = modal(html`<h2>Enlace de contraseña</h2>
+          <p class="sub">Compártelo con <b>${u.nombre}</b>. Sirve una sola vez y vence en ${min} minutos.${app.conf.recuperacion_por_correo ? '' : ' (El envío automático por correo no está configurado: SMTP_URL).'}</p>
+          <label class="campo">Enlace<input id="enlace-clave" readonly value="${enlace}"></label>
+          <div class="fila" style="margin-top:12px"><button class="btn" id="copiar-clave">Copiar</button>
+            <a class="btn sec" target="_blank" rel="noopener" href="https://wa.me/${fono}?text=${encodeURIComponent(texto)}">Enviar por WhatsApp</a></div>`);
+        $('#copiar-clave', m.el).onclick = async () => {
+          try { await navigator.clipboard.writeText(enlace); toast('Enlace copiado', 'ok'); } catch { $('#enlace-clave', m.el).select(); }
+        };
+      } catch (err) { errorToast(err); }
+    };
+  });
   $$('[data-activo]').forEach((b) => {
     b.onclick = async () => {
       try { await patch(`/api/usuarios/${b.dataset.activo}`, { activo: b.dataset.v === '1' }); toast('Usuario actualizado', 'ok'); usuarios(); } catch (err) { errorToast(err); }
@@ -209,7 +229,7 @@ export async function usuarios() {
       <label class="campo">Correo *<input name="correo" type="email"></label>
       <label class="campo">Perfil *<select name="rol"><option value="cliente">Cliente</option><option value="repartidor">Repartidor</option><option value="admin">Administrador</option></select></label>
       <label class="campo">Teléfono<input name="telefono" placeholder="+56 9 1234 5678"></label>
-      <label class="campo">Contraseña inicial <small>(para cuando se active el inicio de sesión)</small><input name="password" type="password" minlength="8"></label>
+      <label class="campo">Contraseña inicial <small>(mínimo 8; o déjala vacía y envía un enlace)</small><input name="password" type="password" minlength="8"></label>
       <button class="btn">Crear usuario</button></form>`);
     $('#f-u', m.el).onsubmit = async (e) => {
       e.preventDefault();
@@ -254,7 +274,7 @@ export async function ajustes() {
           </div>
           <button class="btn" style="margin-top:12px">Guardar opciones</button></form>
         <div class="card" style="margin:0"><div class="card-titulo"><h2>Costos del mes</h2><button class="btn sec chico" id="nuevo-costo">+ Registrar costo</button></div>
-          ${costos.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Nota</th><th class="num">Monto</th></tr></thead>
+          ${costos.length ? html`<div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Nota</th><th class="num">Monto</th></tr></thead>
             <tbody>${costos.map((c) => html`<tr><td>${fecha(c.fecha)}</td><td>${c.tipo}</td><td class="sub">${c.nota || ''}</td><td class="num">${clp(c.monto)}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Sin costos registrados este mes.</p>`}
         </div>
       </div>

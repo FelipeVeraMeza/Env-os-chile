@@ -3,16 +3,22 @@
 Prioridad: **I** = Imprescindible · **A** = Alta · **M** = Media. Estado del prototipo v0.1: ✅ implementado y probado · 🟡 parcial · ⬜ pendiente para desarrollo.
 Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan-qa-y-criterios-de-aceptacion.md)).
 
+> **Estado al 26-09-2026: 78 de 90 requerimientos listos y probados** (60 de 65 funcionales, 18 de 25 no funcionales).
+> Los 12 pendientes no dependen del código de esta etapa:
+> - **Del cliente o de un proveedor:** pasarela real RF-45 (C-3), aviso automático pagado RF-55, plazo de conservación RF-59 y RNF-20 (C-11), Google Places RF-61 y operación sin señal RF-62 (C-12).
+> - **De pruebas presenciales:** teléfonos reales RNF-01, cronometrar a personas RNF-02 y matriz de navegadores Safari/iPhone RNF-08.
+> - **De la cuenta del cliente:** respaldos en Supabase RNF-07, traspaso del repositorio RNF-12 y revisión legal RNF-15.
+
 ## Requerimientos funcionales
 
 ### Cuentas y acceso
 | ID | Requerimiento | Prio. | Proto. | QA |
 |---|---|---|---|---|
-| RF-01 | El usuario inicia sesión con correo y contraseña | I | 🟡 API lista (`/api/auth/login`); la interfaz demo no pide login | — |
-| RF-02 | Recuperación de contraseña por correo | A | ⬜ requiere proveedor de correo | — |
-| RF-03 | La sesión dura 30 días en el dispositivo | A | 🟡 token JWT de 30 días | — |
+| RF-01 | El usuario inicia sesión con correo y contraseña | I | ✅ pantalla de ingreso con `AUTH_MODE=jwt`; la demo abierta usa perfiles | CP-85 |
+| RF-02 | Recuperación de contraseña por correo | A | ✅ enlace de un solo uso (1 h); se envía por correo si hay `SMTP_URL`, o administración lo comparte por WhatsApp. Cambio de contraseña cierra las otras sesiones | CP-86, CP-87 |
+| RF-03 | La sesión dura 30 días en el dispositivo | A | ✅ | CP-85 |
 | RF-04 | Tres perfiles (admin, cliente, repartidor) que limitan lo que se ve y hace | I | ✅ | CP-25, CP-60 a CP-62 |
-| RF-05 | El administrador crea, edita y desactiva usuarios | A | ✅ | CP-61, CP-74 |
+| RF-05 | El administrador crea, edita y desactiva usuarios | A | ✅ no se desactiva un repartidor con envíos en curso | CP-61, CP-74, CP-89 |
 
 ### Destinatarios y direcciones
 | ID | Requerimiento | Prio. | Proto. | QA |
@@ -39,11 +45,11 @@ Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan
 ### Ticket, QR y mapas
 | ID | Requerimiento | Prio. | Proto. | QA |
 |---|---|---|---|---|
-| RF-20 | Ticket con todos los datos del envío | I | ✅ | CP-22 |
+| RF-20 | Ticket con todos los datos del envío: remitente, destinatario y teléfono, dirección completa con referencia, comuna y región, contenido, servicio, pago, firma de recepción y enlace de seguimiento | I | ✅ | CP-22, CP-84 |
 | RF-21 | Formato térmico 80 mm y A4 (PDF) | A | ✅ | CP-22 |
 | RF-22 | Imprimir, descargar y compartir (WhatsApp manual) | I | ✅ | — |
 | RF-23 | QR único por envío | I | ✅ | CP-23 |
-| RF-24 | El QR abre la navegación hacia el destino | I | ✅ | CP-23 |
+| RF-24 | El QR abre **Google Maps con la dirección** del destino (configurable: Google Maps, Waze o página con ambos) | I | ✅ | CP-23, CP-71, CP-84 |
 | RF-25 | El administrador elige si el QR abre página, Google Maps o Waze | M | ✅ | CP-71 |
 | RF-26 | Botones "Google Maps / Waze" en el detalle sin escanear | A | ✅ | CP-71 |
 
@@ -95,28 +101,35 @@ Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan
 Faltan para operar con clientes reales. La mayoría depende de respuestas del cliente (ver [14](14-plan-de-accion.md), bloque C) o de la etapa de desarrollo.
 | ID | Requerimiento | Prio. | Proto. | Depende de |
 |---|---|---|---|---|
-| RF-55 | **Aviso automático al destinatario** (envío en camino, entregado, intento fallido) por WhatsApp, SMS o correo. Hoy solo se comparte el enlace de seguimiento a mano | A | ⬜ | Proveedor de mensajería (costo por mensaje) |
-| RF-56 | **Registro autónomo de clientes** (sin que el administrador los cree) con verificación de correo | M | ⬜ | Pregunta C-9 · RF-01, RF-02 |
-| RF-57 | **Reembolso** del pago cuando el envío se anula tras pagar o se devuelve después de 3 intentos | A | ⬜ | Pregunta C-7 · pasarela real (RF-45) |
-| RF-58 | **Derechos de los titulares** (Ley 21.719): acceso, rectificación y supresión/anonimización de datos de un destinatario sin perder el historial contable | A | ⬜ | Revisión legal (RNF-15) |
+| RF-55 | **Aviso al destinatario** (en camino, entregado, intento fallido) | A | 🟡 botón "Avisar por WhatsApp" con el mensaje listo según el estado (sin costo). El envío automático requiere proveedor pagado | E2E |
+| RF-56 | **Registro autónomo de clientes**, habilitable por administración (cerrado por defecto) | M | ✅ | CP-88 |
+| RF-57 | **Reembolso** (total o parcial) del pago de un envío anulado o devuelto; aparece en el reporte | A | ✅ registro manual; con la pasarela real se automatiza. La política la define el cliente (C-7) | CP-90 |
+| RF-58 | **Derechos de los titulares** (Ley 21.719): exportar los datos de un destinatario y anonimizarlo sin perder el historial contable | A | ✅ falta validación legal (RNF-15) | CP-91 |
 | RF-59 | **Plazo de conservación**: borrar o anonimizar fotos y datos personales pasado el plazo definido | M | ⬜ | Pregunta C-11 · revisión legal · RNF-20 |
-| RF-60 | **Orden de la ruta del repartidor** (por comuna o arrastrando) y vista de la ruta del día | M | ⬜ | Validar con repartidores en la semana de pruebas |
+| RF-60 | **Orden de la ruta del repartidor** (subir/bajar paradas) | M | ✅ | CP-92 |
 | RF-61 | **Autocompletar direcciones** (Google Places) | M | ⬜ | Pregunta C-12 · costo de la API de Google |
 | RF-62 | **Operación sin señal** para el repartidor: guardar la entrega (foto + GPS) y enviarla al recuperar conexión | M | ⬜ | Pregunta C-12 |
+
+### Agregados para operar con muchos usuarios (26-09-2026)
+| ID | Requerimiento | Prio. | Proto. | QA |
+|---|---|---|---|---|
+| RF-63 | **Una etiqueta por bulto** en el ticket térmico ("Bulto 2 de 3"), con el alto justo al contenido (sin papel en blanco) | A | ✅ | CP-84 |
+| RF-64 | **Actualización automática**: las pantallas de ruta, detalle, inicio y registro se refrescan solas cada 30 s sin interrumpir a quien escribe | A | ✅ | E2E (el cliente ve "Entregado" sin recargar) |
+| RF-65 | **Cerrar sesión** y **Mi cuenta** (cambiar contraseña) para cada usuario | A | ✅ | CP-86 |
 
 ## Requerimientos no funcionales
 
 | ID | Requerimiento | Estado | Cómo se verifica |
 |---|---|---|---|
-| RNF-01 | Diseñado para celular primero, botones grandes, usable con una mano | 🟡 revisión automática en 390 px sin errores; falta equipo real | Revisión en equipo real del repartidor (semana de pruebas) |
-| RNF-02 | Crear un envío completo en < 60 s con los datos a mano | ⬜ | Prueba cronometrada con 5 envíos reales |
-| RNF-03 | Pantallas cargan en < 2 s con 4G | ⬜ | Lighthouse / DevTools con perfil "Fast 4G" |
+| RNF-01 | Diseñado para celular primero, botones grandes, usable con una mano | 🟡 flujo completo probado por interfaz en 390 px (E2E); falta equipo real | Revisión en equipo real del repartidor (semana de pruebas) |
+| RNF-02 | Crear un envío completo en < 60 s con los datos a mano | 🟡 el formulario (4 pasos) se completa en ~1 s automatizado; falta cronometrar a personas | Prueba cronometrada con 5 envíos reales |
+| RNF-03 | Pantallas cargan en < 2 s con 4G | ✅ local con 4G simulado (150 ms, 9 Mbps, CPU ×4, sin caché): 0,9 a 1,7 s. Módulos precargados y respuestas comprimidas (gzip). Repetir contra Railway | `npm run rendimiento` |
 | RNF-04 | Ticket con QR en < 3 s | ✅ | CP-76 (y medición de `/ticket.pdf` en Railway) |
 | RNF-05 | Contraseñas con hash (bcrypt) y HTTPS siempre | ✅ | Revisión de código + certificado del dominio |
 | RNF-06 | Fotos y boletas **nunca públicas**: solo con enlace firmado que expira (10 min) | ✅ | CP-33, CP-56 |
 | RNF-07 | Respaldo diario de la base con 30 días de retención | ⬜ | Configuración de backups en Supabase (plan, A-8) |
 | RNF-08 | Chrome y Safari (dos últimas versiones), Android e iOS | ⬜ | Matriz de navegadores en plan QA |
-| RNF-09 | 20 usuarios simultáneos y 100.000 envíos sin degradarse | ⬜ | Prueba de carga previa a producción |
+| RNF-09 | 20 usuarios simultáneos y 100.000 envíos sin degradarse | ✅ local: 100 clientes + 30 repartidores a la vez, 3.231 solicitudes, 0 errores, p95 347 ms (pool de 5 conexiones, como Supabase); con 100.000 envíos las consultas responden en < 0,25 s. Repetir contra Railway | `npm run carga` |
 | RNF-10 | Español de Chile, CLP, dd-mm-aaaa, zona horaria America/Santiago | ✅ | Revisión visual; reportes calculados en America/Santiago |
 | RNF-11 | El QR se genera aunque el servicio de mapas no responda | ✅ | CP-76: QR PNG generado en el servidor, sin dependencias externas |
 | RNF-12 | Código documentado en un repositorio del cliente | 🟡 | Este repositorio (falta traspasarlo al cliente) |
@@ -125,7 +138,11 @@ Faltan para operar con clientes reales. La mayoría depende de respuestas del cl
 | RNF-15 | Cumplimiento de la Ley 19.628 y la Ley 21.719 (datos personales) | ⬜ | Revisión legal antes de producción |
 | RNF-16 | **Límite de solicitudes por IP**: 1.200/min en la API, 60/min en el seguimiento público y la página del QR, 10 intentos de login cada 15 min. Responde 429 con `Retry-After`. Protege la demo abierta | ✅ | CP-78 y pruebas unitarias del limitador. Variables `LIMITE_API_POR_MINUTO`, `LIMITE_PUBLICO_POR_MINUTO` |
 | RNF-17 | **Todo en la misma app**: la interfaz usa la API del mismo dominio (Railway sirve ambas), sin servidores ni fuentes externas; la política CSP solo permite `'self'` | ✅ | CP-77 |
-| RNF-18 | **Monitoreo**: `/api/health` revisado cada 5 min con aviso por correo si falla | 🟡 endpoint listo; falta el servicio de avisos (p. ej. UptimeRobot, gratis) | Configurar el monitor y provocar una caída de prueba |
-| RNF-19 | **Accesibilidad** WCAG 2.1 AA: contraste, etiquetas en todos los campos, uso con lector de pantalla | 🟡 campos con etiqueta; falta auditoría | Lighthouse Accesibilidad ≥ 90 |
+| RNF-18 | **Monitoreo**: `/api/health` revisado cada 15 min, con aviso por correo si falla | ✅ GitHub Actions (`.github/workflows/monitoreo.yml`); se activa al llegar a la rama principal | Pestaña Actions → Monitoreo |
+| RNF-19 | **Accesibilidad** WCAG 2.1 AA: contraste, etiquetas en todos los campos, uso con teclado y lector de pantalla | ✅ 11 pantallas sin problemas graves (axe-core); falta prueba con lector de pantalla real | `npm run accesibilidad` |
 | RNF-20 | **Retención de datos** definida (fotos de entrega, boletas y datos de destinatarios) | ⬜ | Documento firmado con el cliente (ver RF-59) |
+| RNF-22 | **Varias personas sobre el mismo envío a la vez** sin pisarse: cada cambio se aplica solo si el envío sigue como estaba (si no, 409 y se pide recargar). Folios, pagos, asignaciones, intentos y reclamos nunca se duplican | ✅ | CP-80 a CP-83 (fallaban con el código anterior) |
+| RNF-23 | **Prueba extremo a extremo por la interfaz**: cliente, administración y repartidor en teléfonos distintos al mismo tiempo | ✅ | `npm run e2e` |
+| RNF-25 | **Pruebas automáticas en cada cambio** (unitarias, QA, carga, extremo a extremo y accesibilidad) | ✅ | `.github/workflows/pruebas.yml` |
+| RNF-24 | La base de datos se crea igual en Supabase y en el servidor, y el script SQL se puede ejecutar varias veces sin errores | ✅ | Verificado en base nueva (2 ejecuciones) |
 | RNF-21 | La **demo abierta no se usa con datos reales**: los datos cargados en la demo son de prueba y pueden borrarse | ✅ decisión | Aviso al cliente al compartir el enlace; producción usa `AUTH_MODE=jwt` |
