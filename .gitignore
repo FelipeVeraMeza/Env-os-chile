@@ -1,0 +1,7 @@
+node_modules/
+.env
+entornos.local.env
+uploads/
+qa/reportes/
+.DS_Store
+*.log

@@ -1,0 +1,271 @@
+import { app } from '../app.js';
+import { get, patch, post, put } from '../api.js';
+import { $, $$, clp, datosForm, errorToast, esqueleto, fecha, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
+import { limpiarCacheComunas } from './comun.js';
+
+// ================= Panel de ganancias =================
+export async function panel(rango = {}) {
+  const vista = $('#vista');
+  const hoy = hoyISO();
+  const desde = rango.desde || `${hoy.slice(0, 8)}01`;
+  const hasta = rango.hasta || hoy;
+  montar(vista, esqueleto(4));
+  const [g, pendientes, reclamosAbiertos] = await Promise.all([
+    get(`/api/reportes/ganancias?desde=${desde}&hasta=${hasta}`),
+    get('/api/envios?estado=creado&repartidor_id=sin&limite=5'),
+    get('/api/reclamos?estado=solicitado'),
+  ]);
+  const estados = Object.fromEntries(g.por_estado.map((r) => [r.estado, r.n]));
+
+  montar(vista, html`
+    <div class="encabezado"><div><h1>Panel de administración</h1><p>Ganancia neta = tarifas de envíos entregados − costos (incluye seguros pagados).</p></div>
+      <form class="fila" id="rango">
+        <label class="campo">Desde<input type="date" name="desde" value="${desde}" max="${hoy}"></label>
+        <label class="campo">Hasta<input type="date" name="hasta" value="${hasta}" max="${hoy}"></label>
+        <div class="fila" style="align-self:flex-end"><button type="button" class="btn sec chico" data-r="hoy">Hoy</button><button type="button" class="btn sec chico" data-r="mes">Mes</button></div>
+      </form></div>
+    <div class="grid g4">
+      <div class="kpi destacado"><div class="etiqueta">Ganancia neta</div><div class="valor">${clp(g.neto)}</div><div class="nota">${fecha(g.desde)} – ${fecha(g.hasta)}</div></div>
+      <div class="kpi"><div class="etiqueta">Ingresos (entregados)</div><div class="valor">${clp(g.ingreso)}</div><div class="nota">${g.entregados} envíos · prom. ${clp(g.promedio_por_envio)}</div></div>
+      <div class="kpi"><div class="etiqueta">Costos</div><div class="valor">${clp(g.costos)}</div><div class="nota">${g.costos_por_tipo.map((c) => `${c.tipo} ${clp(c.total)}`).join(' · ') || 'sin costos registrados'}</div></div>
+      <div class="kpi"><div class="etiqueta">Cobrado en el período</div><div class="valor">${clp(g.cobrado)}</div><div class="nota">${g.pagados} pagos · proyectado ${clp(g.proyectado.monto)}</div></div>
+    </div>
+    <div class="grid g2" style="margin-top:16px;align-items:start">
+      <div class="card" style="margin:0"><div class="card-titulo"><h2>Ingresos por día</h2><span class="sub">Envíos entregados</span></div><div id="grafico"></div></div>
+      <div class="card" style="margin:0"><h2>Comunas con más ingresos</h2>
+        ${g.por_comuna.length ? html`<div class="ranking">${g.por_comuna.map((c) => html`<div class="r"><span>${c.comuna}</span><div><div class="b" style="width:${Math.max(4, (c.ingreso / g.por_comuna[0].ingreso) * 100)}%"></div></div><span class="v">${clp(c.ingreso)} · ${c.envios}</span></div>`)}</div>` : vacio('Sin entregas en el período.')}
+      </div>
+    </div>
+    <div class="grid g3" style="margin-top:16px;align-items:start">
+      <div class="card" style="margin:0"><div class="card-titulo"><h2>Sin asignar</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
+        ${pendientes.items.length ? html`<div class="pila">${pendientes.items.map((e) => html`<a href="#/envio/${e.id}" class="fila entre" style="color:inherit;text-decoration:none"><span class="mono"><b>${e.folio}</b></span><span class="sub">${e.comuna_nombre}</span>${e.estado_pago === 'pagado' ? html`<span class="badge e-pagado">Pagado</span>` : html`<span class="badge e-pendiente">Por pagar</span>`}</a>`)}</div>` : html`<p class="sub">Todo asignado ✔</p>`}</div>
+      <div class="card" style="margin:0"><h2>Repartidores</h2>
+        ${g.por_repartidor.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Repartidor</th><th class="num">Entregas</th><th class="num">Fallidos</th></tr></thead>
+          <tbody>${g.por_repartidor.map((r) => html`<tr><td>${r.repartidor}</td><td class="num">${r.entregados}</td><td class="num">${r.intentos_fallidos}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Sin actividad en el período.</p>`}</div>
+      <div class="card" style="margin:0"><h2>Estado de la operación</h2>
+        <div class="desglose">${[['creado', 'Creados'], ['asignado', 'Asignados'], ['en_ruta', 'En ruta'], ['entregado', 'Entregados'], ['fallido', 'Fallidos'], ['devuelto', 'Devueltos'], ['anulado', 'Anulados']].map(([k, t]) => html`<div><span>${t}</span><b>${estados[k] || 0}</b></div>`)}</div>
+        <p class="sub" style="margin-top:10px">Intentos fallidos por envío: ${(g.tasa_intentos_fallidos * 100).toFixed(1)}%</p>
+        ${reclamosAbiertos.length ? html`<a class="btn sec chico" href="#/reclamos" style="margin-top:8px">${reclamosAbiertos.length} reclamo(s) de seguro por revisar</a>` : ''}</div>
+    </div>`);
+
+  graficoBarras($('#grafico'), g.por_dia, desde, hasta);
+  $('#rango').addEventListener('change', (e) => panel(datosForm(e.currentTarget)));
+  $$('[data-r]').forEach((b) => { b.onclick = () => panel(b.dataset.r === 'hoy' ? { desde: hoy, hasta: hoy } : {}); });
+}
+
+// Barras de una sola serie (sin leyenda: el título la nombra), tooltip al pasar el cursor y tabla accesible.
+function graficoBarras(el, datos, desde, hasta) {
+  const dias = [];
+  for (let d = new Date(`${desde}T12:00:00`); d <= new Date(`${hasta}T12:00:00`) && dias.length < 62; d.setDate(d.getDate() + 1)) dias.push(d.toISOString().slice(0, 10));
+  const mapa = Object.fromEntries(datos.map((d) => [d.dia, d]));
+  const serie = dias.map((dia) => ({ dia, ingreso: mapa[dia]?.ingreso || 0, envios: mapa[dia]?.envios || 0 }));
+  if (!serie.some((s) => s.ingreso)) return montar(el, vacio('Aún no hay entregas en este período.'));
+  const W = 600; const H = 220; const pl = 52; const pb = 26; const pt = 10;
+  const max = Math.max(...serie.map((s) => s.ingreso));
+  const paso = max <= 10000 ? 2500 : max <= 50000 ? 10000 : 10 ** Math.floor(Math.log10(max)) * (max / 10 ** Math.floor(Math.log10(max)) > 5 ? 2 : 1);
+  const tope = Math.ceil(max / paso) * paso;
+  const ancho = (W - pl) / serie.length;
+  const barra = Math.max(3, Math.min(28, ancho - 2));
+  const y = (v) => pt + (H - pt - pb) * (1 - v / tope);
+  const lineas = [];
+  for (let v = 0; v <= tope; v += paso) lineas.push(`<line class="grilla" x1="${pl}" x2="${W}" y1="${y(v)}" y2="${y(v)}"/><text class="eje" x="${pl - 6}" y="${y(v) + 4}" text-anchor="end">${v >= 1000 ? `$${v / 1000}k` : `$${v}`}</text>`);
+  const cadaEtiqueta = Math.ceil(serie.length / 8);
+  const barras = serie.map((s, i) => {
+    const x = pl + i * ancho + (ancho - barra) / 2;
+    const h = Math.max(0, y(0) - y(s.ingreso));
+    const r = Math.min(4, barra / 2, h);
+    const path = h ? `M${x},${y(0)} V${y(s.ingreso) + r} Q${x},${y(s.ingreso)} ${x + r},${y(s.ingreso)} H${x + barra - r} Q${x + barra},${y(s.ingreso)} ${x + barra},${y(s.ingreso) + r} V${y(0)} Z` : '';
+    const etiqueta = i % cadaEtiqueta === 0 ? `<text class="eje" x="${x + barra / 2}" y="${H - 6}" text-anchor="middle">${s.dia.slice(8)}/${s.dia.slice(5, 7)}</text>` : '';
+    return `<rect class="barra-hit" data-i="${i}" x="${pl + i * ancho}" y="${pt}" width="${ancho}" height="${H - pt - pb}"/><path class="barra" data-b="${i}" d="${path}"/>${etiqueta}`;
+  }).join('');
+  el.innerHTML = `<div class="grafico"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ingresos por día del período">${lineas.join('')}${barras}</svg></div>
+    <details style="margin-top:8px"><summary class="sub">Ver como tabla</summary><div class="tabla-wrap" style="margin-top:8px"><table><thead><tr><th>Día</th><th class="num">Envíos</th><th class="num">Ingreso</th></tr></thead>
+    <tbody>${serie.filter((s) => s.envios).map((s) => `<tr><td>${fecha(`${s.dia}T12:00:00`)}</td><td class="num">${s.envios}</td><td class="num">${clp(s.ingreso)}</td></tr>`).join('')}</tbody></table></div></details>`;
+  const cont = $('.grafico', el);
+  const tip = document.createElement('div');
+  tip.className = 'tooltip';
+  tip.hidden = true;
+  cont.append(tip);
+  $$('.barra-hit', cont).forEach((r) => {
+    r.addEventListener('mousemove', (ev) => {
+      const s = serie[r.dataset.i];
+      $$('.barra.hover', cont).forEach((b) => b.classList.remove('hover'));
+      $(`[data-b="${r.dataset.i}"]`, cont).classList.add('hover');
+      tip.hidden = false;
+      tip.textContent = `${fecha(`${s.dia}T12:00:00`)} · ${clp(s.ingreso)} · ${s.envios} envío(s)`;
+      const caja = cont.getBoundingClientRect();
+      tip.style.left = `${ev.clientX - caja.left}px`;
+      tip.style.top = `${ev.clientY - caja.top}px`;
+    });
+    r.addEventListener('mouseleave', () => { tip.hidden = true; $$('.barra.hover', cont).forEach((b) => b.classList.remove('hover')); });
+  });
+}
+
+// ================= Tarifas, reglas de operación y cobertura =================
+export async function tarifas() {
+  const vista = $('#vista');
+  montar(vista, esqueleto(3));
+  const comunas = await get('/api/comunas');
+  const t = app.conf.tarifas;
+  const op = app.conf.operacion;
+  const regiones = [...new Set(comunas.map((c) => c.region))];
+  montar(vista, html`
+    <div class="encabezado"><div><h1>Tarifas y reglas</h1><p>Valores acordados con el cliente. Los cambios aplican a los envíos nuevos.</p></div></div>
+    <div class="grid g2" style="align-items:start">
+      <form class="card" id="f-tarifas" style="margin:0">
+        <h2>Tarifas</h2>
+        <div class="grid g2">
+          <label class="campo">Tarifa base Santiago<input type="number" name="base" value="${t.base}"></label>
+          <label class="campo">Recargo horario especial<input type="number" name="recargo_horario_especial" value="${t.recargo_horario_especial}"></label>
+          <label class="campo">Bulto adicional a domicilio<input type="number" name="bulto_adicional_domicilio" value="${t.bulto_adicional_domicilio}"></label>
+          <label class="campo">Bulto adicional a punto courier<input type="number" name="bulto_adicional_punto" value="${t.bulto_adicional_punto}"><small>0 = sin límite de paquetes</small></label>
+          <label class="campo">Peso máximo por bulto (kg)<input type="number" name="peso_max_kg" value="${t.peso_max_kg}"></label>
+          <label class="campo">Lado máximo (cm)<input type="number" name="dim_max_cm" value="${t.dim_max_cm}"></label>
+        </div>
+        <button class="btn" style="margin-top:14px">Guardar tarifas</button>
+      </form>
+      <form class="card" id="f-operacion" style="margin:0">
+        <h2>Operación</h2>
+        <div class="grid g2">
+          <label class="campo">Intentos máximos de entrega<input type="number" name="intentos_max" min="1" value="${op.intentos_max}"></label>
+          <label class="campo">Espera máxima en destino (min)<input type="number" name="espera_max_min" min="1" value="${op.espera_max_min}"></label>
+          <label class="campo">Al escanear el QR<select name="qr_destino">${[['pagina', 'Página con Maps y Waze (recomendado)'], ['google', 'Abrir Google Maps directo'], ['waze', 'Abrir Waze directo']].map(([v, txt]) => html`<option value="${v}" ${op.qr_destino === v ? html`selected` : ''}>${txt}</option>`)}</select></label>
+        </div>
+        <label class="interruptor" style="margin-top:14px"><input type="checkbox" name="gps_obligatorio" ${op.gps_obligatorio ? html`checked` : ''}> GPS obligatorio para cerrar la entrega</label>
+        <p class="muted">La foto de entrega es siempre obligatoria.</p>
+        <button class="btn" style="margin-top:6px">Guardar reglas</button>
+      </form>
+    </div>
+    <div class="card">
+      <div class="card-titulo"><h2>Cobertura por comuna</h2><span class="sub">${comunas.filter((c) => c.en_cobertura).length} comunas en cobertura</span></div>
+      <div class="grid g2" style="margin-bottom:12px"><input type="search" id="buscar-comuna" placeholder="Buscar comuna…">
+        <select id="region">${regiones.map((r) => html`<option ${r === 'Metropolitana' ? html`selected` : ''}>${r}</option>`)}</select></div>
+      <div class="tabla-wrap"><table><thead><tr><th>Comuna</th><th>Provincia</th><th>Cobertura</th><th class="num">Tarifa propia</th></tr></thead><tbody id="tabla-comunas"></tbody></table></div>
+    </div>`);
+
+  const pintarComunas = () => {
+    const q = $('#buscar-comuna').value.toLowerCase();
+    const region = $('#region').value;
+    const filas = comunas.filter((c) => (q ? c.nombre.toLowerCase().includes(q) : c.region === region));
+    montar($('#tabla-comunas'), html`${filas.map((c) => html`<tr>
+      <td><b>${c.nombre}</b><div class="muted">${c.region}</div></td><td>${c.provincia}</td>
+      <td><label class="interruptor"><input type="checkbox" data-cob="${c.id}" ${c.en_cobertura ? html`checked` : ''}><span class="sub">${c.en_cobertura ? 'Sí' : 'No'}</span></label></td>
+      <td class="num"><input type="number" data-tarifa="${c.id}" value="${c.tarifa_base ?? ''}" placeholder="${c.tarifa ?? t.base}" style="max-width:120px;min-height:38px;text-align:right"></td></tr>`)}`);
+    $$('[data-cob]').forEach((i) => {
+      i.onchange = async () => {
+        try {
+          const zonas = await get('/api/zonas');
+          await patch(`/api/comunas/${i.dataset.cob}`, { en_cobertura: i.checked, ...(i.checked && zonas[0] ? { zona_id: zonas[0].id } : {}) });
+          const c = comunas.find((x) => String(x.id) === i.dataset.cob);
+          c.en_cobertura = i.checked;
+          limpiarCacheComunas();
+          toast(`${c.nombre}: ${i.checked ? 'en cobertura' : 'fuera de cobertura'}`, 'ok');
+          i.nextElementSibling.textContent = i.checked ? 'Sí' : 'No';
+        } catch (err) { errorToast(err); i.checked = !i.checked; }
+      };
+    });
+    $$('[data-tarifa]').forEach((i) => {
+      i.onchange = async () => {
+        try { await patch(`/api/comunas/${i.dataset.tarifa}`, { tarifa_base: i.value === '' ? null : Number(i.value) }); limpiarCacheComunas(); toast('Tarifa de comuna actualizada', 'ok'); }
+        catch (err) { errorToast(err); }
+      };
+    });
+  };
+  $('#buscar-comuna').oninput = pintarComunas;
+  $('#region').onchange = pintarComunas;
+  pintarComunas();
+
+  const guardar = (clave) => async (e) => {
+    e.preventDefault();
+    try { app.conf[clave] = await put(`/api/config/${clave}`, datosForm(e.target)); toast('Cambios guardados', 'ok'); }
+    catch (err) { errorToast(err); }
+  };
+  $('#f-tarifas').onsubmit = guardar('tarifas');
+  $('#f-operacion').onsubmit = guardar('operacion');
+}
+
+// ================= Usuarios =================
+const ROL = { admin: 'Administrador', cliente: 'Cliente', repartidor: 'Repartidor' };
+
+export async function usuarios() {
+  const vista = $('#vista');
+  montar(vista, esqueleto(3));
+  const lista = (await get('/api/usuarios')).filter((u) => !u.correo.startsWith('qa-'));
+  montar(vista, html`
+    <div class="encabezado"><div><h1>Usuarios</h1><p>Tres perfiles: administrador, cliente y repartidor.</p></div>
+      <button class="btn" id="nuevo-u">${icono('nuevo')} Nuevo usuario</button></div>
+    <div class="tabla-wrap"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${lista.map((u) => html`<tr><td><b>${u.nombre}</b></td><td>${u.correo}</td><td><span class="badge ${u.rol === 'admin' ? 'e-en_ruta' : u.rol === 'cliente' ? 'e-creado' : 'e-asignado'}">${ROL[u.rol]}</span></td>
+        <td>${u.telefono || '—'}</td><td>${u.activo ? html`<span class="badge e-entregado">Activo</span>` : html`<span class="badge e-anulado">Inactivo</span>`}</td>
+        <td><button class="btn sec chico" data-activo="${u.id}" data-v="${u.activo ? '0' : '1'}">${u.activo ? 'Desactivar' : 'Activar'}</button></td></tr>`)}</tbody></table></div>`);
+  $$('[data-activo]').forEach((b) => {
+    b.onclick = async () => {
+      try { await patch(`/api/usuarios/${b.dataset.activo}`, { activo: b.dataset.v === '1' }); toast('Usuario actualizado', 'ok'); usuarios(); } catch (err) { errorToast(err); }
+    };
+  });
+  $('#nuevo-u').onclick = () => {
+    const m = modal(html`<h2>Nuevo usuario</h2><form class="pila" id="f-u" novalidate>
+      <label class="campo">Nombre *<input name="nombre"></label>
+      <label class="campo">Correo *<input name="correo" type="email"></label>
+      <label class="campo">Perfil *<select name="rol"><option value="cliente">Cliente</option><option value="repartidor">Repartidor</option><option value="admin">Administrador</option></select></label>
+      <label class="campo">Teléfono<input name="telefono" placeholder="+56 9 1234 5678"></label>
+      <label class="campo">Contraseña inicial <small>(para cuando se active el inicio de sesión)</small><input name="password" type="password" minlength="8"></label>
+      <button class="btn">Crear usuario</button></form>`);
+    $('#f-u', m.el).onsubmit = async (e) => {
+      e.preventDefault();
+      const d = datosForm(e.target);
+      if (!d.password) delete d.password;
+      try { await post('/api/usuarios', d); m.cerrar(); toast('Usuario creado', 'ok'); usuarios(); }
+      catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+    };
+  };
+}
+
+// ================= Ajustes: negocio, ticket y costos =================
+export async function ajustes() {
+  const vista = $('#vista');
+  montar(vista, esqueleto(3));
+  const costos = await get('/api/costos');
+  const n = app.conf.negocio;
+  montar(vista, html`
+    <div class="encabezado"><div><h1>Ajustes</h1><p>Nombre y logo de la empresa están por definir: cámbialos aquí cuando estén listos.</p></div></div>
+    <div class="grid g2" style="align-items:start">
+      <form class="card" id="f-negocio" style="margin:0"><h2>Empresa</h2>
+        <div class="pila">
+          <label class="campo">Nombre de la empresa<input name="nombre" value="${n.nombre}"></label>
+          <div class="grid g2"><label class="campo">RUT<input name="rut" value="${n.rut}"></label><label class="campo">Teléfono<input name="telefono" value="${n.telefono}"></label></div>
+          <label class="campo">Correo de contacto<input name="correo" value="${n.correo}"></label>
+          <label class="campo">URL del logo <small>(PNG o SVG, fondo transparente)</small><input name="logo_url" value="${n.logo_url}" placeholder="https://…/logo.svg"></label>
+          <button class="btn">Guardar empresa</button></div></form>
+      <div>
+        <form class="card" id="f-ticket" style="margin:0 0 16px"><h2>Ticket</h2>
+          <label class="campo">Texto al pie<textarea name="pie">${app.conf.ticket.pie}</textarea></label>
+          <button class="btn" style="margin-top:12px">Guardar</button></form>
+        <div class="card" style="margin:0"><div class="card-titulo"><h2>Costos del mes</h2><button class="btn sec chico" id="nuevo-costo">+ Registrar costo</button></div>
+          ${costos.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Nota</th><th class="num">Monto</th></tr></thead>
+            <tbody>${costos.map((c) => html`<tr><td>${fecha(c.fecha)}</td><td>${c.tipo}</td><td class="sub">${c.nota || ''}</td><td class="num">${clp(c.monto)}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Sin costos registrados este mes.</p>`}
+        </div>
+      </div>
+    </div>`);
+  const guardar = (clave) => async (e) => {
+    e.preventDefault();
+    try {
+      app.conf[clave] = await put(`/api/config/${clave}`, datosForm(e.target));
+      toast('Cambios guardados', 'ok');
+      if (clave === 'negocio') $('#marca-nombre').textContent = app.conf.negocio.nombre;
+    } catch (err) { errorToast(err); }
+  };
+  $('#f-negocio').onsubmit = guardar('negocio');
+  $('#f-ticket').onsubmit = guardar('ticket');
+  $('#nuevo-costo').onclick = () => {
+    const m = modal(html`<h2>Registrar costo</h2><form class="pila" id="f-c" novalidate>
+      <label class="campo">Tipo<select name="tipo"><option value="bencina">Bencina</option><option value="comision">Comisión repartidor</option><option value="peaje">Peaje</option><option value="mantencion">Mantención</option><option value="otro">Otro</option></select></label>
+      <div class="grid g2"><label class="campo">Monto<input name="monto" type="number" min="1"></label><label class="campo">Fecha<input name="fecha" type="date" value="${hoyISO()}" max="${hoyISO()}"></label></div>
+      <label class="campo">Nota<input name="nota"></label><button class="btn">Guardar</button></form>`);
+    $('#f-c', m.el).onsubmit = async (e) => {
+      e.preventDefault();
+      try { await post('/api/costos', datosForm(e.target)); m.cerrar(); toast('Costo registrado', 'ok'); ajustes(); }
+      catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+    };
+  };
+}
