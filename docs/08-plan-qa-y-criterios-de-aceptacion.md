@@ -52,6 +52,7 @@ Resultado de la última ejecución local: **52/52 aprobados** (QA) y **16/16** (
 | CP-17 | 20 kg y 60×60×60 exactos aceptados (límite) | RF-42 |
 | CP-18 | Comuna fuera de cobertura rechazada | RF-18 |
 | CP-19 | Solo admin cotiza sobredimensionados | RF-42 |
+| CP-67 | Couriers y franjas editables en Ajustes y aplicados al cotizar | RF-41, RF-47 |
 | CP-20 | Validación marca todos los campos faltantes | RF-11 |
 | CP-21 | Crear y confirmar: folio `ENV-AAAA-NNNNNN` | RF-19 |
 | CP-22 | Ticket PDF 80 mm y A4 | RF-20, RF-21 |

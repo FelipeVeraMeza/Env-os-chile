@@ -3,7 +3,7 @@ import { enviarForm, get, post, patch, api } from '../api.js';
 import {
   $, $$, abrirBlob, badgePago, clp, comprimirFoto, datosForm, errorToast, esqueleto, html, icono, marcarErrores, modal, montar, toast, vacio,
 } from '../ui.js';
-import { comunasCobertura, direccionTexto, FRANJAS, itemEnvio, opcionesComunas } from './comun.js';
+import { comunasCobertura, direccionTexto, itemEnvio, opcionesComunas } from './comun.js';
 import { pagar } from './envios.js';
 
 // ================= Inicio del cliente =================
@@ -145,7 +145,7 @@ export async function nuevo() {
       </div>
       <div class="card" style="box-shadow:none">
         <label class="interruptor"><input type="checkbox" name="horario_especial" ${p.horario_especial ? html`checked` : ''}> Envío especial por horario <span class="badge e-en_ruta">+${clp(t.recargo_horario_especial)}</span></label>
-        ${p.horario_especial ? html`<label class="campo" style="margin-top:12px">Franja horaria *<select name="franja_horaria"><option value="">Selecciona…</option>${FRANJAS.map((f) => html`<option ${p.franja_horaria === f ? html`selected` : ''}>${f}</option>`)}</select></label>` : ''}
+        ${p.horario_especial ? html`<label class="campo" style="margin-top:12px">Franja horaria *<select name="franja_horaria"><option value="">Selecciona…</option>${app.conf.franjas.map((f) => html`<option ${p.franja_horaria === f ? html`selected` : ''}>${f}</option>`)}</select></label>` : ''}
       </div>
       <div class="grid g2" style="margin-top:16px">
         <label class="campo">Foto del paquete <small>(opcional)</small><input type="file" name="foto" accept="image/*" capture="environment"></label>

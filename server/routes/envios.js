@@ -41,7 +41,7 @@ function datosPaquete(b) {
 // Valida paquete + destino y calcula la tarifa. Usado por /cotizar y al crear.
 async function cotizar(body, usuario, conf) {
   const paquete = datosPaquete(body);
-  const errores = { ...validarDestino(paquete) };
+  const errores = { ...validarDestino(paquete, conf.listas) };
   const erroresPaquete = validarPaquete(paquete, conf.tarifas);
   const tarifaManual = usuario.rol === 'admin' && body.tarifa_manual !== undefined && body.tarifa_manual !== '' && body.tarifa_manual !== null
     ? Number(body.tarifa_manual) : null;

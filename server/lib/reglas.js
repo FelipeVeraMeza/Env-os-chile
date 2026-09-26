@@ -40,6 +40,7 @@ export const MOTIVOS_FALLO = {
 };
 
 export const COURIERS = ['Blue Express', 'Starken', 'Chilexpress', 'Correos de Chile', 'Otra'];
+export const FRANJAS = ['08:00 – 10:00', '10:00 – 13:00', '13:00 – 16:00', '16:00 – 19:00', '19:00 – 21:00', '21:00 – 23:00'];
 
 export const CONFIG_POR_DEFECTO = {
   negocio: {
@@ -65,6 +66,10 @@ export const CONFIG_POR_DEFECTO = {
   },
   ticket: {
     pie: 'Conserve este ticket. Consultas y reclamos indicando el folio.',
+  },
+  listas: {
+    couriers: COURIERS, // empresas de puntos courier que se ofrecen al crear un envío
+    franjas: FRANJAS, // franjas del envío con horario especial
   },
   pagos: {
     proveedor: 'simulado', // simulado | webpay | mercadopago | flow (etapa de desarrollo)
@@ -157,16 +162,31 @@ export function validarDireccion(d) {
   return errores;
 }
 
-export function validarDestino(e) {
+// Compara franjas sin importar espacios ni el tipo de guion ("19:00 - 21:00" = "19:00 – 21:00").
+const claveFranja = (f) => String(f || '').replace(/[\s]/g, '').replace(/[‐-―−]/g, '-');
+
+// Normaliza una lista editable desde Ajustes (arreglo o texto con una opción por línea).
+export function normalizarLista(valor, { max = 20, largo = 60 } = {}) {
+  const items = Array.isArray(valor) ? valor : String(valor ?? '').split('\n');
+  const limpia = [...new Set(items.map((x) => String(x ?? '').trim()).filter(Boolean))];
+  if (!limpia.length) return { error: 'Debe tener al menos una opción' };
+  if (limpia.length > max) return { error: `Máximo ${max} opciones` };
+  if (limpia.some((x) => x.length > largo)) return { error: `Cada opción puede tener hasta ${largo} caracteres` };
+  return { lista: limpia };
+}
+
+export function validarDestino(e, listas = CONFIG_POR_DEFECTO.listas) {
   const errores = {};
   const tipo = e.tipo_destino || 'domicilio';
   if (!['domicilio', 'punto_courier'].includes(tipo)) errores.tipo_destino = 'Tipo de destino inválido';
   if (tipo === 'punto_courier') {
-    if (!COURIERS.includes(e.courier_empresa)) errores.courier_empresa = 'Selecciona la empresa (Blue Express, Starken, …)';
+    if (!listas.couriers.includes(e.courier_empresa)) errores.courier_empresa = `Selecciona la empresa (${listas.couriers.slice(0, 2).join(', ')}, …)`;
     if (!String(e.courier_punto || '').trim()) errores.courier_punto = 'Indica el punto o sucursal';
   }
   if (e.horario_especial && !String(e.franja_horaria || '').trim()) {
     errores.franja_horaria = 'Indica la franja horaria solicitada';
+  } else if (e.horario_especial && !listas.franjas.some((f) => claveFranja(f) === claveFranja(e.franja_horaria))) {
+    errores.franja_horaria = 'Franja horaria no disponible';
   }
   return errores;
 }

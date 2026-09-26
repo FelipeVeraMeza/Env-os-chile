@@ -12,7 +12,6 @@ export function opcionesComunas(comunas, seleccionada) {
   return html`<option value="">Selecciona la comuna…</option>${comunas.map((c) => html`<option value="${c.id}" ${String(c.id) === String(seleccionada) ? html`selected` : ''}>${c.nombre}</option>`)}`;
 }
 
-export const FRANJAS = ['08:00 – 10:00', '10:00 – 13:00', '13:00 – 16:00', '16:00 – 19:00', '19:00 – 21:00', '21:00 – 23:00'];
 
 export function direccionTexto(e) {
   return `${e.calle} ${e.numero}${e.depto ? `, ${e.depto}` : ''} · ${e.comuna_nombre}`;

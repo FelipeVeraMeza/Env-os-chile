@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   calcularTarifa, enlacesMapa, esperaCumplida, formatearFolio, normalizarRut, normalizarTelefono, ocultarMontos,
-  puedeTransicionar, rolPuedeTransicionar, validarPaquete, validarReclamo, validarTransicion, validarUbicacion, CONFIG_POR_DEFECTO,
+  normalizarLista, puedeTransicionar, rolPuedeTransicionar, validarDestino, validarPaquete, validarReclamo, validarTransicion, validarUbicacion, CONFIG_POR_DEFECTO,
 } from '../../server/lib/reglas.js';
 
 test('teléfono móvil chileno se normaliza a +56 9 XXXX XXXX', () => {
@@ -113,4 +113,23 @@ test('el repartidor no recibe montos', () => {
   assert.equal(e.tarifa_total, undefined);
   assert.equal(e.valor_declarado, undefined);
   assert.equal(e.folio, 'x');
+});
+
+test('couriers y franjas editables: validación contra la lista configurada', () => {
+  const listas = { couriers: ['Starken', 'Mi Courier'], franjas: ['09:00 – 12:00'] };
+  const punto = { tipo_destino: 'punto_courier', courier_punto: 'Sucursal Centro' };
+  assert.deepEqual(validarDestino({ ...punto, courier_empresa: 'Mi Courier' }, listas), {});
+  assert.ok(validarDestino({ ...punto, courier_empresa: 'Blue Express' }, listas).courier_empresa);
+  assert.deepEqual(validarDestino({ horario_especial: true, franja_horaria: '09:00-12:00' }, listas), {});
+  assert.ok(validarDestino({ horario_especial: true, franja_horaria: '19:00 – 21:00' }, listas).franja_horaria);
+  // Por defecto sigue aceptando las listas originales.
+  assert.deepEqual(validarDestino({ horario_especial: true, franja_horaria: '19:00 - 21:00' }), {});
+});
+
+test('listas de Ajustes: una opción por línea, sin vacíos ni duplicados', () => {
+  assert.deepEqual(normalizarLista(' Starken \n\nStarken\nBlue Express '), { lista: ['Starken', 'Blue Express'] });
+  assert.deepEqual(normalizarLista(['A', 'B']), { lista: ['A', 'B'] });
+  assert.ok(normalizarLista('\n  \n').error);
+  assert.ok(normalizarLista(Array.from({ length: 21 }, (_, i) => `C${i}`)).error);
+  assert.ok(normalizarLista('x'.repeat(61)).error);
 });

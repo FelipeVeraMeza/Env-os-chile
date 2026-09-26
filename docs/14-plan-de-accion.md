@@ -13,7 +13,7 @@
 | [ ] A-3 | Desactivar las **claves legacy** (anon / service_role JWT) | TÚ | Supabase → API Keys → Legacy API keys → Disable |
 | [ ] A-4 | Tras A-1 a A-3, confirmar que `/api/health` sigue en `ok:true`, `base:"supabase"`, `archivos:"supabase"` | TÚ | Navegador |
 | [ ] A-5 | Decidir si la demo sigue con **clave de acceso** (recomendado) o queda abierta | TÚ | — |
-| [ ] A-6 | Correr el **QA completo contra Railway** (52 casos): `QA_DEMO_CLAVE` en `entornos.local.env` y `npm run qa:railway` | TÚ o DESARROLLO | Computador con el repo, o permitir `*.railway.app` en la red de la sesión |
+| [ ] A-6 | Correr el **QA completo contra Railway** (53 casos): `QA_DEMO_CLAVE` en `entornos.local.env` y `npm run qa:railway` | TÚ o DESARROLLO | Computador con el repo, o permitir `*.railway.app` en la red de la sesión |
 | [ ] A-7 | Dejar **una sola rama** conectada a Railway (hoy `…-rdzym7`) | TÚ | Railway → Settings → Source |
 | [ ] A-8 | Activar **respaldos** de la base (Supabase: plan con backups diarios o exportación programada) | TÚ | Supabase → Database → Backups |
 
@@ -53,14 +53,14 @@ Registrar cada falla con captura, teléfono, navegador y pasos.
 | [ ] C-11 | Responsable de datos personales y retención de fotos/boletas — P-16 | Fotos 12 meses, envíos 5 años |
 | [ ] C-12 | ¿Google Places para direcciones exactas? — P-06 · ¿funcionar sin señal? — P-14 | No · No |
 
-Cuando respondan: nombre, logo, datos del negocio, tarifas, límites e intentos se cargan desde **Administrador → Ajustes** (sin tocar código). Couriers y franjas horarias hoy requieren código (ver D-a).
+Cuando respondan: nombre, logo, datos del negocio, tarifas, límites e intentos se cargan desde **Administrador → Ajustes** (sin tocar código). Couriers y franjas horarias también (Ajustes → Opciones del envío, D-a).
 
 ## D. Mejoras de código (DESARROLLO)
 
 ### Antes de entregar el prototipo (hasta 26/10)
 | # | Mejora | Motivo |
 |---|---|---|
-| [ ] D-a | **Couriers** (Blue Express, Starken, …) y **franjas horarias** editables en Ajustes | Hoy están fijos en el código |
+| [x] D-a | **Couriers** (Blue Express, Starken, …) y **franjas horarias** editables en Ajustes | Hecho: Ajustes → Opciones del envío (una por línea). Probado con CP-67 |
 | [ ] D-b | Revisión visual completa en teléfono de cada pantalla (admin, cliente, repartidor) | RNF-01, RNF-13 |
 | [ ] D-c | Actualizar documentos 02, 05, 09, 12 y 13 con lo hecho en esta etapa | Supabase Storage ya reemplaza S3/R2 (D-06); validación de variables en producción |
 | [ ] D-d | Medir carga de pantallas con perfil 4G (Lighthouse) | RNF-03 |

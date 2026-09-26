@@ -648,6 +648,7 @@ INSERT INTO config (clave, valor) VALUES
   ('tarifas', '{"base":3500,"bulto_adicional_domicilio":3500,"bulto_adicional_punto":0,"recargo_horario_especial":1000,"peso_max_kg":20,"dim_max_cm":60}'::jsonb),
   ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":true,"qr_destino":"pagina"}'::jsonb),
   ('ticket', '{"pie":"Conserve este ticket. Consultas y reclamos indicando el folio."}'::jsonb),
+  ('listas', '{"couriers":["Blue Express","Starken","Chilexpress","Correos de Chile","Otra"],"franjas":["08:00 – 10:00","10:00 – 13:00","13:00 – 16:00","16:00 – 19:00","19:00 – 21:00","21:00 – 23:00"]}'::jsonb),
   ('pagos', '{"proveedor":"simulado"}'::jsonb)
 ON CONFLICT (clave) DO NOTHING;
 

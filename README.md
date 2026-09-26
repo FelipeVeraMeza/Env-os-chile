@@ -98,7 +98,7 @@ Guía completa: [docs/10-despliegue.md](docs/10-despliegue.md).
 ```bash
 npm test            # 29 pruebas unitarias (reglas de negocio, conexión Supabase, Storage, SQL)
 npm run verificar   # revisa variables, conexión a la base y almacenamiento antes de desplegar
-npm run qa:local    # 52 casos QA extremo a extremo (CP-01 … CP-66) contra localhost
+npm run qa:local    # 53 casos QA extremo a extremo (CP-01 … CP-67) contra localhost
 ```
 
 Cada caso QA está trazado a un requerimiento en el [plan de QA](docs/08-plan-qa-y-criterios-de-aceptacion.md). Los reportes JUnit quedan en `qa/reportes/`.

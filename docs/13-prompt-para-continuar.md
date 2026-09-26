@@ -28,7 +28,7 @@ ESTADO ACTUAL (ya hecho y probado)
 - supabase/base-de-datos-completa.sql crea toda la base desde el SQL Editor (regenerar con npm run sql:supabase).
 - npm run publicar -- .env.railway: crea la base, (con RAILWAY_TOKEN) sube variables y despliega, y verifica con QA.
 - Railway: railway.json arranca con "node server/index.js" y healthcheck /api/health.
-- Pruebas: npm test (29 unitarias) y npm run qa:local / qa:railway (52 casos CP-01…CP-66), todas en verde.
+- Pruebas: npm test (37 unitarias) y npm run qa:local / qa:railway (53 casos CP-01…CP-67), todas en verde.
 - entornos.env guarda las URLs (localhost, Railway, Vercel, producción) para QA y la interfaz.
 
 REGLAS DE TRABAJO

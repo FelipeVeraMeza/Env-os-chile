@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { query, uno } from '../db/pool.js';
 import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
-import { normalizarRut, normalizarTelefono, validarDestinatario, validarDireccion, COURIERS, ESTADOS, ESTADOS_RECLAMO, MOTIVOS_FALLO, MOTIVOS_RECLAMO, CONFIG_POR_DEFECTO } from '../lib/reglas.js';
+import { normalizarRut, normalizarTelefono, validarDestinatario, validarDireccion, normalizarLista, ESTADOS, ESTADOS_RECLAMO, MOTIVOS_FALLO, MOTIVOS_RECLAMO, CONFIG_POR_DEFECTO } from '../lib/reglas.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
 import { config } from '../config.js';
 
@@ -64,7 +64,7 @@ configuracion.get('/publica', ruta(async (_req, res) => {
   const conf = await leerConfig();
   res.json({
     negocio: conf.negocio, tarifas: conf.tarifas, operacion: conf.operacion, ticket: conf.ticket,
-    pagos: { proveedor: conf.pagos.proveedor }, couriers: COURIERS, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
+    pagos: { proveedor: conf.pagos.proveedor }, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
     motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave),
   });
 }));
@@ -76,8 +76,12 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
   const nuevo = { ...actual };
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!(k in CONFIG_POR_DEFECTO[clave])) continue; // se ignoran claves desconocidas
-    const tipo = typeof CONFIG_POR_DEFECTO[clave][k];
-    if (tipo === 'number') {
+    const tipo = Array.isArray(CONFIG_POR_DEFECTO[clave][k]) ? 'lista' : typeof CONFIG_POR_DEFECTO[clave][k];
+    if (tipo === 'lista') {
+      const { lista, error } = normalizarLista(v);
+      if (error) throw falla(422, `${k}: ${error}`);
+      nuevo[k] = lista;
+    } else if (tipo === 'number') {
       if (!Number.isFinite(Number(v)) || Number(v) < 0) throw falla(422, `Valor inválido para ${k}`);
       nuevo[k] = Number(v);
     } else if (tipo === 'boolean') nuevo[k] = v === true || v === 'true';

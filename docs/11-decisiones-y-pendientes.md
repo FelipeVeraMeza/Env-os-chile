@@ -32,7 +32,7 @@ Ordenados por impacto. **Sin P-01 a P-05 no se puede cotizar el desarrollo.**
 | P-05 | A domicilio, ¿cada bulto extra se cobra $3.500 o hay otra regla? | Cálculo de tarifa | $3.500 por bulto extra |
 | P-06 | ¿Pagarán Google Places para direcciones exactas? | Precisión del mapa | No |
 | P-07 | "5 min máx. entrega": ¿es tiempo de espera en el domicilio? | Regla de fallido | Sí, espera en destino |
-| P-08 | ¿Qué franjas horarias ofrecen en el envío especial? | Opciones del formulario | 6 franjas de 08:00 a 23:00 |
+| P-08 | ¿Qué franjas horarias ofrecen en el envío especial? | Opciones del formulario (editables en Ajustes) | 6 franjas de 08:00 a 23:00 |
 | P-09 | ¿Qué pasa con el pago si el envío se devuelve tras 3 intentos? ¿Se reembolsa? | Reembolsos y ganancias | No se reembolsa (visita realizada) |
 | P-10 | ¿El seguro tiene un tope máximo por envío o un costo adicional (prima)? | Cálculo y ganancia | Sin tope adicional ni prima |
 | P-11 | ¿Qué plazo tiene el cliente para reclamar el seguro? | Regla del reclamo | Sin plazo definido |

@@ -241,6 +241,13 @@ export async function ajustes() {
         <form class="card" id="f-ticket" style="margin:0 0 16px"><h2>Ticket</h2>
           <label class="campo">Texto al pie<textarea name="pie">${app.conf.ticket.pie}</textarea></label>
           <button class="btn" style="margin-top:12px">Guardar</button></form>
+        <form class="card" id="f-listas" style="margin:0 0 16px"><h2>Opciones del envío</h2>
+          <p class="sub">Una opción por línea. Los cambios aplican a los envíos nuevos.</p>
+          <div class="grid g2">
+            <label class="campo">Empresas de punto courier<textarea name="couriers" rows="6">${app.conf.couriers.join('\n')}</textarea></label>
+            <label class="campo">Franjas del horario especial<textarea name="franjas" rows="6">${app.conf.franjas.join('\n')}</textarea></label>
+          </div>
+          <button class="btn" style="margin-top:12px">Guardar opciones</button></form>
         <div class="card" style="margin:0"><div class="card-titulo"><h2>Costos del mes</h2><button class="btn sec chico" id="nuevo-costo">+ Registrar costo</button></div>
           ${costos.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Nota</th><th class="num">Monto</th></tr></thead>
             <tbody>${costos.map((c) => html`<tr><td>${fecha(c.fecha)}</td><td>${c.tipo}</td><td class="sub">${c.nota || ''}</td><td class="num">${clp(c.monto)}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Sin costos registrados este mes.</p>`}
@@ -257,6 +264,17 @@ export async function ajustes() {
   };
   $('#f-negocio').onsubmit = guardar('negocio');
   $('#f-ticket').onsubmit = guardar('ticket');
+  $('#f-listas').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const listas = await put('/api/config/listas', datosForm(e.target));
+      app.conf.couriers = listas.couriers;
+      app.conf.franjas = listas.franjas;
+      e.target.couriers.value = listas.couriers.join('\n');
+      e.target.franjas.value = listas.franjas.join('\n');
+      toast('Opciones guardadas', 'ok');
+    } catch (err) { errorToast(err); }
+  };
   $('#nuevo-costo').onclick = () => {
     const m = modal(html`<h2>Registrar costo</h2><form class="pila" id="f-c" novalidate>
       <label class="campo">Tipo<select name="tipo"><option value="bencina">Bencina</option><option value="comision">Comisión repartidor</option><option value="peaje">Peaje</option><option value="mantencion">Mantención</option><option value="otro">Otro</option></select></label>
