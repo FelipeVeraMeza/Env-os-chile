@@ -56,7 +56,7 @@ Debe terminar en **"✔ Todo listo para desplegar"**. Si algo falla, el mensaje 
 2. En el servicio creado → **Settings**:
    - **Source → Branch:** elige la rama donde está el código (`claude/shipping-management-platform-rdzym7`, o `main` si ya la uniste).
    - **Deploy → Region:** la misma zona de Supabase (p. ej. US East).
-   - No hace falta configurar el build: Railway lee `railway.json` (instala con `npm ci`, arranca con `npm start`, revisa `/api/health`).
+   - No hace falta configurar el build: Railway lee `railway.json` (instala con `npm ci`, arranca con `node server/index.js`, revisa `/api/health`).
 3. **Settings → Networking → Generate Domain.** Te da algo como `https://env-os-chile-production.up.railway.app`. (Los QR usarán esta dirección automáticamente).
 4. **Variables → Raw Editor** → pega el contenido de [`.env.railway.example`](../.env.railway.example) con tus valores:
 
@@ -118,6 +118,7 @@ Mensaje sugerido:
 | `Invalid URL` o conexión rara | La clave tiene símbolos. Cambia la clave de la base por una solo con letras y números. |
 | `Supabase Storage (autorización…) respondió 401/403` | `SUPABASE_SECRET_KEY` incorrecta (no uses la *publishable/anon*, usa la **secret/service_role**). |
 | `ECONNREFUSED` / `timeout` | El proyecto de Supabase está pausado (plan gratis tras 7 días sin uso): entra a Supabase y presiona **Restore**. |
+| `npm warn config production Use --omit=dev instead` (en rojo) | Solo un aviso de npm, no un error. Ya no aparece: la app arranca con `node server/index.js`. |
 | Healthcheck falla / "Application failed to respond" | Revisa los logs: casi siempre es `DATABASE_URL`. |
 | La página pide clave y no la acepta | Revisa `DEMO_CLAVE` en Railway (distingue mayúsculas). |
 | Las fotos no cargan | Revisa en los logs la línea `[archivos]`; debe decir Supabase Storage. |
