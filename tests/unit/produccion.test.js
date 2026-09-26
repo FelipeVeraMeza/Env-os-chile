@@ -39,3 +39,9 @@ test('con AUTH_MODE=jwt no se exige DEMO_CLAVE', () => {
   const { DEMO_CLAVE, ...sinDemo } = completo;
   assert.deepEqual(validarProduccion({ ...sinDemo, AUTH_MODE: 'jwt' }), []);
 });
+
+test('producción rechaza textos de ejemplo sin reemplazar', () => {
+  const faltan = validarProduccion({ ...completo, SUPABASE_DB_PASSWORD: 'PEGAR_AQUI_LA_NUEVA_CLAVE_DE_LA_BASE', JWT_SECRET: 'CAMBIAR_POR_UNA_CADENA_LARGA_ALEATORIA' });
+  assert.equal(faltan.length, 1);
+  assert.match(faltan[0], /SUPABASE_DB_PASSWORD, JWT_SECRET/);
+});

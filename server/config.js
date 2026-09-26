@@ -92,6 +92,13 @@ export const config = {
 export function validarProduccion(env) {
   if ((env.NODE_ENV || 'development') !== 'production') return [];
   const faltan = [];
+  // Textos de ejemplo de las plantillas (.env.railway.example / guía) que quedaron sin reemplazar.
+  const plantilla = /PEGAR_AQUI|CAMBIAR|TU_REF|LA_CLAVE_DE_LA_BASE/i;
+  const sinReemplazar = ['SUPABASE_URL', 'SUPABASE_DB_PASSWORD', 'SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'DATABASE_URL',
+    'JWT_SECRET', 'ADMIN_EMAIL', 'ADMIN_PASSWORD', 'DEMO_CLAVE'].filter((k) => plantilla.test(env[k] || ''));
+  if (sinReemplazar.length) {
+    faltan.push(`Valores de ejemplo sin reemplazar (PEGAR_AQUI/CAMBIAR…): ${sinReemplazar.join(', ')}`);
+  }
   if (!env.DATABASE_URL && !(env.SUPABASE_URL && env.SUPABASE_DB_PASSWORD)) {
     faltan.push('Base de datos: define SUPABASE_URL + SUPABASE_DB_PASSWORD (o DATABASE_URL)');
   }
