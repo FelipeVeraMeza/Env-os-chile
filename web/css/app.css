@@ -32,7 +32,7 @@
   --radio-sm: 12px;
   --sombra: 0 10px 30px rgba(3, 8, 40, 0.45);
   --fuente: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  color-scheme: dark;
+  color-scheme: only dark;
 }
 
 * { box-sizing: border-box; }
@@ -369,3 +369,4 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   body { background: #fff; color: #000; }
   .topbar, .menu, #toasts { display: none; }
 }
+#f-clave input::placeholder { color: #5a67a6; font-weight: 600; }

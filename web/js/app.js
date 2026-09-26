@@ -96,18 +96,28 @@ function hojaMas() {
   const m = modal(html`
     ${ocultos.length ? html`<div class="hoja-titulo" style="margin-top:0">Secciones</div><div class="hoja-lista">${ocultos.map(([h, ic, txt]) => html`
       <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}</a>`)}</div>` : ''}
-    <div class="hoja-titulo" ${ocultos.length ? '' : raw('style="margin-top:0"')}>Ver la plataforma como</div>
+    ${app.perfiles.length ? html`<div class="hoja-titulo" ${ocultos.length ? '' : raw('style="margin-top:0"')}>Ver la plataforma como</div>
     <div class="hoja-lista">${app.perfiles.map((p) => html`<button class="item ${p.id === app.usuario?.id ? 'activo' : ''}" data-perfil="${p.id}">
-      <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>
-    <div class="hoja-titulo">App</div>
+      <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>` : ''}
+    <div class="hoja-titulo" ${ocultos.length || app.perfiles.length ? '' : raw('style="margin-top:0"')}>App</div>
     <div class="hoja-lista">
       ${esApp() ? '' : html`<button class="item" id="h-instalar">${icono('nuevo')}Instalar en este teléfono</button>`}
-      <button class="item" id="h-servidor">${icono('ajustes')}Servidor: ${urlApi() || location.host}</button>
+      ${modoDesarrollo() ? html`<button class="item" id="h-servidor">${icono('ajustes')}Servidor: ${urlApi() || location.host}</button>` : ''}
     </div>`);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
   m.el.querySelectorAll('[data-perfil]').forEach((b) => { b.onclick = () => { m.cerrar(); cambiarPerfil(Number(b.dataset.perfil)); }; });
   $('#h-instalar', m.el)?.addEventListener('click', () => { m.cerrar(); instalarApp(); });
-  $('#h-servidor', m.el).onclick = () => { m.cerrar(); dialogoServidor(); };
+  $('#h-servidor', m.el)?.addEventListener('click', () => { m.cerrar(); dialogoServidor(); });
+}
+
+// Elegir servidor (localhost / Railway) es una herramienta de desarrollo: el cliente no la ve.
+// Se muestra en localhost, o en la app publicada agregando ?dev a la URL (queda recordado).
+function modoDesarrollo() {
+  if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return true;
+  try {
+    if (new URLSearchParams(location.search).has('dev')) localStorage.setItem('envios.dev', '1');
+    return localStorage.getItem('envios.dev') === '1';
+  } catch { return false; }
 }
 
 // ---------- Instalar como app (PWA) ----------
@@ -225,6 +235,7 @@ function pedirClaveDemo(conf) {
 
 async function iniciar() {
   $('#btn-servidor').onclick = dialogoServidor;
+  if (!modoDesarrollo()) $('#btn-servidor').style.pointerEvents = 'none'; // solo muestra el punto de estado
   $('#chip-perfil').onclick = hojaMas;
   try {
     const conf = await get('/api/config/publica');

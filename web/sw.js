@@ -1,6 +1,6 @@
 // Service worker mínimo: permite instalar la app (PWA) y abrir la interfaz sin conexión.
 // Los datos (API) siempre se piden a la red: nunca se sirven envíos desde caché.
-const CACHE = 'envios-v2';
+const CACHE = 'envios-v3';
 const BASE = ['./', 'index.html', 'css/app.css', 'config.js', 'js/app.js', 'js/api.js', 'js/ui.js',
   'js/vistas/comun.js', 'js/vistas/cliente.js', 'js/vistas/envios.js', 'js/vistas/repartidor.js', 'js/vistas/admin.js',
   'js/vistas/publico.js', 'icons/icono.svg', 'manifest.webmanifest'];
