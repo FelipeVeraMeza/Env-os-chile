@@ -2,11 +2,11 @@ import { config } from './config.js';
 import { crearApp } from './app.js';
 import { migrar } from './db/migrate.js';
 import { sembrar } from './db/seed.js';
-import { explicarErrorConexion, pool } from './db/pool.js';
+import { conectar, explicarErrorConexion, pool } from './db/pool.js';
 import { asegurarAlmacenamiento } from './lib/archivos.js';
 
 async function iniciar() {
-  const db = config.db;
+  const db = await conectar();
   console.log(`[db] conectando a ${db.host || 'base local'}${db.esSupabase ? ` (Supabase${db.pooler ? ', pooler' : ''})` : ''} · SSL ${db.ssl ? 'sí' : 'no'}`);
   await pool.query('SELECT 1');
   await migrar();

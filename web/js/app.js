@@ -60,9 +60,11 @@ async function enrutar() {
   const ruta = RUTAS.find(([re, , roles]) => re.test(hash) && (!roles || [].concat(roles).includes(rol)));
   if (!ruta) return ir(INICIO[rol] || '#/seguimiento');
   pintarMenu(hash);
+  $('#modal-raiz').replaceChildren(); // al navegar se cierran hojas y modales abiertos
   const vista = $('#vista');
   try {
     await ruta[1](hash.match(ruta[0]));
+    if (/^#\/(inicio|ruta|panel)$/.test(hash)) bannerInstalar();
   } catch (err) {
     montar(vista, html`<div class="card"><h2>No se pudo cargar esta pantalla</h2><p class="sub">${err.message}</p>
       <button class="btn sec" onclick="location.reload()">Reintentar</button></div>`);
@@ -73,8 +75,75 @@ async function enrutar() {
 
 function pintarMenu(hash) {
   const items = MENUS[app.usuario?.rol] || [];
+  const ocultos = items.filter(([, , , cls]) => cls === 'solo-escritorio');
   montar($('#menu'), html`<div class="titulo-menu">${app.usuario?.nombre || ''}</div>${items.map(([h, ic, txt, cls]) => html`
-    <a href="${h}" class="${[hash.startsWith(h) ? 'activo' : '', cls].filter(Boolean).join(' ')}">${icono(ic)}<span>${txt}</span></a>`)}`);
+    <a href="${h}" class="${[hash.startsWith(h) ? 'activo' : '', cls].filter(Boolean).join(' ')}">${icono(ic)}<span>${txt}</span></a>`)}
+    <button type="button" class="solo-movil ${ocultos.some(([h]) => hash.startsWith(h)) ? 'activo' : ''}" id="btn-mas" aria-label="Más opciones">${raw('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>')}<span>Más</span></button>`);
+  $('#btn-mas').onclick = hojaMas;
+}
+
+// ---------- Celular: hoja "Más" (secciones extra, perfil, instalar app, servidor) ----------
+const INICIALES = { admin: 'AD', cliente: 'CL', repartidor: 'RE' };
+
+function pintarChip() {
+  $('#chip-avatar').textContent = INICIALES[app.usuario?.rol] || '?';
+  $('#chip-rol').textContent = app.usuario ? ROL_TXT[app.usuario.rol] : 'Perfil';
+}
+
+function hojaMas() {
+  const hash = location.hash;
+  const ocultos = (MENUS[app.usuario?.rol] || []).filter(([, , , cls]) => cls === 'solo-escritorio');
+  const m = modal(html`
+    ${ocultos.length ? html`<div class="hoja-titulo" style="margin-top:0">Secciones</div><div class="hoja-lista">${ocultos.map(([h, ic, txt]) => html`
+      <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}</a>`)}</div>` : ''}
+    <div class="hoja-titulo" ${ocultos.length ? '' : raw('style="margin-top:0"')}>Ver la plataforma como</div>
+    <div class="hoja-lista">${app.perfiles.map((p) => html`<button class="item ${p.id === app.usuario?.id ? 'activo' : ''}" data-perfil="${p.id}">
+      <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>
+    <div class="hoja-titulo">App</div>
+    <div class="hoja-lista">
+      ${esApp() ? '' : html`<button class="item" id="h-instalar">${icono('nuevo')}Instalar en este teléfono</button>`}
+      <button class="item" id="h-servidor">${icono('ajustes')}Servidor: ${urlApi() || location.host}</button>
+    </div>`);
+  m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
+  m.el.querySelectorAll('[data-perfil]').forEach((b) => { b.onclick = () => { m.cerrar(); cambiarPerfil(Number(b.dataset.perfil)); }; });
+  $('#h-instalar', m.el)?.addEventListener('click', () => { m.cerrar(); instalarApp(); });
+  $('#h-servidor', m.el).onclick = () => { m.cerrar(); dialogoServidor(); };
+}
+
+// ---------- Instalar como app (PWA) ----------
+let eventoInstalar = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); eventoInstalar = e; });
+const esApp = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+async function instalarApp() {
+  if (eventoInstalar) {
+    eventoInstalar.prompt();
+    const r = await eventoInstalar.userChoice.catch(() => null);
+    if (r?.outcome === 'accepted') toast('¡App instalada! Búscala en tu pantalla de inicio.', 'ok');
+    eventoInstalar = null;
+    return;
+  }
+  modal(esIOS()
+    ? html`<h2>Instalar en iPhone</h2><ol class="sub" style="padding-left:20px;line-height:1.8">
+        <li>Abre esta página en <b>Safari</b>.</li><li>Toca el botón <b>Compartir</b> (cuadrado con flecha ↑).</li>
+        <li>Elige <b>"Agregar a pantalla de inicio"</b>.</li><li>Toca <b>Agregar</b>. La app queda con su ícono.</li></ol>`
+    : html`<h2>Instalar en Android</h2><ol class="sub" style="padding-left:20px;line-height:1.8">
+        <li>Abre esta página en <b>Chrome</b>.</li><li>Toca el menú <b>⋮</b> (arriba a la derecha).</li>
+        <li>Elige <b>"Instalar app"</b> o <b>"Agregar a pantalla principal"</b>.</li></ol>`);
+}
+
+function bannerInstalar() {
+  let cerrado = false;
+  try { cerrado = localStorage.getItem('envios.banner_instalar') === 'no'; } catch { /* sin almacenamiento */ }
+  if (cerrado || esApp() || !window.matchMedia('(max-width: 860px)').matches || $('.banner-instalar')) return;
+  const b = document.createElement('div');
+  b.className = 'banner-instalar';
+  montar(b, html`<img src="icons/icono-192.png" alt=""><div><b>Instala la app</b><br>Úsala desde tu pantalla de inicio, como cualquier app.</div>
+    <button class="btn" id="b-instalar">Instalar</button><button class="cerrar-banner" aria-label="Cerrar">✕</button>`);
+  $('#vista').prepend(b);
+  $('#b-instalar', b).onclick = instalarApp;
+  $('.cerrar-banner', b).onclick = () => { b.remove(); try { localStorage.setItem('envios.banner_instalar', 'no'); } catch { /* */ } };
 }
 
 function pantallaSinPerfil() {
@@ -89,6 +158,7 @@ function pantallaSinPerfil() {
 const ROL_TXT = { admin: 'Administrador', cliente: 'Cliente', repartidor: 'Repartidor' };
 
 function pintarSelector() {
+  pintarChip();
   const sel = $('#selector-perfil');
   montar(sel, html`<option value="">Elegir perfil…</option>${['admin', 'cliente', 'repartidor'].map((rol) => html`
     <optgroup label="${ROL_TXT[rol]}">${app.perfiles.filter((p) => p.rol === rol).map((p) => html`
@@ -155,6 +225,7 @@ function pedirClaveDemo(conf) {
 
 async function iniciar() {
   $('#btn-servidor').onclick = dialogoServidor;
+  $('#chip-perfil').onclick = hojaMas;
   try {
     const conf = await get('/api/config/publica');
     let perfiles = [];

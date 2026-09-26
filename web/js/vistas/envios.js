@@ -260,15 +260,15 @@ export async function reclamos() {
   const lista = await get('/api/reclamos');
   montar(vista, html`
     <div class="encabezado"><div><h1>Reclamos de seguro</h1><p>Toda indemnización requiere la boleta de compra del producto.</p></div></div>
-    ${lista.length ? html`<div class="tabla-wrap"><table>
+    ${lista.length ? html`<div class="tabla-wrap"><table class="tabla-cards">
       <thead><tr><th>N°</th><th>Envío</th>${esAdmin ? html`<th>Cliente</th>` : ''}<th>Motivo</th><th class="num">Declarado</th><th class="num">Reclamado</th><th class="num">Aprobado</th><th>Boleta</th><th>Estado</th>${esAdmin ? html`<th>Acción</th>` : ''}</tr></thead>
       <tbody>${lista.map((r) => html`<tr>
-        <td class="mono">${r.numero}</td><td><a href="#/envio/${r.envio_id}">${r.folio}</a></td>${esAdmin ? html`<td>${r.cliente_nombre}</td>` : ''}
-        <td>${app.conf.motivos_reclamo[r.motivo]}</td><td class="num">${clp(r.valor_declarado)}</td><td class="num">${clp(r.monto_reclamado)}</td>
-        <td class="num">${r.monto_aprobado ? clp(r.monto_aprobado) : '—'}</td>
-        <td><a href="${archivo(r.boleta_url)}" target="_blank" rel="noopener">N° ${r.boleta_numero}</a><div class="muted">${clp(r.boleta_monto)}</div></td>
-        <td>${badge(r.estado, app.conf.estados_reclamo[r.estado])}</td>
-        ${esAdmin ? html`<td><div class="fila">
+        <td data-label="N°" class="mono"><b>${r.numero}</b></td><td data-label="Envío"><a href="#/envio/${r.envio_id}">${r.folio}</a></td>${esAdmin ? html`<td data-label="Cliente">${r.cliente_nombre}</td>` : ''}
+        <td data-label="Motivo">${app.conf.motivos_reclamo[r.motivo]}</td><td data-label="Declarado" class="num">${clp(r.valor_declarado)}</td><td data-label="Reclamado" class="num">${clp(r.monto_reclamado)}</td>
+        <td data-label="Aprobado" class="num">${r.monto_aprobado ? clp(r.monto_aprobado) : '—'}</td>
+        <td data-label="Boleta"><a href="${archivo(r.boleta_url)}" target="_blank" rel="noopener">N° ${r.boleta_numero} · ${clp(r.boleta_monto)}</a></td>
+        <td data-label="Estado">${badge(r.estado, app.conf.estados_reclamo[r.estado])}</td>
+        ${esAdmin ? html`<td data-label="Acción"><div class="fila">
           ${r.estado === 'solicitado' ? html`<button class="btn sec chico" data-revisar="${r.id}">Revisar</button>` : ''}
           ${['solicitado', 'en_revision'].includes(r.estado) ? html`<button class="btn chico" data-resolver="${r.id}">Resolver</button>` : ''}
           ${r.estado === 'aprobado' ? html`<button class="btn chico" data-pagar="${r.id}">Pagar</button>` : ''}</div></td>` : ''}

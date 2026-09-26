@@ -53,6 +53,11 @@ export const config = {
   entorno,
   puerto: Number(process.env.PORT || 3000),
   db: configBaseDatos(process.env),
+  // Alternativa a DATABASE_URL: con la URL del proyecto y la contraseña de la base, el servidor
+  // encuentra solo el Session pooler de Supabase (ver server/db/supabase-pooler.js).
+  supabaseDb: !process.env.DATABASE_URL && process.env.SUPABASE_URL && process.env.SUPABASE_DB_PASSWORD
+    ? { supabaseUrl: process.env.SUPABASE_URL, password: process.env.SUPABASE_DB_PASSWORD }
+    : null,
   // URL pública del backend. Se usa en los QR. En Railway se toma sola de RAILWAY_PUBLIC_DOMAIN.
   publicBaseUrl,
   // Orígenes permitidos para el frontend (ej. el dominio de Vercel). La URL pública siempre se incluye.
@@ -64,6 +69,8 @@ export const config = {
     driver: process.env.STORAGE_DRIVER || (process.env.SUPABASE_URL && claveSupabase ? 'supabase' : 'local'),
     supabaseUrl: (process.env.SUPABASE_URL || '').replace(/\/+$/, ''),
     supabaseKey: claveSupabase,
+    // Si hay dos claves (nueva sb_secret_ y antigua service_role) se usa la primera que funcione.
+    clavesAlternativas: [process.env.SUPABASE_SECRET_KEY, process.env.SUPABASE_SERVICE_ROLE_KEY].filter(Boolean),
     bucket: process.env.SUPABASE_BUCKET || 'envios-privado',
   },
   // demo = sin inicio de sesión, se elige el rol desde la interfaz. jwt = inicio de sesión real.

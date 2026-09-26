@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0a1a6b">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Envíos">
+  <meta name="format-detection" content="telephone=no">
   <meta name="description" content="Plataforma de gestión de envíos: crea, paga, sigue y entrega envíos con QR y foto de constancia.">
   <title>Gestión de Envíos</title>
   <link rel="manifest" href="manifest.webmanifest">
@@ -25,11 +30,12 @@
       </a>
       <div class="topbar-der">
         <span class="chip-demo" title="Sin inicio de sesión: elige un perfil para recorrer la plataforma">Modo demo</span>
-        <label class="perfil">
+        <button class="perfil-chip solo-movil" id="chip-perfil" aria-label="Cambiar perfil"><span class="avatar" id="chip-avatar">?</span><span id="chip-rol">Perfil</span></button>
+        <label class="perfil solo-escritorio-top">
           <span class="sr">Perfil</span>
           <select id="selector-perfil" aria-label="Perfil de demostración"></select>
         </label>
-        <button class="btn-icono" id="btn-servidor" title="Servidor API (localhost / Railway)" aria-label="Configurar servidor">
+        <button class="btn-icono solo-escritorio-top" id="btn-servidor" title="Servidor API (localhost / Railway)" aria-label="Configurar servidor">
           <span class="punto-estado" id="estado-api"></span>
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 5h16v5H4zm0 9h16v5H4zm3-7.5A1 1 0 1 0 7 8.5 1 1 0 0 0 7 6.5m0 9a1 1 0 1 0 0 2 1 1 0 0 0 0-2"/></svg>
         </button>

@@ -14,7 +14,11 @@ Celular / PC ──► Railway (API + interfaz) ──► Supabase: PostgreSQL (
 1. Entra a [supabase.com](https://supabase.com) → **New project**.
    - **Region:** elige la **misma zona que usarás en Railway**. Recomendado: **East US (North Virginia)** en ambos (Railway no tiene región en Sudamérica y la API hace muchas consultas a la base: estar juntos la hace rápida).
    - **Database password:** usa una clave **solo de letras y números** (los símbolos `@ : / # ?` rompen la URL). Guárdala.
-2. Cuando el proyecto esté listo, copia estos 3 datos:
+2. Cuando el proyecto esté listo, copia estos datos.
+
+   **Opción fácil (recomendada):** solo necesitas la **Project URL**, la **Secret key** y la **contraseña de la base** (la que pusiste al crear el proyecto). Ponlas en `SUPABASE_URL`, `SUPABASE_SECRET_KEY` y `SUPABASE_DB_PASSWORD`, sin `DATABASE_URL`: el servidor encuentra solo el pooler y su región (en el log verás `[db] pooler encontrado: …`). Con esta opción la contraseña puede tener símbolos.
+
+   **Opción manual:**
 
    | Dato | Dónde está | Variable en Railway |
    |---|---|---|

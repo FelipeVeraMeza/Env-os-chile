@@ -2,7 +2,7 @@
 // Uso:  npm run verificar            (lee .env)
 //       npm run verificar -- --railway (además exige lo necesario para producción)
 import { config } from '../server/config.js';
-import { explicarErrorConexion, pool } from '../server/db/pool.js';
+import { conectar, explicarErrorConexion, pool } from '../server/db/pool.js';
 import { asegurarAlmacenamiento, guardarArchivo, leerArchivo } from '../server/lib/archivos.js';
 
 const estricto = process.argv.includes('--railway');
@@ -13,7 +13,8 @@ const aviso = (m) => { avisos++; console.log(`  ⚠ ${m}`); };
 const falla = (m) => { fallas++; console.log(`  ✖ ${m}`); };
 
 console.log('\n1) Variables');
-if (!process.env.DATABASE_URL) falla('DATABASE_URL no está definida');
+if (config.supabaseDb) ok('Base: se buscará el Session pooler con SUPABASE_URL + SUPABASE_DB_PASSWORD');
+else if (!process.env.DATABASE_URL) falla('Falta DATABASE_URL (o SUPABASE_URL + SUPABASE_DB_PASSWORD)');
 else ok(`DATABASE_URL → ${config.db.host}${config.db.esSupabase ? ' (Supabase)' : ''}`);
 if (config.db.esSupabase && !config.db.pooler) {
   aviso('Estás usando la conexión DIRECTA de Supabase (solo IPv6). Desde Railway usa el "Session pooler" (…pooler.supabase.com:5432).');
@@ -35,6 +36,7 @@ else (estricto ? falla : aviso)('Archivos en disco local: en Railway se pierden 
 
 console.log('\n2) Base de datos');
 try {
+  await conectar();
   const t0 = Date.now();
   const { rows: [v] } = await pool.query('SELECT version(), current_user, current_database()');
   ok(`Conexión OK en ${Date.now() - t0} ms · ${v.version.split(' ').slice(0, 2).join(' ')} · usuario ${v.current_user} · SSL ${config.db.ssl ? 'sí' : 'no'}`);

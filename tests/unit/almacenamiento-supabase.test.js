@@ -32,3 +32,12 @@ test('sube y lee de vuelta una boleta', async () => {
 test('un archivo inexistente devuelve null', async () => {
   assert.equal(await archivos.leerArchivo('sb:2026/01/no-existe.jpg'), null);
 });
+
+test('si la primera clave es rechazada, usa la alternativa', async () => {
+  const { config } = await import('../../server/config.js');
+  config.almacenamiento.clavesAlternativas = ['clave-mala', falso.clave];
+  config.almacenamiento.supabaseKey = 'clave-mala';
+  const r = await archivos.asegurarAlmacenamiento();
+  assert.equal(r.driver, 'supabase');
+  assert.equal(config.almacenamiento.supabaseKey, falso.clave);
+});

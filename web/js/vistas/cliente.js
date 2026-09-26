@@ -186,7 +186,7 @@ export async function nuevo() {
       <div class="pasos">${PASOS.map((p, i) => html`<div class="paso ${i < w.paso ? 'hecho' : i === w.paso ? 'actual' : ''}">${p}</div>`)}</div>
       <form class="card" id="form-envio" novalidate>
         ${cuerpo()}
-        <div class="fila entre" style="margin-top:22px">
+        <div class="fila entre acciones-fijas" style="margin-top:22px">
           <button type="button" class="btn sec" id="atras" ${w.paso === 0 ? html`disabled` : ''}>Atrás</button>
           <div class="fila">${w.cotizacion && w.paso === 2 ? html`<span class="sub">Tarifa: <b>${clp(w.cotizacion.tarifa_total)}</b></span>` : ''}
           <button type="submit" class="btn grande" id="siguiente">${w.paso === 3 ? 'Confirmar envío' : 'Continuar'}</button></div>

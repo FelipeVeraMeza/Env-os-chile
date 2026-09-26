@@ -41,7 +41,14 @@ export async function asegurarAlmacenamiento() {
   }
   const { bucket, supabaseUrl, supabaseKey } = config.almacenamiento;
   if (!supabaseUrl || !supabaseKey) throw new Error('Faltan SUPABASE_URL o SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY');
-  const existe = await fetch(urlStorage(`/bucket/${bucket}`), { headers: cabecerasSupabase() });
+  let existe = await fetch(urlStorage(`/bucket/${bucket}`), { headers: cabecerasSupabase() });
+  for (const alternativa of config.almacenamiento.clavesAlternativas) {
+    if (existe.status !== 401 && existe.status !== 403) break;
+    if (alternativa === config.almacenamiento.supabaseKey) continue;
+    config.almacenamiento.supabaseKey = alternativa;
+    existe = await fetch(urlStorage(`/bucket/${bucket}`), { headers: cabecerasSupabase() });
+    if (existe.status !== 401 && existe.status !== 403) console.log('[archivos] se usa la clave alternativa de Supabase');
+  }
   if (existe.ok) {
     const info = await existe.json();
     if (info.public) console.warn(`[archivos] ATENCIÓN: el bucket "${bucket}" es público. Márcalo como privado en Supabase.`);
