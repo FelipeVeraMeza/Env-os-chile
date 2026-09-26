@@ -66,7 +66,7 @@ Debe terminar en **"✔ Todo listo para desplegar"**. Si algo falla, el mensaje 
    | `SUPABASE_URL` / `SUPABASE_SECRET_KEY` | Paso 1 |
    | `JWT_SECRET` | Resultado de `npm run secreto` (64 caracteres) |
    | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Tu correo y una clave segura |
-   | `DEMO_CLAVE` | La clave que le darás al cliente para entrar a la demo |
+   | `DEMO_CLAVE` | **Opcional.** Déjala sin definir: la demo queda abierta (decisión del 26-09-2026). Si la defines, la página pide esa clave |
    | `AUTH_MODE` | `demo` (primera versión, sin inicio de sesión) |
 
    Guarda con **Update Variables** → Railway despliega solo.
@@ -87,7 +87,7 @@ Debe terminar en **"✔ Todo listo para desplegar"**. Si algo falla, el mensaje 
 ## Paso 4 · Verificar y cargar datos de ejemplo
 
 1. En [`entornos.env`](../entornos.env) pega tu dominio en `URL_RAILWAY=`.
-2. Crea `entornos.local.env` (no se sube al repositorio) con `QA_DEMO_CLAVE=<tu DEMO_CLAVE>`.
+2. Solo si definiste `DEMO_CLAVE`: crea `entornos.local.env` (no se sube al repositorio) con `QA_DEMO_CLAVE=<tu DEMO_CLAVE>`.
 3. Opcional, para que el cliente vea la plataforma "con vida":
    ```bash
    npm run datos-demo -- railway      # crea 17 envíos de ejemplo en distintos estados
@@ -103,7 +103,6 @@ Debe terminar en **"✔ Todo listo para desplegar"**. Si algo falla, el mensaje 
 Mensaje sugerido:
 
 > Te comparto la primera versión de la plataforma: **https://…up.railway.app**
-> Clave de acceso: **(tu DEMO_CLAVE)**
 > Arriba a la derecha eliges el perfil (Administrador, Cliente o Repartidor). Te recomiendo abrirla también en el celular para ver la vista del repartidor. Es una versión de demostración: los pagos son simulados (no se cobra dinero) y no ingreses datos reales de clientes.
 
 ---

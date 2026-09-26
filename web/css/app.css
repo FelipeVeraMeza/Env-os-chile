@@ -1,3 +1,12 @@
+/* Tipografía servida por la misma app (sin Google Fonts). Licencia: fonts/OFL-plus-jakarta-sans.txt */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('../fonts/plus-jakarta-sans.woff2') format('woff2');
+}
+
 /* ==========================================================================
    Paleta de marca: AZUL 60% (fondos, estructura) · MAGENTA 30% (acciones, acentos) · BLANCO 10% (texto, detalles)
    ========================================================================== */

@@ -1,6 +1,6 @@
 import { app } from '../app.js';
 import { get, patch, post, put } from '../api.js';
-import { $, $$, clp, datosForm, errorToast, esqueleto, fecha, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
+import { $, $$, clp, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 import { limpiarCacheComunas } from './comun.js';
 
 // ================= Panel de ganancias =================
@@ -222,10 +222,15 @@ export async function usuarios() {
 }
 
 // ================= Ajustes: negocio, ticket y costos =================
+const ACCIONES = {
+  crear: 'Creó', editar: 'Editó', confirmar: 'Confirmó', asignar: 'Asignó repartidor', cambiar_estado: 'Cambió estado', entregar: 'Entregó',
+  llegada: 'Marcó llegada', adjuntar: 'Adjuntó archivo', iniciar_pago: 'Inició pago', pago_manual: 'Registró pago manual',
+  revisar: 'Revisó reclamo', pagar: 'Pagó reclamo', pago_aprobado: 'Pago aprobado', pago_rechazado: 'Pago rechazado', login: 'Inició sesión', qr_escaneado: 'QR escaneado',
+};
 export async function ajustes() {
   const vista = $('#vista');
   montar(vista, esqueleto(3));
-  const costos = await get('/api/costos');
+  const [costos, actividad] = await Promise.all([get('/api/costos'), get('/api/auditoria?limite=30').catch(() => [])]);
   const n = app.conf.negocio;
   montar(vista, html`
     <div class="encabezado"><div><h1>Ajustes</h1><p>Nombre y logo de la empresa están por definir: cámbialos aquí cuando estén listos.</p></div></div>
@@ -253,6 +258,12 @@ export async function ajustes() {
             <tbody>${costos.map((c) => html`<tr><td>${fecha(c.fecha)}</td><td>${c.tipo}</td><td class="sub">${c.nota || ''}</td><td class="num">${clp(c.monto)}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Sin costos registrados este mes.</p>`}
         </div>
       </div>
+    </div>
+    <div class="card"><div class="card-titulo"><h2>Actividad reciente</h2><span class="sub">Registro de auditoría · últimas ${actividad.length}</span></div>
+      ${actividad.length ? html`<details><summary class="sub">Ver registro</summary><div class="pila" style="margin-top:10px">${actividad.map((a) => html`<div class="fila entre">
+          <div><b>${ACCIONES[a.accion] || a.accion}</b> <span class="sub">${a.entidad.replace('_', ' ')}${a.entidad_id ? ` #${a.entidad_id}` : ''}</span>
+            <div class="muted">${a.usuario || 'Público'}</div></div><span class="sub">${fechaHora(a.fecha)}</span></div>`)}</div></details>`
+        : html`<p class="sub">Sin actividad registrada.</p>`}
     </div>`);
   const guardar = (clave) => async (e) => {
     e.preventDefault();

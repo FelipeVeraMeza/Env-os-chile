@@ -6,7 +6,7 @@ Levantamiento, definición funcional y técnica, **prototipo navegable** y **sui
 |---|---|
 | Servicio | Levantamiento, análisis y definición — **$220.000 CLP** |
 | Fecha meta | **26 de octubre de 2026** |
-| Estado | Documentación v2.0 en validación · Prototipo v0.1 (modo demo sin inicio de sesión) |
+| Estado | Documentación v2.0 en validación · Prototipo v0.1 (demo abierta, sin inicio de sesión) |
 | Despliegue | Railway (API + interfaz) · **Supabase** (PostgreSQL + Storage) · opcionalmente Vercel (interfaz) |
 
 ![Panel del cliente](docs/capturas/cliente-inicio.jpg)
@@ -19,7 +19,7 @@ Guía paso a paso: **[docs/12-primera-version-railway-supabase.md](docs/12-prime
 2. Supabase → **SQL Editor** → pega [`supabase/base-de-datos-completa.sql`](supabase/base-de-datos-completa.sql) → **Run** (crea toda la base).
 3. `cp .env.railway.example .env` → completa → `npm run verificar:railway` (debe decir "Todo listo").
 4. Railway → *Deploy from GitHub repo* → elige la rama → *Generate Domain* → pega las variables de [`.env.railway.example`](.env.railway.example) en *Raw Editor*.
-5. Abre `https://tu-app.up.railway.app` e ingresa tu `DEMO_CLAVE`.
+5. Abre `https://tu-app.up.railway.app` y elige un perfil (la demo está abierta; `DEMO_CLAVE` es opcional).
 
 Las tablas, las 346 comunas, los perfiles demo y el bucket privado de fotos/boletas se crean solos en el primer arranque.
 
@@ -98,7 +98,7 @@ Guía completa: [docs/10-despliegue.md](docs/10-despliegue.md).
 ```bash
 npm test            # 29 pruebas unitarias (reglas de negocio, conexión Supabase, Storage, SQL)
 npm run verificar   # revisa variables, conexión a la base y almacenamiento antes de desplegar
-npm run qa:local    # 53 casos QA extremo a extremo (CP-01 … CP-67) contra localhost
+npm run qa:local    # 65 casos QA extremo a extremo (CP-01 … CP-79) contra localhost
 ```
 
 Cada caso QA está trazado a un requerimiento en el [plan de QA](docs/08-plan-qa-y-criterios-de-aceptacion.md). Los reportes JUnit quedan en `qa/reportes/`.

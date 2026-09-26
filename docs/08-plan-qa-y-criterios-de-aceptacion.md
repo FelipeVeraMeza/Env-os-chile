@@ -32,7 +32,7 @@ Cada ejecución deja un reporte JUnit en `qa/reportes/` (evidencia para el clien
 
 ## 3. Matriz de casos de prueba automatizados
 
-Resultado de la última ejecución local: **52/52 aprobados** (QA) y **16/16** (unitarias).
+Resultado de la última ejecución local (26-09-2026): **65/65 aprobados** (QA) y **40/40** (unitarias).
 
 | Caso | Descripción | Requerimiento |
 |---|---|---|
@@ -89,6 +89,18 @@ Resultado de la última ejecución local: **52/52 aprobados** (QA) y **16/16** (
 | CP-64 | Libreta: varias direcciones por destinatario | RF-09 |
 | CP-65 | No se usa la libreta de otro cliente | RF-09, RF-04 |
 | CP-66 | Búsqueda por folio y exportación CSV | RF-28, RF-37 |
+| CP-68 | Tarifa propia de una comuna se aplica al cotizar | RF-17 |
+| CP-69 | Filtros por estado, comuna, repartidor y fecha | RF-29 |
+| CP-70 | Reporte con desglose por día, comuna y repartidor | RF-34, RF-35 |
+| CP-71 | QR abre página, Google Maps o Waze según Ajustes | RF-25, RF-26 |
+| CP-72 | Datos de la empresa editables y publicados | RF-39, RF-51 |
+| CP-73 | Auditoría registrada y consultable solo por admin | RF-40, RF-54 |
+| CP-74 | Usuario desactivado no puede operar | RF-05 |
+| CP-75 | PWA: manifiesto y service worker | RF-38 |
+| CP-76 | Ticket con QR en < 3 s, QR generado en el servidor | RNF-04, RNF-11 |
+| CP-77 | Web y API en la misma app, sin servidores ni fuentes externas | RNF-17 |
+| CP-78 | Límite de solicitudes por IP (API y seguimiento público) | RNF-16 |
+| CP-79 | Demo abierta: perfiles sin clave | RF-53 |
 
 ## 4. Criterios de aceptación (UAT con el cliente)
 

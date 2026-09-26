@@ -3,25 +3,16 @@ import jwt from 'jsonwebtoken';
 import { Router } from 'express';
 import { config } from '../config.js';
 import { query, uno } from '../db/pool.js';
-import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
+import { auditar, exigirSinErrores, falla, idNumerico, limitador, ruta } from '../lib/http.js';
 import { normalizarRut, normalizarTelefono, ROLES } from '../lib/reglas.js';
 import { autenticar, exigirClaveDemo, requiereRol } from '../middleware/auth.js';
 
 export const auth = Router();
 
-// Límite simple de intentos de inicio de sesión por IP (10 por 15 min).
-const intentos = new Map();
-function limitar(ip) {
-  const ahora = Date.now();
-  const reg = intentos.get(ip) || { n: 0, desde: ahora };
-  if (ahora - reg.desde > 15 * 60 * 1000) Object.assign(reg, { n: 0, desde: ahora });
-  reg.n += 1;
-  intentos.set(ip, reg);
-  if (reg.n > 10) throw falla(429, 'Demasiados intentos. Espera unos minutos.');
-}
+// Límite de intentos de inicio de sesión por IP (10 por 15 min).
+const limiteLogin = limitador({ nombre: 'login', max: 10, ventanaMs: 15 * 60 * 1000, mensaje: 'Demasiados intentos. Espera unos minutos.' });
 
-auth.post('/login', ruta(async (req, res) => {
-  limitar(req.ip);
+auth.post('/login', limiteLogin, ruta(async (req, res) => {
   const { correo, password } = req.body || {};
   const u = await uno('SELECT * FROM usuario WHERE correo = $1', [String(correo || '').toLowerCase().trim()]);
   if (!u || !u.activo || !u.password_hash || !(await bcrypt.compare(String(password || ''), u.password_hash))) {

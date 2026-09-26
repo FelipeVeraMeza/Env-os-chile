@@ -4,7 +4,9 @@
 > Fecha meta del servicio (levantamiento, análisis y definición): **26/10/2026**.
 > Marca cada casilla al terminar. Responsable: **TÚ** (Railway/Supabase/cliente) · **CLIENTE** · **DESARROLLO** (código).
 
-## A. Urgente — seguridad y puesta en línea (esta semana)
+## A. Seguridad y puesta en línea
+
+> **26/09/2026:** el bloque A queda para otro día, salvo A-5 (decidido: demo abierta).
 
 | # | Qué hacer | Responsable | Dónde |
 |---|---|---|---|
@@ -12,8 +14,8 @@
 | [ ] A-2 | Crear una **secret key nueva**, ponerla en `SUPABASE_SECRET_KEY` y **borrar la antigua** | TÚ | Supabase → Project Settings → API Keys |
 | [ ] A-3 | Desactivar las **claves legacy** (anon / service_role JWT) | TÚ | Supabase → API Keys → Legacy API keys → Disable |
 | [ ] A-4 | Tras A-1 a A-3, confirmar que `/api/health` sigue en `ok:true`, `base:"supabase"`, `archivos:"supabase"` | TÚ | Navegador |
-| [ ] A-5 | Decidir si la demo sigue con **clave de acceso** (recomendado) o queda abierta | TÚ | — |
-| [ ] A-6 | Correr el **QA completo contra Railway** (53 casos): `QA_DEMO_CLAVE` en `entornos.local.env` y `npm run qa:railway` | TÚ o DESARROLLO | Computador con el repo, o permitir `*.railway.app` en la red de la sesión |
+| [x] A-5 | Decidir si la demo sigue con clave o queda abierta → **abierta**. Borra la variable `DEMO_CLAVE` en Railway (si existe) | TÚ | Railway → Variables |
+| [ ] A-6 | Correr el **QA completo contra Railway** (65 casos): `npm run qa:railway` | TÚ o DESARROLLO | Computador con el repo, o permitir `*.railway.app` en la red de la sesión |
 | [ ] A-7 | Dejar **una sola rama** conectada a Railway (hoy `…-rdzym7`) | TÚ | Railway → Settings → Source |
 | [ ] A-8 | Activar **respaldos** de la base (Supabase: plan con backups diarios o exportación programada) | TÚ | Supabase → Database → Backups |
 
@@ -62,7 +64,7 @@ Cuando respondan: nombre, logo, datos del negocio, tarifas, límites e intentos 
 |---|---|---|
 | [x] D-a | **Couriers** (Blue Express, Starken, …) y **franjas horarias** editables en Ajustes | Hecho: Ajustes → Opciones del envío (una por línea). Probado con CP-67 |
 | [ ] D-b | Revisión visual completa en teléfono de cada pantalla (admin, cliente, repartidor) | RNF-01, RNF-13 |
-| [ ] D-c | Actualizar documentos 02, 05, 09, 12 y 13 con lo hecho en esta etapa | Supabase Storage ya reemplaza S3/R2 (D-06); validación de variables en producción |
+| [ ] D-c | Actualizar documentos 02, 05, 09, 12 y 13 con lo hecho en esta etapa | Parcial (26/09): 02, 08, 12 y 13 al día (requerimientos RF-52 a RF-62 y RNF-16 a RNF-21). Faltan 05 y 09 (Supabase Storage reemplaza S3/R2, D-06) |
 | [ ] D-d | Medir carga de pantallas con perfil 4G (Lighthouse) | RNF-03 |
 
 ### Etapa de desarrollo (se cotiza aparte, ver [09](09-plan-de-desarrollo.md))

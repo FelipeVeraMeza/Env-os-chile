@@ -5,12 +5,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { config } from './config.js';
 import { pool } from './db/pool.js';
-import { manejadorErrores } from './lib/http.js';
+import { limitador, manejadorErrores } from './lib/http.js';
 import { autenticar } from './middleware/auth.js';
 import { envios } from './routes/envios.js';
 import { auth, demo, usuarios } from './routes/cuentas.js';
 import { comunas, configuracion, destinatarios, zonas } from './routes/catalogos.js';
-import { adjuntos, costos, pagos, reclamos, reportes } from './routes/operacion.js';
+import { adjuntos, auditoria, costos, pagos, reclamos, reportes } from './routes/operacion.js';
 import { paginaQr, seguimiento } from './routes/publico.js';
 
 const raiz = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -25,8 +25,8 @@ export function crearApp() {
         defaultSrc: ["'self'"],
         imgSrc: ["'self'", 'data:', 'blob:'],
         connectSrc: ["'self'", ...config.corsOrigins],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        fontSrc: ["'self'"],
         mediaSrc: ["'self'", 'blob:'],
         frameSrc: ["'self'", 'blob:'],
         objectSrc: ["'self'", 'blob:'],
@@ -49,11 +49,13 @@ export function crearApp() {
     });
   });
 
+  const limitePublico = limitador({ nombre: 'publico', max: config.limites.publico });
+  app.use('/api', limitador({ nombre: 'api', max: config.limites.api }));
   app.use('/api/auth', auth);
   app.use('/api/demo', demo);
   app.use('/api/config', configuracion);
   app.use('/api/comunas', comunas);
-  app.use('/api/seguimiento', seguimiento);
+  app.use('/api/seguimiento', limitePublico, seguimiento);
   app.use('/api/adjuntos', adjuntos);
   app.use('/api/usuarios', usuarios);
   app.use('/api/zonas', zonas);
@@ -63,7 +65,8 @@ export function crearApp() {
   app.use('/api/reclamos', reclamos);
   app.use('/api/costos', costos);
   app.use('/api/reportes', reportes);
-  app.use('/q', paginaQr);
+  app.use('/api/auditoria', auditoria);
+  app.use('/q', limitePublico, paginaQr);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 
   // Si el frontend no está en Vercel, Railway lo sirve desde /web en el mismo dominio.

@@ -1,7 +1,7 @@
-// Cliente de la API. La URL del servidor se toma (en orden) de:
-//   1) lo elegido en la interfaz (botón "servidor", se guarda en este navegador)
-//   2) web/config.js → window.APP_CONFIG.API_URL (generado desde entornos.env)
-//   3) mismo origen (cuando Railway sirve la interfaz y la API juntas)
+// Cliente de la API. Por defecto la interfaz y la API viven en la misma app (mismo origen:
+// Railway sirve ambas). Solo se usa otra URL si:
+//   1) se eligió en el botón "servidor" estando en modo desarrollo (?dev), o
+//   2) web/config.js → window.APP_CONFIG.API_URL la define (generado desde entornos.env).
 const LS_API = 'envios.api_url';
 const LS_PERFIL = 'envios.perfil';
 const LS_TOKEN = 'envios.token';
@@ -12,8 +12,10 @@ function escribirLS(clave, valor) {
   try { valor === null ? localStorage.removeItem(clave) : localStorage.setItem(clave, valor); } catch { /* sin almacenamiento */ }
 }
 
+const enDesarrollo = () => leerLS('envios.dev') === '1';
 export function urlApi() {
-  return (leerLS(LS_API) ?? window.APP_CONFIG?.API_URL ?? '').replace(/\/+$/, '');
+  const elegida = enDesarrollo() ? leerLS(LS_API) : null;
+  return (elegida ?? window.APP_CONFIG?.API_URL ?? '').replace(/\/+$/, '');
 }
 export function fijarUrlApi(url) { escribirLS(LS_API, url === null ? null : url.replace(/\/+$/, '')); }
 export function perfilActual() { const v = Number(leerLS(LS_PERFIL)); return Number.isInteger(v) && v > 0 ? v : null; }
@@ -48,7 +50,7 @@ export async function api(ruta, { metodo = 'GET', json, form, blob = false } = {
   try {
     res = await fetch(`${urlApi()}${ruta}`, { method: metodo, headers, body });
   } catch {
-    throw new ErrorApi(0, { error: `No hay conexión con el servidor (${urlApi() || 'mismo origen'}). Revisa la URL en el botón de servidor.` });
+    throw new ErrorApi(0, { error: `No hay conexión con el servidor (${urlApi() || 'mismo origen'}). Revisa tu conexión a internet.` });
   }
   if (blob && res.ok) return res.blob();
   const tipo = res.headers.get('content-type') || '';

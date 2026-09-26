@@ -84,6 +84,11 @@ export const config = {
     password: process.env.ADMIN_PASSWORD || 'Cambiar.Esta.Clave.2026',
   },
   sembrarDemo: process.env.SEED_DEMO !== 'false',
+  // Solicitudes por minuto y por IP (RNF-16). 0 desactiva el límite.
+  limites: {
+    api: Number(process.env.LIMITE_API_POR_MINUTO ?? 1200),
+    publico: Number(process.env.LIMITE_PUBLICO_POR_MINUTO ?? 60),
+  },
   servirWeb: process.env.SERVE_WEB !== 'false',
 };
 
@@ -110,14 +115,11 @@ export function validarProduccion(env) {
   } else if (env.ADMIN_PASSWORD.length < 12) {
     faltan.push('ADMIN_PASSWORD: debe tener 12 caracteres o más');
   }
-  if ((env.AUTH_MODE || 'demo') === 'demo' && !env.DEMO_CLAVE) {
-    faltan.push('DEMO_CLAVE: con AUTH_MODE=demo la demo publicada debe estar protegida con clave');
-  }
   return faltan;
 }
 
 if (config.authMode === 'demo') {
-  console.warn(`[seguridad] AUTH_MODE=demo: la API no exige inicio de sesión${config.demoClave ? ' (protegida con DEMO_CLAVE)' : ''}. No usar con datos reales.`);
+  console.warn(`[seguridad] AUTH_MODE=demo: la API no exige inicio de sesión${config.demoClave ? ' (protegida con DEMO_CLAVE)' : ' (demo abierta)'}. No usar con datos reales.`);
 }
 if (config.almacenamiento.driver === 'local' && entorno === 'production' && !process.env.UPLOAD_DIR) {
   console.warn('[archivos] Fotos y boletas en disco local: se pierden en cada despliegue. Configura Supabase Storage (SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY) o un Volume de Railway.');

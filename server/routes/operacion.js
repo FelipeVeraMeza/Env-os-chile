@@ -238,3 +238,22 @@ reportes.get('/ganancias', ruta(async (req, res) => {
     por_dia: porDia.rows, por_comuna: porComuna.rows, por_repartidor: porRepartidor.rows, por_estado: porEstado.rows, costos_por_tipo: costosTipo.rows,
   });
 }));
+
+// Consulta del registro de auditoría (RF-54): solo administración, del más reciente al más antiguo.
+export const auditoria = Router();
+auditoria.use(autenticar, requiereRol('admin'));
+auditoria.get('/', ruta(async (req, res) => {
+  const params = [];
+  const cond = [];
+  const p = (v) => { params.push(v); return `$${params.length}`; };
+  if (req.query.entidad) cond.push(`a.entidad = ${p(String(req.query.entidad))}`);
+  if (req.query.entidad_id) cond.push(`a.entidad_id = ${p(String(req.query.entidad_id))}`);
+  if (req.query.accion) cond.push(`a.accion = ${p(String(req.query.accion))}`);
+  if (req.query.usuario_id) cond.push(`a.usuario_id = ${p(idNumerico(req.query.usuario_id, 'usuario_id'))}`);
+  const limite = Math.min(Math.max(Number(req.query.limite) || 50, 1), 200);
+  const { rows } = await query(
+    `SELECT a.id, a.fecha, a.accion, a.entidad, a.entidad_id, a.datos, u.nombre AS usuario, u.rol
+     FROM auditoria a LEFT JOIN usuario u ON u.id = a.usuario_id
+     ${cond.length ? `WHERE ${cond.join(' AND ')}` : ''} ORDER BY a.fecha DESC, a.id DESC LIMIT ${limite}`, params);
+  res.json(rows);
+}));

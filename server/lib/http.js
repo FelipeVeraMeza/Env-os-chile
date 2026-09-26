@@ -8,6 +8,33 @@ export function falla(status, mensaje, detalles) {
   return new ErrorNegocio(status, mensaje, detalles);
 }
 
+// Límite de solicitudes por IP en una ventana de tiempo (RNF-16). max = 0 lo desactiva.
+// En memoria: suficiente para un solo servidor (Railway); con varias instancias usar un almacén compartido.
+export function limitador({ nombre, max, ventanaMs = 60_000, mensaje = 'Demasiadas solicitudes. Espera un momento e inténtalo de nuevo.' }) {
+  const registros = new Map();
+  return (req, res, next) => {
+    if (!max) return next();
+    const ahora = Date.now();
+    const clave = `${nombre}:${req.ip}`;
+    let reg = registros.get(clave);
+    if (!reg || ahora - reg.desde >= ventanaMs) {
+      reg = { n: 0, desde: ahora };
+      registros.set(clave, reg);
+      if (registros.size > 10_000) for (const [k, v] of registros) if (ahora - v.desde >= ventanaMs) registros.delete(k);
+    }
+    reg.n += 1;
+    const restantes = Math.max(0, max - reg.n);
+    res.set('RateLimit-Limit', String(max));
+    res.set('RateLimit-Remaining', String(restantes));
+    res.set('RateLimit-Reset', String(Math.ceil((reg.desde + ventanaMs - ahora) / 1000)));
+    if (reg.n > max) {
+      res.set('Retry-After', String(Math.ceil((reg.desde + ventanaMs - ahora) / 1000)));
+      return next(falla(429, mensaje));
+    }
+    next();
+  };
+}
+
 export function exigirSinErrores(errores, mensaje = 'Revisa los campos marcados') {
   if (Object.keys(errores).length) throw falla(422, mensaje, errores);
 }
