@@ -22,7 +22,8 @@
     "verificar:railway": "node scripts/verificar-despliegue.js --railway",
     "datos-demo": "node scripts/datos-demo.js",
     "secreto": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
-    "sql:supabase": "node scripts/generar-sql-supabase.js"
+    "sql:supabase": "node scripts/generar-sql-supabase.js",
+    "publicar": "node scripts/publicar.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

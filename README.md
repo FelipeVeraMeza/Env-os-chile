@@ -23,6 +23,15 @@ Guía paso a paso: **[docs/12-primera-version-railway-supabase.md](docs/12-prime
 
 Las tablas, las 346 comunas, los perfiles demo y el bucket privado de fotos/boletas se crean solos en el primer arranque.
 
+### Todo en un comando
+
+```bash
+npm install
+npm run publicar -- .env.railway
+```
+
+Crea la base en Supabase (tablas, RLS, comunas, configuración, usuarios y bucket), sube las variables y despliega en Railway si defines `RAILWAY_TOKEN`, y al final verifica la app en línea con la suite QA completa (requiere `URL_RAILWAY`).
+
 ## Documentación (entregables)
 
 | # | Documento |
