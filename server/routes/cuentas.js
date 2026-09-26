@@ -5,7 +5,7 @@ import { config } from '../config.js';
 import { query, uno } from '../db/pool.js';
 import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
 import { normalizarRut, normalizarTelefono, ROLES } from '../lib/reglas.js';
-import { autenticar, requiereRol } from '../middleware/auth.js';
+import { autenticar, exigirClaveDemo, requiereRol } from '../middleware/auth.js';
 
 export const auth = Router();
 
@@ -37,8 +37,9 @@ auth.get('/yo', autenticar, (req, res) => res.json(req.usuario));
 
 // Perfiles para el modo demostración (sin inicio de sesión).
 export const demo = Router();
-demo.get('/usuarios', ruta(async (_req, res) => {
+demo.get('/usuarios', ruta(async (req, res) => {
   if (config.authMode !== 'demo') throw falla(404, 'No disponible');
+  exigirClaveDemo(req);
   const { rows } = await query("SELECT id, nombre, rol FROM usuario WHERE activo AND correo NOT LIKE 'qa-%' ORDER BY CASE rol WHEN 'admin' THEN 0 WHEN 'cliente' THEN 1 ELSE 2 END, id");
   res.json(rows);
 }));

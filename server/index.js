@@ -1,19 +1,36 @@
-import fs from 'node:fs/promises';
 import { config } from './config.js';
 import { crearApp } from './app.js';
 import { migrar } from './db/migrate.js';
 import { sembrar } from './db/seed.js';
+import { explicarErrorConexion, pool } from './db/pool.js';
+import { asegurarAlmacenamiento } from './lib/archivos.js';
 
 async function iniciar() {
-  await fs.mkdir(config.uploadDir, { recursive: true });
+  const db = config.db;
+  console.log(`[db] conectando a ${db.host || 'base local'}${db.esSupabase ? ` (Supabase${db.pooler ? ', pooler' : ''})` : ''} · SSL ${db.ssl ? 'sí' : 'no'}`);
+  await pool.query('SELECT 1');
   await migrar();
   await sembrar();
-  crearApp().listen(config.puerto, () => {
-    console.log(`[api] escuchando en ${config.publicBaseUrl} (puerto ${config.puerto}, modo ${config.authMode})`);
+  const alm = await asegurarAlmacenamiento();
+  console.log(`[archivos] fotos y boletas en ${alm.driver === 'supabase' ? `Supabase Storage (bucket "${alm.destino}")` : `disco local (${alm.destino})`}`);
+
+  const servidor = crearApp().listen(config.puerto, () => {
+    console.log(`[api] lista en ${config.publicBaseUrl} (puerto ${config.puerto}, modo ${config.authMode})`);
   });
+
+  // Railway envía SIGTERM al redesplegar: cerrar ordenado para no cortar peticiones.
+  const cerrar = (senal) => {
+    console.log(`[api] ${senal} recibido, cerrando…`);
+    servidor.close(() => pool.end().finally(() => process.exit(0)));
+    setTimeout(() => process.exit(0), 10000).unref();
+  };
+  process.on('SIGTERM', () => cerrar('SIGTERM'));
+  process.on('SIGINT', () => cerrar('SIGINT'));
 }
 
 iniciar().catch((err) => {
-  console.error('[api] no se pudo iniciar:', err);
+  console.error('[api] no se pudo iniciar:', err.message);
+  const ayuda = explicarErrorConexion(err);
+  if (ayuda) console.error(`[api] 👉 ${ayuda}`);
   process.exit(1);
 });

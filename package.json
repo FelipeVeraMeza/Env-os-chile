@@ -5,7 +5,7 @@
   "description": "Plataforma de Gestión de Envíos (Chile) — base técnica v0.1 + documentación de alcance y QA",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node server/index.js",
@@ -17,7 +17,11 @@
     "qa:local": "node qa/run.js local",
     "qa:railway": "node qa/run.js railway",
     "qa:vercel": "node qa/run.js vercel",
-    "build:web": "node scripts/build-web-config.js"
+    "build:web": "node scripts/build-web-config.js",
+    "verificar": "node scripts/verificar-despliegue.js",
+    "verificar:railway": "node scripts/verificar-despliegue.js --railway",
+    "datos-demo": "node scripts/datos-demo.js",
+    "secreto": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

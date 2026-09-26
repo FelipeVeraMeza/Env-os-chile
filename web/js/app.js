@@ -1,4 +1,4 @@
-import { fijarPerfil, fijarUrlApi, get, perfilActual, urlApi } from './api.js';
+import { fijarClaveDemo, fijarPerfil, fijarUrlApi, get, perfilActual, urlApi } from './api.js';
 import { $, errorToast, html, icono, modal, montar, raw, toast } from './ui.js';
 import * as cliente from './vistas/cliente.js';
 import * as envios from './vistas/envios.js';
@@ -137,10 +137,32 @@ function dialogoServidor() {
   $('#usar-url', m.el).onclick = () => probar($('#url-custom', m.el).value.trim());
 }
 
+// La demo publicada puede estar protegida con una clave (DEMO_CLAVE en Railway).
+function pedirClaveDemo(conf) {
+  $('#marca-nombre').textContent = conf.negocio.nombre;
+  $('#estado-api').className = 'punto-estado ok';
+  montar($('#vista'), html`<div class="hero" style="max-width:560px"><h1>Acceso a la demo</h1>
+    <p>Ingresa la clave que te compartieron para ver la plataforma.</p>
+    <form class="fila" id="f-clave" style="margin-top:14px"><input type="password" name="clave" placeholder="Clave de acceso" autocomplete="current-password"
+      style="flex:1;background:rgba(255,255,255,.95);color:#0a1a6b;font-weight:700" aria-label="Clave de acceso"><button class="btn blanco">Entrar</button></form></div>`);
+  $('#f-clave').onsubmit = async (e) => {
+    e.preventDefault();
+    fijarClaveDemo(e.target.clave.value.trim());
+    try { await get('/api/demo/usuarios'); location.reload(); }
+    catch { fijarClaveDemo(null); toast('Clave incorrecta', 'error'); }
+  };
+}
+
 async function iniciar() {
   $('#btn-servidor').onclick = dialogoServidor;
   try {
-    const [conf, perfiles] = await Promise.all([get('/api/config/publica'), get('/api/demo/usuarios').catch(() => [])]);
+    const conf = await get('/api/config/publica');
+    let perfiles = [];
+    try {
+      perfiles = await get('/api/demo/usuarios');
+    } catch (err) {
+      if (err.detalles?.demo_clave) return pedirClaveDemo(conf);
+    }
     app.conf = conf;
     app.perfiles = perfiles;
     $('#estado-api').className = 'punto-estado ok';

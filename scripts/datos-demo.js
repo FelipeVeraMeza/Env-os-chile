@@ -2,11 +2,13 @@
 // Uso: node scripts/datos-demo.js [local|railway|produccion]   (requiere AUTH_MODE=demo en el servidor)
 import { cargarEntornos, resolverObjetivo } from '../qa/entornos.js';
 
-const { api: API } = resolverObjetivo(process.argv[2] || 'local', cargarEntornos());
+const vars = cargarEntornos();
+const { api: API } = resolverObjetivo(process.argv[2] || 'local', vars);
+const CLAVE = vars.QA_DEMO_CLAVE ? { 'X-Demo-Clave': vars.QA_DEMO_CLAVE } : {};
 const jpeg = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
 
 async function llamar(metodo, ruta, { usuario, json, form } = {}) {
-  const headers = { 'X-Demo-Usuario': String(usuario) };
+  const headers = { ...CLAVE, 'X-Demo-Usuario': String(usuario) };
   if (json) headers['Content-Type'] = 'application/json';
   const r = await fetch(`${API}${ruta}`, { method: metodo, headers, body: json ? JSON.stringify(json) : form });
   const d = await r.json().catch(() => ({}));
@@ -14,7 +16,8 @@ async function llamar(metodo, ruta, { usuario, json, form } = {}) {
   return d;
 }
 
-const perfiles = await (await fetch(`${API}/api/demo/usuarios`)).json();
+const perfiles = await (await fetch(`${API}/api/demo/usuarios`, { headers: CLAVE })).json();
+if (!Array.isArray(perfiles)) throw new Error(`No se pudieron leer los perfiles demo: ${JSON.stringify(perfiles)} (¿falta QA_DEMO_CLAVE en entornos.local.env?)`);
 const admin = perfiles.find((p) => p.rol === 'admin').id;
 const [clienteA, clienteB] = perfiles.filter((p) => p.rol === 'cliente').map((p) => p.id);
 const [repA, repB] = perfiles.filter((p) => p.rol === 'repartidor').map((p) => p.id);

@@ -11,8 +11,11 @@ async function modoAuth() {
   return modo;
 }
 
+// Si la demo publicada está protegida con DEMO_CLAVE, define QA_DEMO_CLAVE en entornos.local.env.
+const CLAVE_DEMO = process.env.QA_DEMO_CLAVE ? { 'X-Demo-Clave': process.env.QA_DEMO_CLAVE } : {};
+
 export async function peticion(metodo, ruta, { sesion, json, form, crudo } = {}) {
-  const headers = { ...(sesion?.headers || {}) };
+  const headers = { ...CLAVE_DEMO, ...(sesion?.headers || {}) };
   let body;
   if (json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(json); }
   if (form) body = form;

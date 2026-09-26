@@ -10,22 +10,96 @@ export const subida = multer({
 });
 
 const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+const MIMES = Object.keys(EXT);
+const PREFIJO_SUPABASE = 'sb:';
 
-// Guarda el archivo en disco (en Railway: un Volume montado en UPLOAD_DIR).
-// Próxima etapa: reemplazar por almacenamiento de objetos (S3 / R2) sin cambiar la interfaz.
-export async function guardarArchivo(buffer, mime) {
-  const ahora = new Date();
-  const carpeta = path.join(String(ahora.getFullYear()), String(ahora.getMonth() + 1).padStart(2, '0'));
-  const nombre = `${crypto.randomUUID()}.${EXT[mime] || 'bin'}`;
-  await fs.mkdir(path.join(config.uploadDir, carpeta), { recursive: true });
-  const relativa = path.join(carpeta, nombre);
-  await fs.writeFile(path.join(config.uploadDir, relativa), buffer);
-  return { ruta: relativa, sha256: crypto.createHash('sha256').update(buffer).digest('hex'), tamano: buffer.length };
+// ---------- Supabase Storage (bucket privado) ----------
+// Las fotos y boletas nunca quedan públicas: el servidor las lee con la clave secreta
+// y las entrega solo mediante enlaces firmados temporales (RNF-06).
+function cabecerasSupabase(extra = {}) {
+  const clave = config.almacenamiento.supabaseKey;
+  const h = { apikey: clave, ...extra };
+  // Las claves antiguas (service_role) son JWT y también van en Authorization; las nuevas sb_secret_ solo en apikey.
+  if (clave.startsWith('eyJ')) h.Authorization = `Bearer ${clave}`;
+  return h;
 }
 
-export function rutaAbsoluta(relativa) {
+function urlStorage(ruta) {
+  return `${config.almacenamiento.supabaseUrl}/storage/v1${ruta}`;
+}
+
+async function errorSupabase(res, accion) {
+  const cuerpo = await res.text().catch(() => '');
+  return new Error(`Supabase Storage (${accion}) respondió ${res.status}: ${cuerpo.slice(0, 300)}`);
+}
+
+// Crea el bucket privado si no existe. Se llama al iniciar el servidor.
+export async function asegurarAlmacenamiento() {
+  if (config.almacenamiento.driver === 'local') {
+    await fs.mkdir(config.uploadDir, { recursive: true });
+    return { driver: 'local', destino: config.uploadDir };
+  }
+  const { bucket, supabaseUrl, supabaseKey } = config.almacenamiento;
+  if (!supabaseUrl || !supabaseKey) throw new Error('Faltan SUPABASE_URL o SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY');
+  const existe = await fetch(urlStorage(`/bucket/${bucket}`), { headers: cabecerasSupabase() });
+  if (existe.ok) {
+    const info = await existe.json();
+    if (info.public) console.warn(`[archivos] ATENCIÓN: el bucket "${bucket}" es público. Márcalo como privado en Supabase.`);
+    return { driver: 'supabase', destino: bucket };
+  }
+  if (existe.status === 401 || existe.status === 403) throw await errorSupabase(existe, 'autorización: revisa la clave secreta');
+  const crear = await fetch(urlStorage('/bucket'), {
+    method: 'POST',
+    headers: cabecerasSupabase({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ id: bucket, name: bucket, public: false, file_size_limit: config.maxUploadMb * 1024 * 1024, allowed_mime_types: MIMES }),
+  });
+  if (!crear.ok && crear.status !== 409) throw await errorSupabase(crear, 'crear bucket');
+  console.log(`[archivos] bucket privado "${bucket}" creado en Supabase Storage`);
+  return { driver: 'supabase', destino: bucket };
+}
+
+export async function guardarArchivo(buffer, mime) {
+  const ahora = new Date();
+  const carpeta = `${ahora.getFullYear()}/${String(ahora.getMonth() + 1).padStart(2, '0')}`;
+  const relativa = `${carpeta}/${crypto.randomUUID()}.${EXT[mime] || 'bin'}`;
+  const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+
+  if (config.almacenamiento.driver === 'supabase') {
+    const res = await fetch(urlStorage(`/object/${config.almacenamiento.bucket}/${relativa}`), {
+      method: 'POST',
+      headers: cabecerasSupabase({ 'Content-Type': mime, 'x-upsert': 'false', 'cache-control': 'private, max-age=300' }),
+      body: buffer,
+    });
+    if (!res.ok) throw await errorSupabase(res, 'subir archivo');
+    return { ruta: `${PREFIJO_SUPABASE}${relativa}`, sha256, tamano: buffer.length };
+  }
+
+  await fs.mkdir(path.join(config.uploadDir, carpeta), { recursive: true });
+  await fs.writeFile(rutaLocal(relativa), buffer);
+  return { ruta: relativa, sha256, tamano: buffer.length };
+}
+
+// Devuelve el contenido del archivo o null si ya no existe.
+export async function leerArchivo(ruta) {
+  if (ruta.startsWith(PREFIJO_SUPABASE)) {
+    const res = await fetch(urlStorage(`/object/authenticated/${config.almacenamiento.bucket}/${ruta.slice(PREFIJO_SUPABASE.length)}`), {
+      headers: cabecerasSupabase(),
+    });
+    if (res.status === 404 || res.status === 400) return null;
+    if (!res.ok) throw await errorSupabase(res, 'leer archivo');
+    return Buffer.from(await res.arrayBuffer());
+  }
+  try {
+    return await fs.readFile(rutaLocal(ruta));
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+function rutaLocal(relativa) {
   const abs = path.resolve(config.uploadDir, relativa);
-  if (!abs.startsWith(config.uploadDir)) throw new Error('Ruta fuera del directorio de archivos');
+  if (!abs.startsWith(config.uploadDir + path.sep)) throw new Error('Ruta fuera del directorio de archivos');
   return abs;
 }
 

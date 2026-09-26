@@ -36,14 +36,17 @@ export function crearApp() {
   }));
   app.use(cors({
     origin: (origen, cb) => cb(null, !origen || config.corsOrigins.includes(origen) || config.corsOrigins.includes('*')),
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Demo-Usuario', 'X-Demo-Rol'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Demo-Usuario', 'X-Demo-Rol', 'X-Demo-Clave'],
   }));
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', async (_req, res) => {
     let db = 'ok';
     try { await pool.query('SELECT 1'); } catch { db = 'error'; }
-    res.status(db === 'ok' ? 200 : 503).json({ ok: db === 'ok', db, version, entorno: config.entorno, auth_mode: config.authMode, hora: new Date().toISOString() });
+    res.status(db === 'ok' ? 200 : 503).json({
+      ok: db === 'ok', db, version, entorno: config.entorno, auth_mode: config.authMode,
+      base: config.db.esSupabase ? 'supabase' : 'postgres', archivos: config.almacenamiento.driver, hora: new Date().toISOString(),
+    });
   });
 
   app.use('/api/auth', auth);

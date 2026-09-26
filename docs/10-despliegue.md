@@ -33,7 +33,10 @@ npm test                        # pruebas unitarias
 npm run qa:local                # suite QA contra localhost
 ```
 
-## 2. Railway (API + base de datos + interfaz)
+## 2. Railway
+
+> **Base de datos en Supabase (configuración elegida):** sigue la guía [12-primera-version-railway-supabase.md](12-primera-version-railway-supabase.md). Lo que sigue en esta sección es la alternativa con PostgreSQL de Railway.
+
 
 1. En [railway.com](https://railway.com): **New Project → Deploy from GitHub repo** → elegir este repositorio. Railway lee `railway.json` (arranque `npm start`, healthcheck `/api/health`).
 2. **+ New → Database → PostgreSQL** en el mismo proyecto.

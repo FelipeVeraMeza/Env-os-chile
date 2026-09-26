@@ -31,3 +31,29 @@ test('entornos: resuelve URLs de local, railway y vercel', () => {
   assert.throws(() => resolverObjetivo('railway', { URL_RAILWAY: 'https://CAMBIAR-POR-TU-APP.up.railway.app' }), /entornos\.env/);
   assert.throws(() => resolverObjetivo('marte', vars), /desconocido/);
 });
+
+test('conexión: Supabase activa SSL y quita sslmode; local sin SSL', async () => {
+  const { configBaseDatos } = await import('../../server/config.js');
+  const pooler = configBaseDatos({ DATABASE_URL: 'postgresql://postgres.abc:clave@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require' });
+  assert.equal(pooler.esSupabase, true);
+  assert.equal(pooler.pooler, true);
+  assert.deepEqual(pooler.ssl, { rejectUnauthorized: false });
+  assert.doesNotMatch(pooler.url, /sslmode/);
+  assert.equal(pooler.max, 5);
+  const local = configBaseDatos({ DATABASE_URL: 'postgres://envios:envios@localhost:5432/envios' });
+  assert.equal(local.ssl, false);
+  assert.equal(configBaseDatos({ DATABASE_URL: 'postgres://u:p@h:5432/d', DATABASE_SSL: 'true' }).ssl.rejectUnauthorized, false);
+  assert.equal(configBaseDatos({ DATABASE_URL: 'postgres://u:p@x.supabase.co:5432/d', DATABASE_SSL: 'false' }).ssl, false);
+  const conCa = configBaseDatos({ DATABASE_URL: 'postgres://u:p@x.pooler.supabase.com/d', DATABASE_CA_CERT: '-----BEGIN-----\\nabc' });
+  assert.equal(conCa.ssl.rejectUnauthorized, true);
+  assert.match(conCa.ssl.ca, /\nabc/);
+});
+
+test('errores de conexión comunes traen una instrucción concreta', async () => {
+  const { explicarErrorConexion } = await import('../../server/db/pool.js');
+  assert.match(explicarErrorConexion({ code: '28P01', message: 'password authentication failed for user "postgres"' }), /postgres\.<ref/);
+  assert.match(explicarErrorConexion({ code: 'ENETUNREACH', message: 'connect ENETUNREACH 2600:1f18::1:5432' }), /Session pooler/);
+  assert.match(explicarErrorConexion({ message: 'Tenant or user not found' }), /postgres\.<ref/);
+  assert.match(explicarErrorConexion({ code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' }), /pausa/);
+  assert.equal(explicarErrorConexion({ message: 'otra cosa' }), null);
+});

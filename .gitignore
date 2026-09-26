@@ -5,3 +5,4 @@ uploads/
 qa/reportes/
 .DS_Store
 *.log
+.env.railway

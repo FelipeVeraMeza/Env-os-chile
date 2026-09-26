@@ -12,8 +12,10 @@ flowchart LR
   end
   subgraph Railway
     A[API Node.js + Express<br/>server/]
-    D[(PostgreSQL)]
-    V[(Volume<br/>fotos y boletas)]
+  end
+  subgraph Supabase
+    D[(PostgreSQL<br/>Session pooler + SSL)]
+    V[(Storage<br/>bucket privado<br/>fotos y boletas)]
   end
   P[Pasarela de pago<br/>Webpay / Mercado Pago / Flow]
   G[Google Maps / Waze<br/>enlaces universales]
@@ -36,8 +38,8 @@ flowchart LR
 |---|---|---|
 | Interfaz | HTML + CSS + JavaScript (módulos ES), PWA, sin compilación | Carga rápida en 4G, se publica igual en Railway o Vercel, fácil de mantener |
 | API | Node.js ≥ 20, Express 4 | Estándar, amplio soporte en Railway |
-| Base de datos | PostgreSQL (Railway) | Datos relacionales, reportes, restricciones que protegen las reglas |
-| Archivos | Disco en Volume de Railway → migrar a S3/R2 en producción | Fotos y boletas privadas con enlaces firmados de 10 min |
+| Base de datos | PostgreSQL en **Supabase** (Session pooler, SSL automático, RLS activado) | Datos relacionales, reportes, restricciones que protegen las reglas; respaldos gestionados |
+| Archivos | **Supabase Storage** (bucket privado, creado automáticamente); disco local en desarrollo | Fotos y boletas privadas con enlaces firmados de 10 min; no se pierden al redesplegar |
 | PDF | PDFKit en el servidor | Ticket idéntico en cualquier dispositivo |
 | QR | `qrcode`, corrección de errores H | Escanea bien en térmica |
 | Autenticación | JWT 30 días + bcrypt; modo demo sin login para el prototipo | Seguridad probada, sin inventar |
@@ -91,7 +93,8 @@ Además de validarse en la API, estas reglas están como restricciones de Postgr
 | Google Places (opcional) | Autocompletar y validar direcciones | No incluido | Pago por uso, requiere tarjeta en Google Cloud |
 | Blue Express / Starken / Chilexpress | Entrega en sus puntos | Registro manual de empresa, punto y código | Integración con sus API: fuera de v1 |
 | NIC.cl | Dominio `.cl` | Pendiente del nombre | ≈ 1 UF al año aprox. (verificar tarifa vigente); a nombre del cliente |
-| Railway | API, PostgreSQL, volumen de archivos | Configurado (`railway.json`) | Plan según uso |
+| Railway | API e interfaz | Configurado (`railway.json`) | Plan según uso |
+| Supabase | PostgreSQL + Storage | Configurado (conexión, bucket, RLS) | Gratis para la demo (pausa por inactividad); Pro para producción |
 | Vercel | Interfaz (opcional) | Configurado (`vercel.json`) | Plan Hobby/Pro |
 | Correo transaccional (Resend, SendGrid, etc.) | Recuperar contraseña, avisos | No incluido | Pendiente |
 | Almacenamiento S3/R2 | Fotos y boletas en producción | Interfaz preparada | Pago por GB |

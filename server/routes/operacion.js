@@ -1,9 +1,8 @@
-import fs from 'node:fs';
 import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
 import { auditar, falla, idNumerico, ruta } from '../lib/http.js';
 import { cargarEnvio, exigirAcceso, siguienteFolio } from '../lib/envios.js';
-import { guardarArchivo, rutaAbsoluta, subida, verificarFirma, firmarEnlace } from '../lib/archivos.js';
+import { guardarArchivo, leerArchivo, subida, verificarFirma, firmarEnlace } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { MIME_BOLETA, validarReclamo } from '../lib/reglas.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
@@ -15,12 +14,12 @@ adjuntos.get('/:id/archivo', ruta(async (req, res) => {
   if (!verificarFirma(id, req.query.exp, req.query.sig)) throw falla(403, 'Enlace inválido o expirado');
   const a = await uno('SELECT * FROM adjunto WHERE id = $1', [id]);
   if (!a) throw falla(404, 'Archivo no encontrado');
-  const ruta_ = rutaAbsoluta(a.ruta);
-  if (!fs.existsSync(ruta_)) throw falla(410, 'El archivo ya no está disponible');
+  const contenido = await leerArchivo(a.ruta);
+  if (!contenido) throw falla(410, 'El archivo ya no está disponible');
   res.setHeader('Content-Type', a.mime);
   res.setHeader('Cache-Control', 'private, max-age=300');
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(a.nombre_original || `adjunto-${a.id}`)}"`);
-  fs.createReadStream(ruta_).pipe(res);
+  res.send(contenido);
 }));
 
 // ---------- Pagos (proveedor simulado; Webpay / Mercado Pago / Flow en la etapa de desarrollo) ----------

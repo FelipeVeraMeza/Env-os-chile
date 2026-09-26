@@ -23,7 +23,7 @@ if (!salud.ok) {
   console.error(`✖ La API no responde correctamente en ${destino.api}/api/health →`, salud);
   process.exit(2);
 }
-console.log(`  API ok · versión ${salud.version} · modo ${salud.auth_mode}\n`);
+console.log(`  API ok · versión ${salud.version} · modo ${salud.auth_mode} · base ${salud.base || '?'} · archivos ${salud.archivos || '?'}\n`);
 
 fs.mkdirSync(path.join(dir, 'reportes'), { recursive: true });
 const sello = new Date().toISOString().replace(/[:.]/g, '-');
@@ -34,7 +34,7 @@ const resultado = spawnSync(process.execPath, [
   ...fs.readdirSync(path.join(dir, 'specs')).filter((f) => f.endsWith('.test.js')).sort().map((f) => path.join(dir, 'specs', f)),
 ], {
   stdio: 'inherit',
-  env: { ...process.env, QA_API_URL: destino.api, QA_WEB_URL: destino.web, QA_OBJETIVO: objetivo, QA_ADMIN_CORREO: vars.QA_ADMIN_CORREO || '', QA_ADMIN_PASSWORD: vars.QA_ADMIN_PASSWORD || '' },
+  env: { ...process.env, QA_API_URL: destino.api, QA_WEB_URL: destino.web, QA_OBJETIVO: objetivo, QA_ADMIN_CORREO: vars.QA_ADMIN_CORREO || '', QA_ADMIN_PASSWORD: vars.QA_ADMIN_PASSWORD || '', QA_DEMO_CLAVE: vars.QA_DEMO_CLAVE || '' },
 });
 console.log(`\n  Reporte JUnit: qa/reportes/qa-${objetivo}-${sello}.xml`);
 process.exit(resultado.status ?? 1);

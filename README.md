@@ -7,9 +7,20 @@ Levantamiento, definición funcional y técnica, **prototipo navegable** y **sui
 | Servicio | Levantamiento, análisis y definición — **$220.000 CLP** |
 | Fecha meta | **26 de octubre de 2026** |
 | Estado | Documentación v2.0 en validación · Prototipo v0.1 (modo demo sin inicio de sesión) |
-| Despliegue | Railway (API + PostgreSQL + interfaz) y opcionalmente Vercel (interfaz) |
+| Despliegue | Railway (API + interfaz) · **Supabase** (PostgreSQL + Storage) · opcionalmente Vercel (interfaz) |
 
 ![Panel del cliente](docs/capturas/cliente-inicio.jpg)
+
+## 🚀 Subir la primera versión (Railway + Supabase)
+
+Guía paso a paso: **[docs/12-primera-version-railway-supabase.md](docs/12-primera-version-railway-supabase.md)**. En resumen:
+
+1. Crea el proyecto en Supabase y copia: URI del **Session pooler**, **Project URL** y **Secret key**.
+2. `cp .env.railway.example .env` → completa → `npm run verificar:railway` (debe decir "Todo listo").
+3. Railway → *Deploy from GitHub repo* → elige la rama → *Generate Domain* → pega las variables de [`.env.railway.example`](.env.railway.example) en *Raw Editor*.
+4. Abre `https://tu-app.up.railway.app` e ingresa tu `DEMO_CLAVE`.
+
+Las tablas, las 346 comunas, los perfiles demo y el bucket privado de fotos/boletas se crean solos en el primer arranque.
 
 ## Documentación (entregables)
 
@@ -27,6 +38,7 @@ Levantamiento, definición funcional y técnica, **prototipo navegable** y **sui
 | 09 | [Base para estimar y planificar el desarrollo](docs/09-plan-de-desarrollo.md) |
 | 10 | [Despliegue: localhost, Railway, Vercel y NIC.cl](docs/10-despliegue.md) |
 | 11 | [Decisiones tomadas y pendientes del cliente](docs/11-decisiones-y-pendientes.md) |
+| 12 | [Subir la primera versión: Railway + Supabase](docs/12-primera-version-railway-supabase.md) |
 
 ## Reglas de negocio implementadas
 
@@ -74,7 +86,8 @@ Guía completa: [docs/10-despliegue.md](docs/10-despliegue.md).
 ## Pruebas
 
 ```bash
-npm test            # 16 pruebas unitarias de reglas de negocio
+npm test            # 21 pruebas unitarias (reglas de negocio, conexión Supabase, Storage)
+npm run verificar   # revisa variables, conexión a la base y almacenamiento antes de desplegar
 npm run qa:local    # 52 casos QA extremo a extremo (CP-01 … CP-66) contra localhost
 ```
 
@@ -93,6 +106,7 @@ qa/              Suite QA configurable por entorno
 tests/unit/      Pruebas unitarias
 scripts/         Generador de config web y datos de ejemplo
 entornos.env     URLs de localhost / Railway / Vercel / producción
+.env.railway.example  Variables para pegar en Railway (Supabase)
 railway.json     Configuración de Railway
 vercel.json      Configuración de Vercel
 ```

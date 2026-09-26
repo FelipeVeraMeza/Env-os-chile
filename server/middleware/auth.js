@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { uno } from '../db/pool.js';
@@ -19,6 +20,7 @@ export const autenticar = ruta(async (req, _res, next) => {
     }
     usuario = await uno('SELECT id, nombre, correo, rol, activo FROM usuario WHERE id = $1', [payload.sub]);
   } else if (config.authMode === 'demo') {
+    exigirClaveDemo(req);
     const id = Number(req.get('x-demo-usuario'));
     const rol = req.get('x-demo-rol');
     if (Number.isInteger(id) && id > 0) {
@@ -39,4 +41,14 @@ export function requiereRol(...roles) {
     if (!roles.includes(req.usuario?.rol)) return next(falla(403, 'No tienes permiso para esta acción'));
     next();
   };
+}
+
+// Si DEMO_CLAVE está definida, la demo publicada pide esa clave una vez (se guarda en el navegador).
+export function exigirClaveDemo(req) {
+  if (!config.demoClave) return;
+  const dada = Buffer.from(String(req.get('x-demo-clave') || ''));
+  const esperada = Buffer.from(config.demoClave);
+  if (dada.length !== esperada.length || !crypto.timingSafeEqual(dada, esperada)) {
+    throw falla(401, 'Ingresa la clave de acceso a la demo', { demo_clave: true });
+  }
 }

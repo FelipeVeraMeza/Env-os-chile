@@ -5,6 +5,7 @@
 const LS_API = 'envios.api_url';
 const LS_PERFIL = 'envios.perfil';
 const LS_TOKEN = 'envios.token';
+const LS_CLAVE = 'envios.demo_clave';
 
 function leerLS(clave) { try { return localStorage.getItem(clave); } catch { return null; } }
 function escribirLS(clave, valor) {
@@ -17,11 +18,14 @@ export function urlApi() {
 export function fijarUrlApi(url) { escribirLS(LS_API, url === null ? null : url.replace(/\/+$/, '')); }
 export function perfilActual() { const v = Number(leerLS(LS_PERFIL)); return Number.isInteger(v) && v > 0 ? v : null; }
 export function fijarPerfil(id) { escribirLS(LS_PERFIL, id ? String(id) : null); }
+export function fijarClaveDemo(clave) { escribirLS(LS_CLAVE, clave || null); }
 
 function cabeceras() {
   const h = {};
   const token = leerLS(LS_TOKEN);
   if (token) h.Authorization = `Bearer ${token}`;
+  const clave = leerLS(LS_CLAVE);
+  if (clave) h['X-Demo-Clave'] = clave;
   const perfil = perfilActual();
   if (perfil) h['X-Demo-Usuario'] = String(perfil);
   return h;

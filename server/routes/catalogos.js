@@ -65,7 +65,7 @@ configuracion.get('/publica', ruta(async (_req, res) => {
   res.json({
     negocio: conf.negocio, tarifas: conf.tarifas, operacion: conf.operacion, ticket: conf.ticket,
     pagos: { proveedor: conf.pagos.proveedor }, couriers: COURIERS, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
-    motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode,
+    motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave),
   });
 }));
 
