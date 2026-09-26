@@ -30,7 +30,13 @@ Celular / PC ──► Railway (API + interfaz) ──► Supabase: PostgreSQL (
    >
    > ⚠ La clave secreta da acceso total a tu proyecto: va **solo** en las variables de Railway, nunca en el código ni en el navegador.
 
-3. **No necesitas crear tablas ni el bucket**: la aplicación los crea sola en el primer arranque (tablas, 346 comunas, usuarios demo y el bucket privado `envios-privado`). Además activa RLS en todas las tablas para que la API pública de Supabase no pueda leer nada.
+3. **Crear la base de datos** (recomendado, 1 minuto): en Supabase → **SQL Editor** → **New query** → pega **todo** el archivo [`supabase/base-de-datos-completa.sql`](../supabase/base-de-datos-completa.sql) → **Run**. Al final muestra `346 | 34 | 5 | 001_inicial.sql, 002_seguridad_supabase.sql`. Crea:
+   - las 15 tablas con seguridad RLS (la API pública de Supabase no puede leer nada),
+   - las 346 comunas de Chile (34 en cobertura dentro de Santiago),
+   - tarifas y reglas ($3.500, +$1.000 horario especial, 20 kg / 60 cm, 3 intentos, 5 min),
+   - el bucket **privado** `envios-privado` para fotos y boletas.
+
+   Se puede ejecutar más de una vez sin problema. Si te lo saltas, la app crea lo mismo sola en su primer arranque. **Los usuarios** (administrador y perfiles demo) los crea la app al arrancar en Railway, con `ADMIN_EMAIL` / `ADMIN_PASSWORD`, para que ninguna contraseña quede escrita en el repositorio.
 
 ## Paso 2 · Probar la conexión desde tu computador (recomendado)
 

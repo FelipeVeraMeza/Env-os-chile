@@ -16,9 +16,10 @@ Levantamiento, definición funcional y técnica, **prototipo navegable** y **sui
 Guía paso a paso: **[docs/12-primera-version-railway-supabase.md](docs/12-primera-version-railway-supabase.md)**. En resumen:
 
 1. Crea el proyecto en Supabase y copia: URI del **Session pooler**, **Project URL** y **Secret key**.
-2. `cp .env.railway.example .env` → completa → `npm run verificar:railway` (debe decir "Todo listo").
-3. Railway → *Deploy from GitHub repo* → elige la rama → *Generate Domain* → pega las variables de [`.env.railway.example`](.env.railway.example) en *Raw Editor*.
-4. Abre `https://tu-app.up.railway.app` e ingresa tu `DEMO_CLAVE`.
+2. Supabase → **SQL Editor** → pega [`supabase/base-de-datos-completa.sql`](supabase/base-de-datos-completa.sql) → **Run** (crea toda la base).
+3. `cp .env.railway.example .env` → completa → `npm run verificar:railway` (debe decir "Todo listo").
+4. Railway → *Deploy from GitHub repo* → elige la rama → *Generate Domain* → pega las variables de [`.env.railway.example`](.env.railway.example) en *Raw Editor*.
+5. Abre `https://tu-app.up.railway.app` e ingresa tu `DEMO_CLAVE`.
 
 Las tablas, las 346 comunas, los perfiles demo y el bucket privado de fotos/boletas se crean solos en el primer arranque.
 
@@ -86,7 +87,7 @@ Guía completa: [docs/10-despliegue.md](docs/10-despliegue.md).
 ## Pruebas
 
 ```bash
-npm test            # 21 pruebas unitarias (reglas de negocio, conexión Supabase, Storage)
+npm test            # 29 pruebas unitarias (reglas de negocio, conexión Supabase, Storage, SQL)
 npm run verificar   # revisa variables, conexión a la base y almacenamiento antes de desplegar
 npm run qa:local    # 52 casos QA extremo a extremo (CP-01 … CP-66) contra localhost
 ```
@@ -104,7 +105,8 @@ server/          API Node.js + Express + PostgreSQL
 web/             Interfaz PWA (HTML/CSS/JS sin compilación)
 qa/              Suite QA configurable por entorno
 tests/unit/      Pruebas unitarias
-scripts/         Generador de config web y datos de ejemplo
+scripts/         Generador de config web, SQL de Supabase y datos de ejemplo
+supabase/        base-de-datos-completa.sql para pegar en el SQL Editor de Supabase
 entornos.env     URLs de localhost / Railway / Vercel / producción
 .env.railway.example  Variables para pegar en Railway (Supabase)
 railway.json     Configuración de Railway
