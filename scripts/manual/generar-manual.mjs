@@ -9,8 +9,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
 import { tomarCapturas } from './capturas.mjs';
+import { crearPiezas, CSS, generarPdf } from './piezas.mjs';
+import { htmlInduccion } from './induccion.mjs';
 
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const url = (process.argv[2] || 'http://localhost:3000').replace(/\/+$/, '');
@@ -32,14 +33,7 @@ const t = conf.tarifas;
 const op = conf.operacion;
 
 // ---------- Piezas de maquetación ----------
-const img = (id, pie, clase = '') => (fotos[id]
-  ? `<figure class="${clase}"><img src="data:image/jpeg;base64,${fotos[id]}" alt="${pie}"><figcaption>${pie}</figcaption></figure>` : '');
-const par = (a, b) => `<div class="par">${a}${b}</div>`;
-const trio = (a, b, c) => `<div class="trio">${a}${b}${c}</div>`;
-const nota = (txt) => `<div class="nota">${txt}</div>`;
-const alerta = (txt) => `<div class="nota alerta">${txt}</div>`;
-const pasos = (lista) => `<ol class="pasos">${lista.map((p) => `<li>${p}</li>`).join('')}</ol>`;
-const tabla = (cab, filas) => `<table><thead><tr>${cab.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>${filas.map((f) => `<tr>${f.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+const { img, par, trio, nota, alerta, pasos, tabla } = crearPiezas(fotos);
 
 const conLogin = modo !== 'demo';
 const entrar = conLogin ? `
@@ -50,14 +44,15 @@ const entrar = conLogin ? `
   ${pasos([
     'Abre la dirección de la plataforma en el navegador (o el ícono instalado en el teléfono).',
     'Escribe tu <b>correo</b> y tu <b>contraseña</b> y pulsa <b>Entrar</b>. Con <b>Mostrar</b> puedes ver lo que escribiste.',
-    'Si es tu primera vez (o administración te dio una contraseña temporal), la plataforma te pide <b>crear tu propia contraseña</b> antes de continuar.',
+    'Si es tu primera vez (o administración te dio una contraseña temporal), la plataforma te pide <b>crear tu propia contraseña</b> antes de continuar: mínimo 8 caracteres, con <b>letras y números</b>, que no sea común (como 12345678) ni contenga tu correo o tu nombre.',
     'Si te equivocas <b>5 veces</b>, esa cuenta queda bloqueada <b>15 minutos</b> (protección contra accesos indebidos).',
     '¿Olvidaste la contraseña? Pídele a administración una nueva desde <b>Usuarios → Contraseña</b>.',
   ])}
   <h3>Mi cuenta: cambiar contraseña y cerrar sesión</h3>
-  <p>Toca tu nombre arriba a la derecha (o <b>Más</b> en el celular). Ahí están tus datos, <b>Cambiar contraseña</b> (pide la actual y la nueva,
-  mínimo 8 caracteres) y <b>Cerrar sesión</b>. Al cambiar la contraseña se cierran tus sesiones en otros dispositivos.</p>
-  ${img('cuenta', 'Menú Mi cuenta', 'movil')}
+  <p>Toca tu nombre arriba a la derecha (o <b>Más</b> en el celular). Ahí están tus datos, <b>Cambiar contraseña</b>,
+  <b>Cerrar sesión en mis otros dispositivos</b> (por ejemplo si perdiste el teléfono o entraste en un computador ajeno) y <b>Cerrar sesión</b>.
+  Al cambiar la contraseña también se cierran tus sesiones en otros dispositivos.</p>
+  ${par(img('cuenta', 'Menú Mi cuenta', 'movil'), img('obligatorio', 'Primer ingreso: crear la contraseña propia', 'movil'))}
   ${nota('El <b>seguimiento por folio</b> no necesita sesión: el enlace "Seguir un envío con su folio" está en la misma pantalla de ingreso.')}
   ${nota('Las cuentas las crea el administrador (sección <b>Usuarios</b>). No hay registro público.')}`
   : `
@@ -67,39 +62,7 @@ const entrar = conLogin ? `
   se pide una sola vez.</p>
   ${nota('El inicio de sesión con correo y contraseña para cada perfil se agrega en la siguiente versión; este manual se actualizará con esa pantalla.')}`;
 
-const html = `<!doctype html><html lang="es-CL"><head><meta charset="utf-8"><title>Manual de usuario</title><style>
-@page { size: A4; margin: 18mm 16mm 20mm; }
-* { box-sizing: border-box; }
-body { font-family: 'Liberation Sans', 'DejaVu Sans', Arial, sans-serif; color: #1b2240; font-size: 10.5pt; line-height: 1.5; margin: 0; }
-h1 { font-size: 22pt; color: #0a1a6b; margin: 0 0 6mm; page-break-before: always; border-bottom: 3px solid #e0218a; padding-bottom: 3mm; }
-h1.sin-salto { page-break-before: avoid; }
-h2 { font-size: 14pt; color: #1537d6; margin: 7mm 0 2mm; page-break-after: avoid; }
-h3 { font-size: 11.5pt; color: #0a1a6b; margin: 5mm 0 1.5mm; page-break-after: avoid; }
-p { margin: 0 0 2.5mm; }
-b { color: #0a1a6b; }
-figure { margin: 3mm auto; text-align: center; page-break-inside: avoid; }
-figure img { max-width: 100%; max-height: 205mm; border: 1px solid #c9d0ea; border-radius: 3mm; box-shadow: 0 1mm 3mm rgba(10,26,107,.15); }
-figcaption { font-size: 8.5pt; color: #5b6390; margin-top: 1.5mm; font-style: italic; }
-.par, .trio { display: flex; gap: 6mm; justify-content: center; align-items: flex-start; page-break-inside: avoid; }
-.par figure { flex: 1; } .par figure img { max-height: 150mm; }
-.trio figure { flex: 1; } .trio figure img { max-height: 120mm; }
-.movil img { max-height: 170mm; }
-.nota { background: #eef1fd; border-left: 4px solid #1537d6; padding: 2.5mm 4mm; border-radius: 2mm; margin: 3mm 0; page-break-inside: avoid; }
-.nota.alerta { background: #fdeef6; border-color: #e0218a; }
-ol.pasos { padding-left: 6mm; margin: 2mm 0 3mm; } ol.pasos li { margin-bottom: 1.2mm; }
-table { width: 100%; border-collapse: collapse; margin: 3mm 0; font-size: 9.5pt; page-break-inside: avoid; }
-th { background: #0a1a6b; color: #fff; text-align: left; padding: 2mm; }
-td { border-bottom: 1px solid #dde2f3; padding: 1.8mm 2mm; vertical-align: top; }
-tr:nth-child(even) td { background: #f6f7fd; }
-.portada { height: 250mm; display: flex; flex-direction: column; justify-content: center; text-align: center;
-  background: linear-gradient(160deg, #0a1a6b, #1537d6 60%, #e0218a); color: #fff; border-radius: 6mm; padding: 20mm; }
-.portada h1 { color: #fff; border: 0; font-size: 34pt; page-break-before: avoid; margin-bottom: 4mm; }
-.portada p { font-size: 13pt; opacity: .95; } .portada .meta { margin-top: 18mm; font-size: 10pt; opacity: .85; }
-.indice { columns: 2; column-gap: 10mm; } .indice a { color: #1b2240; text-decoration: none; display: block; padding: .8mm 0; }
-.indice .n1 { font-weight: bold; color: #0a1a6b; margin-top: 2mm; }
-.chip { display: inline-block; padding: .3mm 2.5mm; border-radius: 3mm; font-size: 8.5pt; font-weight: bold; color: #fff; background: #1537d6; }
-.chip.m { background: #e0218a; } .chip.v { background: #0f8a5f; } .chip.g { background: #6b7280; } .chip.n { background: #c2410c; }
-</style></head><body>
+const html = `<!doctype html><html lang="es-CL"><head><meta charset="utf-8"><title>Manual de usuario</title><style>${CSS}</style></head><body>
 
 <div class="portada">
   <h1>Manual de usuario</h1>
@@ -114,7 +77,7 @@ tr:nth-child(even) td { background: #f6f7fd; }
   <a class="n1" href="#conceptos">2. Conceptos clave</a><a href="#estados">2.1 Estados de un envío</a><a href="#tarifas">2.2 Tarifas</a><a href="#reglas">2.3 Reglas que la plataforma hace cumplir</a>
   <a class="n1" href="#cliente">3. Cliente</a><a href="#c-inicio">3.1 Inicio</a><a href="#c-nuevo">3.2 Crear un envío</a><a href="#c-pagar">3.3 Pagar</a><a href="#c-envios">3.4 Mis envíos y detalle</a><a href="#c-libreta">3.5 Destinatarios</a><a href="#c-seguro">3.6 Seguro y reclamos</a><a href="#seguimiento">3.7 Seguimiento por folio</a>
   <a class="n1" href="#repartidor">4. Repartidor</a><a href="#r-ruta">4.1 Mi ruta y envíos disponibles</a><a href="#r-retirar">4.2 Retirar</a><a href="#r-entregar">4.3 Llegar y entregar</a><a href="#r-fallido">4.4 Intento fallido</a><a href="#r-historial">4.5 Historial</a>
-  <a class="n1" href="#admin">5. Administración</a><a href="#a-panel">5.1 Panel</a><a href="#a-envios">5.2 Envíos</a><a href="#a-detalle">5.3 Gestionar un envío</a><a href="#a-cobranza">5.4 Cobranza</a><a href="#a-seguros">5.5 Seguros</a><a href="#a-tarifas">5.6 Tarifas y reglas</a><a href="#a-usuarios">5.7 Usuarios</a><a href="#a-ajustes">5.8 Ajustes y costos</a>
+  <a class="n1" href="#admin">5. Administración</a><a href="#a-panel">5.1 Panel</a><a href="#a-envios">5.2 Envíos</a><a href="#a-detalle">5.3 Gestionar un envío</a><a href="#a-cobranza">5.4 Cobranza</a><a href="#a-seguros">5.5 Seguros</a><a href="#a-tarifas">5.6 Tarifas y reglas</a><a href="#a-usuarios">5.7 Usuarios</a><a href="#a-ajustes">5.8 Ajustes y costos</a><a href="#a-seguridad">5.9 Seguridad</a>
   <a class="n1" href="#qr">6. QR y ticket</a>
   <a class="n1" href="#faq">7. Preguntas frecuentes</a>
   <a class="n1" href="#glosario">8. Glosario</a>
@@ -300,26 +263,49 @@ ${img('a-tarifas', 'Tarifas, reglas de operación y cobertura por comuna')}
 <h2 id="a-usuarios">5.7 Usuarios</h2>
 <p>Crea usuarios (nombre, correo, perfil, teléfono y <b>contraseña inicial</b>, que la plataforma propone al azar) y los activa o desactiva.
 La tabla muestra el <b>último acceso</b> de cada persona. Un repartidor con envíos en curso no se puede desactivar hasta reasignarlos,
-y un administrador no puede quitarse su propio acceso.${conLogin ? ' Con <b>Contraseña</b> se asigna una clave temporal a quien la olvidó: se cierran sus sesiones abiertas y, al entrar, se le pide crear una propia. Desactivar a alguien también cierra su sesión de inmediato.' : ''}</p>
+y un administrador no puede quitarse su propio acceso.${conLogin ? ' <b>Cerrar sesiones</b> obliga a esa persona a volver a entrar en todos sus dispositivos (útil si perdió el teléfono). Con <b>Contraseña</b> se asigna una clave temporal a quien la olvidó: se cierran sus sesiones abiertas y, al entrar, se le pide crear una propia. Desactivar a alguien también cierra su sesión de inmediato.' : ''}</p>
 ${img('a-usuarios', 'Usuarios de la plataforma')}
 <h2 id="a-ajustes">5.8 Ajustes y costos</h2>
 <p><b>Empresa</b>: nombre, RUT, teléfono, correo y logo (aparecen en la app y en el ticket). <b>Ticket</b>: texto al pie.
 <b>Costos del mes</b>: registra bencina, comisiones de repartidores, peajes, mantención u otros; descuentan de la ganancia neta.</p>
 ${img('a-ajustes', 'Ajustes de la empresa, ticket y costos')}
+<h2 id="a-seguridad">5.9 Seguridad</h2>
+<p>La plataforma vigila sola los intentos de ataque y registra <b>quién saca qué datos</b>. Estos registros <b>no se pueden borrar ni modificar</b>,
+ni siquiera desde la propia plataforma, así que sirven como evidencia.</p>
+${tabla(['Sección', 'Qué muestra y qué hacer'], [
+  ['Alertas abiertas', 'Situaciones sospechosas detectadas automáticamente (ver tabla siguiente). Revísalas y pulsa <b>Marcar revisada</b> anotando qué hiciste.'],
+  ['Indicadores', 'Inicios de sesión fallidos y cuentas bloqueadas, intentos de ver datos ajenos, registros exportados y archivos descargados, sesiones o enlaces falsos.'],
+  ['¿Quién sacó datos?', 'Por usuario: cuántos registros exportó a Excel, cuántas fotos o boletas descargó y si intentó ver datos ajenos.'],
+  ['IPs sospechosas', 'Direcciones de internet con señales de ataque. Haz clic en una para ver toda su actividad.'],
+  ['Registro de eventos', 'Todo lo sensible con fecha, usuario, IP y detalle. Filtra por tipo o marca "Solo sospechosos".'],
+  ['Cerrar todas las sesiones', 'Emergencia: todos (menos tú) deben volver a iniciar sesión. Se confirma escribiendo CERRAR.'],
+])}
+${tabla(['Alerta', 'Cuándo aparece', 'Qué hacer'], [
+  ['Fuerza bruta / prueba de contraseñas', 'Muchas contraseñas incorrectas desde una misma IP, o en varias cuentas', 'Verifica que las cuentas afectadas sigan bajo control; si la IP insiste, bloquéala en el proveedor.'],
+  ['Cuenta bloqueada', 'Una cuenta llegó a 5 intentos fallidos', 'Pregunta a la persona si fue ella; si no, asígnale una contraseña nueva.'],
+  ['Posible robo de datos', 'Alguien intenta abrir envíos que no son suyos', 'Revisa quién fue; si es un usuario, ciérrale las sesiones y desactívalo mientras investigas.'],
+  ['Extracción o descarga masiva', 'Un usuario exporta o descarga muchos datos en poco tiempo', 'Confirma con la persona si era necesario; si no, ciérrale las sesiones.'],
+  ['Sesiones falsas', 'Alguien intenta usar sesiones falsificadas', 'Considera cambiar JWT_SECRET en Railway (cierra todas las sesiones).'],
+  ['Fraude de pago', 'Llega una confirmación de pago que no calza', 'No entregues ese envío hasta confirmar el pago con la pasarela.'],
+])}
+${img('a-seguridad', 'Panel de seguridad con alertas, extracción de datos e IPs sospechosas')}
+${alerta('Si sospechas un hackeo: 1) <b>Cerrar todas las sesiones</b>, 2) cambia tu contraseña, 3) revisa en este panel qué usuario e IP actuaron y qué datos salieron, 4) sigue el protocolo del documento <b>17 · Seguridad</b> (cambio de claves del servidor y aviso a la autoridad si salieron datos personales).')}
 
 <h1 id="qr">6. QR y ticket</h1>
 <p>Cada envío confirmado tiene un <b>ticket</b> (80 mm para impresora térmica o A4) con folio, destino, paquete, estado de pago y un <b>código QR</b>.
 Al escanear el QR se abre una página con la dirección y los botones <b>Ir con Google Maps</b> e <b>Ir con Waze</b> (sin teléfono ni nombre del destinatario).
 Administración puede hacer que el QR abra Google Maps o Waze directamente (Tarifas → Operación).</p>
 ${img('qr', 'Página que abre el QR del ticket', 'movil')}
-${nota('El ticket es un comprobante interno: <b>no es boleta ni factura</b>. La emisión de documentos tributarios queda para una etapa posterior.')}
+${nota('El ticket es un comprobante interno: <b>no es boleta ni factura</b>. La emisión de boleta o factura electrónica desde la plataforma queda como último recurso (decisión DEC-16).')}
 
 <h1 id="faq">7. Preguntas frecuentes</h1>
 ${tabla(['Pregunta', 'Respuesta'], [
   ...(conLogin ? [
     ['Olvidé mi contraseña.', 'Administración te asigna una temporal en <b>Usuarios → Contraseña</b>; al entrar con ella se te pedirá crear una propia.'],
     ['Dice "Demasiados intentos fallidos".', 'La cuenta se bloquea 15 minutos tras 5 intentos fallidos. Espera o pide una contraseña nueva a administración.'],
-    ['La app me sacó y pide iniciar sesión otra vez.', 'Tu contraseña cambió (o administración la cambió o te desactivó). Entra con la contraseña vigente.'],
+    ['La app me sacó y pide iniciar sesión otra vez.', 'Tu contraseña cambió, administración cerró tus sesiones o te desactivó. Entra con la contraseña vigente.'],
+    ['Perdí el teléfono con la app abierta.', 'Entra desde otro dispositivo y usa <b>Cerrar sesión en mis otros dispositivos</b>, o pide a administración <b>Cerrar sesiones</b>.'],
+    ['"Contraseña insegura".', 'Usa al menos 8 caracteres con letras y números, que no sea común ni contenga tu nombre o correo.'],
   ] : []),
   ['Creé un envío y el repartidor no lo ve.', 'Revisa que esté <b>pagado</b>. Los envíos pagados aparecen en <b>Disponibles para tomar</b> de todos los repartidores; si nadie lo toma, administración puede asignarlo en el detalle del envío.'],
   ['El repartidor no puede retirar.', 'El envío no está pagado. El cliente debe pagarlo o administración registrar un pago manual.'],
@@ -347,19 +333,15 @@ ${tabla(['Término', 'Significado'], [
 </body></html>`;
 
 // ---------- PDF ----------
-fs.mkdirSync(path.dirname(salida), { recursive: true });
-const navegador = await chromium.launch({ executablePath: ejecutable || undefined });
-const pagina = await navegador.newPage();
-await pagina.setContent(html, { waitUntil: 'load' });
-await pagina.pdf({
-  path: salida, format: 'A4', printBackground: true, displayHeaderFooter: true,
-  headerTemplate: '<div></div>',
-  footerTemplate: `<div style="font-size:8px;color:#5b6390;width:100%;padding:0 16mm;display:flex;justify-content:space-between;font-family:Arial">
-    <span>Manual de usuario · ${conf.negocio.nombre.replace(/[<>&]/g, '')}</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`,
-  margin: { top: '18mm', bottom: '20mm', left: '16mm', right: '16mm' },
-});
-await navegador.close();
+const tam = await generarPdf({ html, salida, pie: `Manual de usuario · ${conf.negocio.nombre}`, ejecutable });
+console.log(`✔ Manual: ${path.relative(raiz, salida)} (${Object.keys(fotos).length} capturas, ${(tam / 1e6).toFixed(1)} MB)`);
+
+// Guía de inducción (sesión de capacitación con el cliente): mismas capturas, otro enfoque.
+const salidaInduccion = path.join(path.dirname(salida), 'guia-de-induccion.pdf');
+const htmlInd = htmlInduccion({ fotos, conf, modo, version, hoy });
+const tamInd = await generarPdf({ html: htmlInd, salida: salidaInduccion, pie: `Guía de inducción · ${conf.negocio.nombre}`, ejecutable });
+console.log(`✔ Guía de inducción: ${path.relative(raiz, salidaInduccion)} (${(tamInd / 1e6).toFixed(1)} MB)`);
+
 const faltan = ['c-inicio', 'c-nuevo-1', 'r-ruta', 'a-panel'].filter((k) => !fotos[k]);
-console.log(`✔ Manual generado: ${path.relative(raiz, salida)} (${Object.keys(fotos).length} capturas, ${(fs.statSync(salida).size / 1e6).toFixed(1)} MB)`);
 for (const a of avisos) console.warn(`⚠ ${a}`);
 if (faltan.length) { console.error(`✖ Faltan capturas esenciales: ${faltan.join(', ')}`); process.exit(1); }

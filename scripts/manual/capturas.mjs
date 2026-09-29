@@ -64,25 +64,26 @@ export async function tomarCapturas({ url, credenciales, ejecutable, log = conso
   const fotos = {};
 
   const avisos = [];
-  async function captura(nombre, { rol = null, hash = '', tam = MOVIL, completa = false, antes, ruta = '/' } = {}) {
+  async function captura(nombre, { rol = null, token = null, hash = '', tam = MOVIL, completa = false, antes, ruta = '/' } = {}) {
     for (let intento = 1; intento <= 3; intento++) {
       const ctx = await navegador.newContext({
         viewport: tam, deviceScaleFactor: 1.5, locale: 'es-CL', timezoneId: 'America/Santiago',
         permissions: ['geolocation'], geolocation: { latitude: -33.4263, longitude: -70.617, accuracy: 12 },
       });
       const page = await ctx.newPage();
+      page.on('pageerror', (err) => avisos.push(`${nombre}: error de JavaScript: ${err.message}`));
       try {
         await page.goto(`${url}/`);
         await page.evaluate(({ modo, id, token }) => {
           localStorage.clear();
           if (modo === 'demo' && id) localStorage.setItem('envios.perfil', String(id));
           if (token) localStorage.setItem('envios.token', token);
-        }, { modo, id: rol ? ids[rol] : null, token: rol ? tokens[rol] : null });
+        }, { modo, id: rol ? ids[rol] : null, token: token || (rol ? tokens[rol] : null) });
         // Cambiar solo el #fragmento no recarga la página: se recarga para que la app lea la sesión recién guardada.
         await page.goto(`${url}${ruta}${hash}`);
         await page.reload({ waitUntil: 'networkidle' });
         // Con perfil, la pantalla debe mostrar el menú de ese perfil (si no, se reintenta).
-        if (rol) await page.waitForSelector('#menu a', { timeout: 5000 });
+        if (rol || token) await page.waitForSelector('#menu a', { timeout: 5000 });
         await page.waitForTimeout(600);
         if (antes) { await antes(page); await page.waitForTimeout(700); }
         // Control de calidad: nada debe salirse del ancho de la pantalla.
@@ -105,6 +106,11 @@ export async function tomarCapturas({ url, credenciales, ejecutable, log = conso
     await captura('login', { tam: MOVIL });
     await captura('login-escritorio', { tam: ESCRITORIO });
     await captura('cuenta', { rol: 'cliente', hash: '#/inicio', antes: clic('#chip-perfil') });
+    // Usuario nuevo con contraseña temporal: al entrar se le exige crear la suya.
+    const correoNuevo = `nuevo.repartidor.${Date.now()}@ejemplo.cl`;
+    await api('admin', '/api/usuarios', { nombre: 'Pedro Nuevo', correo: correoNuevo, rol: 'repartidor', password: 'Temporal.4821' });
+    const t = await (await fetch(`${url}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ correo: correoNuevo, password: 'Temporal.4821' }) })).json();
+    await captura('obligatorio', { token: t.token, hash: '#/ruta' });
   }
 
   // ---------- Cliente ----------
@@ -156,6 +162,13 @@ export async function tomarCapturas({ url, credenciales, ejecutable, log = conso
   await captura('a-reclamos', { rol: 'admin', hash: '#/reclamos', tam: ESCRITORIO });
   await captura('a-tarifas', { rol: 'admin', hash: '#/tarifas', tam: ESCRITORIO_ALTO });
   await captura('a-usuarios', { rol: 'admin', hash: '#/usuarios', tam: ESCRITORIO });
+  // Actividad para que el panel de Seguridad muestre casos reales: contraseñas equivocadas, un cliente que intenta
+  // abrir envíos de otro cliente (alerta crítica de posible robo de datos) y una exportación.
+  for (let i = 0; i < 3; i++) await fetch(`${url}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ correo: 'admin@envios.local', password: `adivinando-${i}` }) });
+  const ajenos = (await api('admin', '/api/envios?limite=100')).items.filter((e) => e.cliente_id !== ids.cliente);
+  for (let i = 0; i < 6; i++) await fetch(`${url}/api/envios/${ajenos[i % ajenos.length].id}`, { headers: cab('cliente') });
+  await fetch(`${url}/api/envios/exportar.csv`, { headers: cab('admin') });
+  await captura('a-seguridad', { rol: 'admin', hash: '#/seguridad', tam: ESCRITORIO_ALTO });
   await captura('a-ajustes', { rol: 'admin', hash: '#/ajustes', tam: ESCRITORIO, completa: true });
   const conQr = await api('admin', `/api/envios/${entregados[0].id}`);
   await captura('qr', { ruta: `/q/${conQr.token_qr}` });

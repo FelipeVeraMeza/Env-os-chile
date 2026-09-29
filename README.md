@@ -53,7 +53,7 @@ Crea la base en Supabase (tablas, RLS, comunas, configuración, usuarios y bucke
 | 15 | [Diagnóstico de envíos, cobranza y verificación de pagos](docs/15-diagnostico-envios-y-cobranza.md) |
 | 16 | [Inicio de sesión: cómo activarlo](docs/16-inicio-de-sesion.md) |
 | 17 | [**Seguridad**: vulnerabilidades corregidas, monitoreo y qué hacer ante un hackeo](docs/17-seguridad.md) |
-| 📘 | [**Manual de usuario (PDF)**](docs/manual/manual-de-usuario.pdf) · se regenera con `npm run manual` |
+| 📘 | [**Manual de usuario (PDF)**](docs/manual/manual-de-usuario.pdf) y [**Guía de inducción (PDF)**](docs/manual/guia-de-induccion.pdf) · se regeneran con `npm run manual` |
 
 ## Reglas de negocio implementadas
 
