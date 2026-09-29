@@ -186,7 +186,8 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--magenta-500); 
   content: ''; position: absolute; inset: auto -60px -80px auto; width: 260px; height: 260px; border-radius: 50%;
   background: rgba(255, 255, 255, .12);
 }
-.hero h1 { font-size: clamp(1.6rem, 3.4vw, 2.3rem); }
+.hero h1 { font-size: clamp(1.6rem, 3.4vw, 2.3rem); overflow-wrap: anywhere; }
+.hero h1.folio-grande { font-size: clamp(1.5rem, 7.5vw, 2.4rem); }
 .hero p { color: rgba(255, 255, 255, .9); max-width: 560px; }
 .hero .fila { position: relative; z-index: 1; }
 

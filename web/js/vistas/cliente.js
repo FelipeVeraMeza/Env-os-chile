@@ -328,7 +328,7 @@ export async function nuevo() {
     const seguimiento = `${location.origin}${location.pathname}#/seguimiento/${envio.folio}`;
     const wa = `https://wa.me/?text=${encodeURIComponent(`Tu envío ${envio.folio} ya está registrado. Síguelo aquí: ${seguimiento}`)}`;
     montar(vista, html`
-      <section class="hero"><p>Envío confirmado</p><h1 class="mono" style="font-size:2.4rem">${envio.folio}</h1>
+      <section class="hero"><p>Envío confirmado</p><h1 class="mono folio-grande">${envio.folio}</h1>
         <p>${envio.destinatario_nombre} · ${direccionTexto(envio)}</p></section>
       <div class="grid g2">
         <div class="card" style="text-align:center"><div class="qr-caja"><img id="qr" alt="Código QR del envío ${envio.folio}"></div>

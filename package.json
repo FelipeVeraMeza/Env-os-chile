@@ -23,7 +23,8 @@
     "datos-demo": "node scripts/datos-demo.js",
     "secreto": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "sql:supabase": "node scripts/generar-sql-supabase.js",
-    "publicar": "node scripts/publicar.js"
+    "publicar": "node scripts/publicar.js",
+    "manual": "node scripts/manual/generar-manual.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -36,5 +37,8 @@
     "pdfkit": "^0.15.2",
     "pg": "^8.13.1",
     "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.1"
   }
 }
