@@ -144,8 +144,8 @@ function accionesCliente(e) {
 
 function accionesAdmin(e, repartidores) {
   const botones = [];
-  if (['creado', 'asignado'].includes(e.estado)) {
-    botones.push(html`<label class="campo">Repartidor asignado<select id="asignar"><option value="">Sin asignar</option>${repartidores.map((r) => html`<option value="${r.id}" ${r.id === e.repartidor_id ? html`selected` : ''}>${r.nombre}</option>`)}</select></label>`);
+  if (['creado', 'asignado', 'reagendado'].includes(e.estado)) {
+    botones.push(html`<label class="campo">Repartidor asignado<select id="asignar">${e.estado === 'reagendado' ? '' : html`<option value="">Sin asignar</option>`}${repartidores.map((r) => html`<option value="${r.id}" ${r.id === e.repartidor_id ? html`selected` : ''}>${r.nombre}</option>`)}</select></label>`);
   } else if (e.repartidor_nombre) botones.push(html`<p class="sub">Repartidor: <b>${e.repartidor_nombre}</b></p>`);
   if (e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado)) botones.push(html`<button class="btn sec" id="pago-manual">Registrar pago manual</button>`);
   if (e.estado === 'fallido') {
@@ -178,11 +178,30 @@ function enlazarAcciones(e, recargar) {
       const estado = b.dataset.estado;
       let motivo = null;
       if (estado === 'anulado') {
-        motivo = prompt('Motivo de la anulación:');
+        motivo = await pedirMotivo(e);
         if (!motivo) return;
       } else if (!(await confirmar(`¿${b.textContent.trim()}?`, `El envío ${e.folio} pasará a "${ESTADOS[estado]}".`))) return;
       try { await post(`/api/envios/${e.id}/estado`, { estado, motivo }); toast(`Envío ${ESTADOS[estado].toLowerCase()}`, 'ok'); recargar(); }
       catch (err) { errorToast(err); }
+    };
+  });
+}
+
+function pedirMotivo(e) {
+  return new Promise((resolve) => {
+    let motivo = null;
+    const m = modal(html`<h2>Anular ${e.folio}</h2>
+      <p class="sub">${e.estado_pago === 'pagado' ? 'Este envío ya está pagado: la anulación no genera un reembolso automático.' : 'El envío quedará anulado y no se podrá retirar.'}</p>
+      <form class="pila" id="f-anular" novalidate><label class="campo">Motivo *<input name="motivo" maxlength="200" placeholder="Ej. el cliente ya no lo enviará"></label>
+        <div class="fila" style="justify-content:flex-end"><button type="button" class="btn sec" data-no>Volver</button><button class="btn peligro">Anular envío</button></div></form>`,
+    { onClose: () => resolve(motivo) });
+    $('[data-no]', m.el).onclick = () => m.cerrar();
+    $('#f-anular', m.el).onsubmit = (ev) => {
+      ev.preventDefault();
+      const v = ev.target.motivo.value.trim();
+      if (!v) return marcarErrores(ev.target, { motivo: 'Indica el motivo' });
+      motivo = v;
+      m.cerrar();
     };
   });
 }

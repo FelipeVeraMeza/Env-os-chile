@@ -65,7 +65,21 @@ export async function asegurarAlmacenamiento() {
   return { driver: 'supabase', destino: bucket };
 }
 
+// El tipo que declara el navegador se puede falsear: se confirma mirando los primeros bytes.
+export function contenidoCoincide(buffer, mime) {
+  if (!buffer || buffer.length < 12) return false;
+  const txt = (a, b) => buffer.subarray(a, b).toString('latin1');
+  if (mime === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  if (mime === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (mime === 'image/webp') return txt(0, 4) === 'RIFF' && txt(8, 12) === 'WEBP';
+  if (mime === 'application/pdf') return txt(0, 5) === '%PDF-';
+  return false;
+}
+
 export async function guardarArchivo(buffer, mime) {
+  if (!contenidoCoincide(buffer, mime)) {
+    throw Object.assign(new Error('El archivo no es una imagen o PDF válido'), { archivoInvalido: true });
+  }
   const ahora = new Date();
   const carpeta = `${ahora.getFullYear()}/${String(ahora.getMonth() + 1).padStart(2, '0')}`;
   const relativa = `${carpeta}/${crypto.randomUUID()}.${EXT[mime] || 'bin'}`;

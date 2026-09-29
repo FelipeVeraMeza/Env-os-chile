@@ -18,6 +18,9 @@
 | DEC-12 | Colores azul 60 % / magenta 30 % / blanco 10 % | Punto del cliente |
 | DEC-13 | Despliegue en Railway y posiblemente Vercel | Pedido del cliente |
 | DEC-14 | Prototipo sin inicio de sesión para revisar el visual | Pedido del cliente |
+| DEC-15 | Los **repartidores toman** los pedidos pagados que les aparecen, **de cualquier zona** (sin filtro por comuna); administración puede igual asignar o reasignar | Respuesta a P-17 (29/09/2026) |
+| DEC-16 | La **boleta/factura electrónica** por cada cobro **queda para más adelante**: la plataforma no la emite por ahora | Respuesta a P-18 (29/09/2026) |
+| DEC-17 | Se agrega **inicio de sesión** con correo y contraseña para administrador, cliente y repartidor (`AUTH_MODE=jwt`) | Pedido del cliente (29/09/2026) |
 
 ## Pendientes que necesitamos del cliente
 
@@ -41,8 +44,8 @@ Ordenados por impacto. **Sin P-01 a P-05 no se puede cotizar el desarrollo.**
 | P-14 | ¿Se necesita funcionar sin señal? | Arquitectura | No |
 | P-15 | ¿Impresora térmica 80 mm, A4 o ambas? ¿Modelo? | Prueba de ticket | Ambas |
 | P-16 | ¿Quién será responsable de los datos personales (RUT)? ¿Retención de fotos y boletas? | Legal | Fotos 12 meses, envíos 5 años |
-| P-17 | ¿Los repartidores **toman** los envíos pagados o **solo administración asigna**? | Cómo le llegan los envíos al repartidor | Pueden tomarlos (se apaga en Tarifas → Operación) |
-| P-18 | ¿Se emitirá boleta/factura electrónica por cada cobro desde la plataforma? | Integración SII y costo | No, la emite el cliente por fuera |
+| ~~P-17~~ | ~~¿Los repartidores toman los envíos o solo administración asigna?~~ | Resuelto: DEC-15 | — |
+| ~~P-18~~ | ~~¿Se emitirá boleta/factura electrónica por cada cobro?~~ | Resuelto: DEC-16 (más adelante) | — |
 
 ## Control de versiones
 

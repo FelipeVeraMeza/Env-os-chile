@@ -120,7 +120,11 @@ function entero(v) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+// Límites absolutos (también para cotización especial): evitan valores que no caben en la base.
+export const LIMITES = { bultos: 100, peso_kg: 1000, dim_cm: 500, valor_declarado: 50_000_000, monto: 100_000_000 };
+
 // Valida el paquete contra los límites de la tarifa estándar (20 kg, 60×60×60 cm por bulto).
+// Los mensajes "Excede…/Máximo…" son los que el administrador puede saltar con tarifa manual.
 export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
   const errores = {};
   if (!p.descripcion_producto || !String(p.descripcion_producto).trim()) {
@@ -128,18 +132,23 @@ export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
   }
   const bultos = entero(p.bultos ?? 1);
   if (!Number.isInteger(bultos) || bultos < 1) errores.bultos = 'Debe haber al menos 1 bulto';
+  else if (bultos > LIMITES.bultos) errores.bultos = `Fuera de rango: hasta ${LIMITES.bultos} bultos por envío`;
 
   const peso = entero(p.peso_kg);
   if (peso === null || Number.isNaN(peso) || peso <= 0) errores.peso_kg = 'Indica el peso por bulto (kg)';
+  else if (peso > LIMITES.peso_kg) errores.peso_kg = `Fuera de rango: hasta ${LIMITES.peso_kg} kg`;
   else if (peso > tarifas.peso_max_kg) errores.peso_kg = `Excede el máximo de ${tarifas.peso_max_kg} kg por bulto`;
 
   for (const dim of ['largo_cm', 'ancho_cm', 'alto_cm']) {
     const v = entero(p[dim]);
     if (v === null || Number.isNaN(v) || v <= 0) errores[dim] = 'Obligatorio';
+    else if (!Number.isInteger(v)) errores[dim] = 'Usa centímetros enteros';
+    else if (v > LIMITES.dim_cm) errores[dim] = `Fuera de rango: hasta ${LIMITES.dim_cm} cm`;
     else if (v > tarifas.dim_max_cm) errores[dim] = `Máximo ${tarifas.dim_max_cm} cm`;
   }
   const valor = entero(p.valor_declarado ?? 0);
-  if (Number.isNaN(valor) || valor < 0) errores.valor_declarado = 'Valor declarado inválido';
+  if (Number.isNaN(valor) || valor < 0 || (valor !== null && !Number.isInteger(valor))) errores.valor_declarado = 'Valor declarado inválido (pesos enteros)';
+  else if (valor > LIMITES.valor_declarado) errores.valor_declarado = `El valor declarado no puede superar $${LIMITES.valor_declarado.toLocaleString('es-CL')}`;
   return errores;
 }
 
@@ -294,12 +303,13 @@ export function validarReclamo({ envio, boleta, datos, reclamosPrevios = [], aho
   if (!MOTIVOS_RECLAMO[datos.motivo]) errores.motivo = 'Selecciona el motivo';
   if (!String(datos.boleta_numero || '').trim()) errores.boleta_numero = 'Número de boleta obligatorio';
 
-  const fecha = datos.boleta_fecha ? new Date(datos.boleta_fecha) : null;
-  if (!fecha || Number.isNaN(fecha.getTime())) errores.boleta_fecha = 'Fecha de boleta obligatoria';
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(datos.boleta_fecha || '')) ? new Date(`${datos.boleta_fecha}T00:00:00Z`) : null;
+  if (!fecha || Number.isNaN(fecha.getTime())) errores.boleta_fecha = 'Fecha de boleta obligatoria (AAAA-MM-DD)';
   else if (fecha.getTime() > ahora.getTime()) errores.boleta_fecha = 'La fecha de la boleta no puede ser futura';
 
   const montoBoleta = Number(datos.boleta_monto);
   if (!Number.isInteger(montoBoleta) || montoBoleta <= 0) errores.boleta_monto = 'Monto de la boleta obligatorio';
+  else if (montoBoleta > LIMITES.monto) errores.boleta_monto = 'Monto fuera de rango';
 
   const montoReclamado = Number(datos.monto_reclamado);
   if (!Number.isInteger(montoReclamado) || montoReclamado <= 0) errores.monto_reclamado = 'Monto a reclamar obligatorio';

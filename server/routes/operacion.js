@@ -42,11 +42,17 @@ pagos.post('/:token/confirmar', ruta(async (req, res) => {
   const resultado = req.body?.resultado === 'rechazado' ? 'rechazado' : 'aprobado';
   const envioId = await transaccion(async (db) => {
     const { rows: [p] } = await db.query(
-      'SELECT p.*, e.cliente_id, e.repartidor_id, e.estado_pago FROM pago p JOIN envio e ON e.id = p.envio_id WHERE p.token = $1 FOR UPDATE OF p',
+      'SELECT p.*, e.cliente_id, e.repartidor_id, e.estado_pago, e.estado AS envio_estado, e.tarifa_total FROM pago p JOIN envio e ON e.id = p.envio_id WHERE p.token = $1 FOR UPDATE OF p, e',
       [req.params.token]);
     if (!p) throw falla(404, 'Pago no encontrado');
     exigirAcceso(req.usuario, p);
     if (p.proveedor !== 'simulado') throw falla(409, 'Este pago lo confirma la pasarela');
+    // Si el envío se anuló o cambió de monto mientras el pago estaba abierto, ese pago ya no sirve.
+    if (p.estado === 'iniciado' && (['anulado', 'borrador'].includes(p.envio_estado) || p.monto !== p.tarifa_total)) {
+      await db.query("UPDATE pago SET estado = 'anulado', actualizado_en = now() WHERE id = $1", [p.id]);
+      await registrarEventoPago(db, { pagoId: p.id, tipo: 'rechazo', estado: 'anulado', monto: p.monto, datos: { motivo: 'Envío anulado o con otro monto' }, usuarioId: req.usuario.id });
+      return { anulado: true };
+    }
     const transaccionId = `SIM-${Date.now().toString(36).toUpperCase()}`;
     const informe = { estado: resultado, token: p.token, monto: p.monto, moneda: 'CLP', transaccion_id: transaccionId };
     const { aprobado } = verificarConfirmacion(p, informe);
@@ -67,6 +73,7 @@ pagos.post('/:token/confirmar', ruta(async (req, res) => {
       [transaccionId, p.envio_id]);
     return p.envio_id;
   });
+  if (envioId?.anulado) throw falla(409, 'El envío fue anulado o cambió su monto: este pago ya no es válido');
   await auditar(req, `pago_${resultado}`, 'envio', envioId);
   res.json({ estado: resultado, envio_id: envioId });
 }));
@@ -192,7 +199,9 @@ costos.get('/', ruta(async (req, res) => {
 costos.post('/', ruta(async (req, res) => {
   const { tipo, monto, fecha, nota, envio_id: envioId } = req.body || {};
   if (!['bencina', 'comision', 'peaje', 'mantencion', 'otro'].includes(tipo)) throw falla(422, 'Tipo de costo inválido', { tipo: 'Inválido' });
-  if (!Number.isInteger(Number(monto)) || Number(monto) <= 0) throw falla(422, 'Monto inválido', { monto: 'Inválido' });
+  if (!Number.isInteger(Number(monto)) || Number(monto) <= 0 || Number(monto) > 100_000_000) throw falla(422, 'Monto inválido', { monto: 'Inválido' });
+  if (fecha && !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw falla(422, 'Fecha inválida', { fecha: 'Usa AAAA-MM-DD' });
+  if (envioId && !(await uno('SELECT 1 FROM envio WHERE id = $1', [idNumerico(envioId, 'envio_id')]))) throw falla(422, 'El envío indicado no existe', { envio_id: 'Inexistente' });
   const c = await uno(
     'INSERT INTO costo (tipo, monto, fecha, nota, envio_id, creado_por) VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE), $4, $5, $6) RETURNING *',
     [tipo, Number(monto), fecha || null, nota || null, envioId || null, req.usuario.id]);

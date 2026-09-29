@@ -92,6 +92,12 @@ usuarios.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   const b = req.body || {};
   exigirSinErrores(validarUsuario(b, false));
   if (id === req.usuario.id && (b.activo === false || (b.rol && b.rol !== 'admin'))) throw falla(409, 'No puedes quitarte tu propio acceso de administrador');
+  // Un repartidor con envíos en curso no se desactiva ni cambia de perfil: sus envíos quedarían sin nadie.
+  const actual = await uno('SELECT rol FROM usuario WHERE id = $1', [id]);
+  if (actual?.rol === 'repartidor' && (b.activo === false || (b.rol && b.rol !== 'repartidor'))) {
+    const { n } = await uno("SELECT count(*)::int AS n FROM envio WHERE repartidor_id = $1 AND estado IN ('asignado','en_ruta','fallido','reagendado')", [id]);
+    if (n) throw falla(409, `Este repartidor tiene ${n} envío(s) en curso: reasígnalos antes de desactivarlo`);
+  }
   const sets = [];
   const params = [];
   const set = (col, v) => { params.push(v); sets.push(`${col} = $${params.length}`); };

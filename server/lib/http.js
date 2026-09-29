@@ -12,6 +12,15 @@ export function exigirSinErrores(errores, mensaje = 'Revisa los campos marcados'
   if (Object.keys(errores).length) throw falla(422, mensaje, errores);
 }
 
+export const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+// Fecha AAAA-MM-DD opcional de un filtro; si viene con otro formato es un error del cliente.
+export function fechaFiltro(valor, nombre) {
+  if (valor === undefined || valor === '') return null;
+  if (!FECHA_ISO.test(String(valor)) || Number.isNaN(new Date(`${valor}T00:00:00Z`).getTime())) throw falla(400, `${nombre}: usa el formato AAAA-MM-DD`);
+  return String(valor);
+}
+
 export function idNumerico(valor, nombre = 'id') {
   const n = Number(valor);
   if (!Number.isInteger(n) || n <= 0) throw falla(400, `${nombre} inválido`);
@@ -34,6 +43,9 @@ export function manejadorErrores(err, req, res, _next) {
   if (err instanceof ErrorNegocio) {
     return res.status(err.status).json({ error: err.message, detalles: err.detalles });
   }
+  if (err?.archivoInvalido) {
+    return res.status(422).json({ error: err.message, detalles: { archivo: 'Formato inválido' } });
+  }
   if (err?.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ error: 'El archivo supera el tamaño máximo permitido' });
   }
@@ -43,6 +55,14 @@ export function manejadorErrores(err, req, res, _next) {
   if (err?.code === '23514' || err?.code === '23502') {
     // Violación de una restricción de la base (CHECK / NOT NULL): es una regla de negocio.
     return res.status(409).json({ error: 'La operación viola una regla del sistema', detalles: { restriccion: err.constraint || err.column } });
+  }
+  if (err?.code === '23503') {
+    // Referencia a un registro que no existe (p. ej. un envío o comuna inexistente).
+    return res.status(422).json({ error: 'Uno de los datos hace referencia a un registro que no existe', detalles: { restriccion: err.constraint } });
+  }
+  if (['22P02', '22007', '22008', '22003', '22001'].includes(err?.code)) {
+    // Texto donde va un número o una fecha, fecha imposible o número fuera de rango.
+    return res.status(400).json({ error: 'Hay un dato con formato inválido o fuera de rango' });
   }
   if (err?.code === '23505') {
     // Registro duplicado (p. ej. dos cobros aprobados para el mismo envío al mismo tiempo).

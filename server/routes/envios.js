@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
-import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
+import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
 import {
   calcularTarifa, normalizarRut, normalizarTelefono, rolPuedeTransicionar, validarDestinatario, validarDestino,
-  validarDireccion, validarPaquete, validarTransicion, validarUbicacion, ESTADOS,
+  validarDireccion, validarPaquete, validarTransicion, validarUbicacion, ESTADOS, LIMITES,
 } from '../lib/reglas.js';
 import {
   cargarEnvio, detalleCompleto, exigirAcceso, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
@@ -63,7 +63,7 @@ async function cotizar(body, usuario, conf) {
 
   const tarifa = calcularTarifa(paquete, conf.tarifas, comuna?.tarifa ?? null);
   if (tarifaManual !== null) {
-    if (!Number.isInteger(tarifaManual) || tarifaManual < 0) errores.tarifa_manual = 'Tarifa manual inválida';
+    if (!Number.isInteger(tarifaManual) || tarifaManual < 0 || tarifaManual > LIMITES.monto) errores.tarifa_manual = 'Tarifa manual inválida';
     else Object.assign(tarifa, { tarifa_base: tarifaManual, recargo_bultos: 0, recargo_horario: 0, tarifa_total: tarifaManual });
   }
   return { paquete, tarifa, errores, comuna };
@@ -86,6 +86,11 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   }
 
   const errores = {};
+  // Una dirección guardada define a su destinatario: no se puede combinar con otro destinatario.
+  if (b.direccion_id && !b.destinatario_id) {
+    const dueno = await uno('SELECT destinatario_id FROM direccion WHERE id = $1', [Number(b.direccion_id)]);
+    if (dueno) b.destinatario_id = dueno.destinatario_id;
+  }
   if (!b.destinatario_id) Object.assign(errores, prefijar('destinatario', validarDestinatario(b.destinatario)));
   if (!b.direccion_id) Object.assign(errores, prefijar('direccion', validarDireccion(b.direccion)));
 
@@ -162,20 +167,29 @@ async function confirmar(db, envioId, usuarioId) {
 }
 
 // Listado con búsqueda, filtros y paginación (RF-27 a RF-29).
+const TZ = "AT TIME ZONE 'America/Santiago'";
+const hoyChile = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+
 function filtrosListado(req) {
   const q = req.query;
   const cond = [];
   const params = [];
   const p = (v) => { params.push(v); return `$${params.length}`; };
+  const idFiltro = (v, nombre) => { const n = Number(v); if (!Number.isInteger(n) || n <= 0) throw falla(400, `${nombre} inválido`); return n; };
   if (req.usuario.rol === 'cliente') cond.push(`e.cliente_id = ${p(req.usuario.id)}`);
   if (req.usuario.rol === 'repartidor') cond.push(`e.repartidor_id = ${p(req.usuario.id)}`);
   if (q.estado) cond.push(`e.estado = ANY(${p(String(q.estado).split(','))})`);
-  if (q.estado_pago) cond.push(`e.estado_pago = ${p(q.estado_pago)}`);
-  if (q.comuna_id) cond.push(`e.comuna_id = ${p(Number(q.comuna_id))}`);
-  if (q.repartidor_id) cond.push(q.repartidor_id === 'sin' ? 'e.repartidor_id IS NULL' : `e.repartidor_id = ${p(Number(q.repartidor_id))}`);
-  if (q.cliente_id && req.usuario.rol === 'admin') cond.push(`e.cliente_id = ${p(Number(q.cliente_id))}`);
-  if (q.desde) cond.push(`e.creado_en >= ${p(q.desde)}::date`);
-  if (q.hasta) cond.push(`e.creado_en < (${p(q.hasta)}::date + 1)`);
+  if (q.estado_pago) cond.push(`e.estado_pago = ${p(String(q.estado_pago))}`);
+  if (q.comuna_id) cond.push(`e.comuna_id = ${p(idFiltro(q.comuna_id, 'comuna_id'))}`);
+  if (q.repartidor_id) cond.push(q.repartidor_id === 'sin' ? 'e.repartidor_id IS NULL' : `e.repartidor_id = ${p(idFiltro(q.repartidor_id, 'repartidor_id'))}`);
+  if (q.cliente_id && req.usuario.rol === 'admin') cond.push(`e.cliente_id = ${p(idFiltro(q.cliente_id, 'cliente_id'))}`);
+  // Las fechas se comparan en hora de Chile (la base puede estar en UTC).
+  const desde = fechaFiltro(q.desde, 'desde');
+  const hasta = fechaFiltro(q.hasta, 'hasta');
+  if (desde) cond.push(`(e.creado_en ${TZ})::date >= ${p(desde)}::date`);
+  if (hasta) cond.push(`(e.creado_en ${TZ})::date <= ${p(hasta)}::date`);
+  // Envíos cerrados (entregados o devueltos) hoy, sin importar cuándo se crearon.
+  if (q.cerrados === 'hoy') cond.push(`(COALESCE(e.entregado_en, e.actualizado_en) ${TZ})::date = ${p(hoyChile())}::date`);
   if (q.q) {
     const t = p(`%${String(q.q).trim()}%`);
     cond.push(`(e.folio ILIKE ${t} OR d.nombre ILIKE ${t} OR d.telefono ILIKE ${t} OR di.calle ILIKE ${t} OR c.nombre ILIKE ${t})`);
@@ -185,8 +199,8 @@ function filtrosListado(req) {
 
 envios.get('/', ruta(async (req, res) => {
   const { where, params } = filtrosListado(req);
-  const limite = Math.min(Number(req.query.limite) || 20, 100);
-  const pagina = Math.max(Number(req.query.pagina) || 1, 1);
+  const limite = Math.min(Math.max(Math.trunc(Number(req.query.limite)) || 20, 1), 100);
+  const pagina = Math.min(Math.max(Math.trunc(Number(req.query.pagina)) || 1, 1), 100000);
   const total = await uno(
     `SELECT count(*)::int AS n FROM envio e JOIN destinatario d ON d.id = e.destinatario_id
      JOIN direccion di ON di.id = e.direccion_id JOIN comuna c ON c.id = e.comuna_id ${where}`, params);
@@ -273,16 +287,18 @@ envios.post('/:id/confirmar', requiereRol('admin', 'cliente'), ruta(async (req, 
 envios.post('/:id/asignar', requiereRol('admin'), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
   const repartidorId = req.body.repartidor_id ? Number(req.body.repartidor_id) : null;
-  if (!['creado', 'asignado'].includes(envio.estado)) throw falla(409, `No se puede asignar un envío en estado "${ESTADOS[envio.estado]}"`);
+  if (!['creado', 'asignado', 'reagendado'].includes(envio.estado)) throw falla(409, `No se puede asignar un envío en estado "${ESTADOS[envio.estado]}"`);
   if (repartidorId) {
     const rep = await uno("SELECT id FROM usuario WHERE id = $1 AND rol = 'repartidor' AND activo", [repartidorId]);
     if (!rep) throw falla(422, 'Repartidor no válido');
   }
-  const nuevo = repartidorId ? 'asignado' : 'creado';
+  // Un envío reagendado cambia de repartidor pero sigue "reagendado" (conserva sus intentos).
+  if (envio.estado === 'reagendado' && !repartidorId) throw falla(422, 'Un envío reagendado debe quedar con un repartidor');
+  const nuevo = envio.estado === 'reagendado' ? 'reagendado' : repartidorId ? 'asignado' : 'creado';
   await transaccion(async (db) => {
     await db.query('UPDATE envio SET repartidor_id = $1, estado = $2, actualizado_en = now() WHERE id = $3', [repartidorId, nuevo, envio.id]);
     if (nuevo !== envio.estado || repartidorId !== envio.repartidor_id) {
-      await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo, usuarioId: req.usuario.id, motivo: repartidorId ? null : 'Repartidor desasignado' });
+      await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo, usuarioId: req.usuario.id, motivo: repartidorId ? (envio.repartidor_id && envio.repartidor_id !== repartidorId ? 'Cambio de repartidor' : null) : 'Repartidor desasignado' });
     }
   });
   await auditar(req, 'asignar', 'envio', envio.id, { repartidor_id: repartidorId });
@@ -381,7 +397,12 @@ envios.post('/:id/pago', requiereRol('admin', 'cliente'), ruta(async (req, res) 
   const envio = await envioAccesible(req);
   if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'Confirma el envío antes de pagar');
   if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
+  if (!(envio.tarifa_total > 0)) throw falla(409, 'Este envío no tiene monto a pagar: administración debe registrarlo como pagado');
   const conf = await leerConfig();
+  const abierto = await uno(
+    `SELECT id, proveedor, monto, estado, token FROM pago WHERE envio_id = $1 AND estado = 'iniciado' AND proveedor = $2 AND monto = $3
+     AND creado_en > now() - interval '1 day' ORDER BY id DESC LIMIT 1`, [envio.id, conf.pagos.proveedor, envio.tarifa_total]);
+  if (abierto) return res.status(201).json(abierto);
   const token = crypto.randomBytes(18).toString('base64url');
   const costo = costoDelCobro(envio.tarifa_total, conf.pagos.proveedor);
   const pago = await transaccion(async (db) => {

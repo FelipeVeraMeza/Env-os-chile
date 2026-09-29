@@ -44,7 +44,7 @@ export async function nuevo() {
   const vista = $('#vista');
   montar(vista, esqueleto(2));
   const esAdmin = app.usuario.rol === 'admin';
-  const [comunas, clientes] = await Promise.all([comunasCobertura(), esAdmin ? get('/api/usuarios?rol=cliente') : []]);
+  const [comunas, clientes] = await Promise.all([comunasCobertura(), esAdmin ? get('/api/usuarios?rol=cliente').then((l) => l.filter((c) => c.activo && !c.correo.startsWith('qa-'))) : []]);
   const w = {
     paso: 0, clienteId: esAdmin ? clientes[0]?.id : app.usuario.id, modoDest: 'libreta', destinatario: null, nuevoDest: {},
     tipo_destino: 'domicilio', direccionId: null, nuevaDir: {}, courier: {}, paquete: { bultos: 1 }, boleta: null, foto: null, cotizacion: null,
@@ -125,14 +125,14 @@ export async function nuevo() {
     return html`
       <div class="grid g2">
         <label class="campo" style="grid-column:1/-1">Descripción del producto *<input name="descripcion_producto" value="${p.descripcion_producto || ''}" placeholder="Ej. Zapatillas talla 42"></label>
-        <label class="campo">Bultos *<input name="bultos" type="number" min="1" value="${p.bultos || 1}">
+        <label class="campo">Bultos *<input name="bultos" type="number" step="1" inputmode="numeric" min="1" max="100" value="${p.bultos || 1}">
           <small>${w.tipo_destino === 'punto_courier' ? 'Punto courier: sin límite de paquetes' : `Cada bulto adicional a domicilio: ${clp(t.bulto_adicional_domicilio)}`}</small></label>
-        <label class="campo">Peso por bulto (kg) *<input name="peso_kg" type="number" step="0.1" min="0" max="${t.peso_max_kg}" value="${p.peso_kg || ''}"><small>Máximo ${t.peso_max_kg} kg</small></label>
+        <label class="campo">Peso por bulto (kg) *<input name="peso_kg" type="number" inputmode="decimal" step="0.1" min="0" max="${t.peso_max_kg}" value="${p.peso_kg || ''}"><small>Máximo ${t.peso_max_kg} kg</small></label>
       </div>
       <div class="grid g3" style="margin-top:14px">
-        <label class="campo">Largo (cm) *<input name="largo_cm" type="number" min="1" max="${t.dim_max_cm}" value="${p.largo_cm || ''}"></label>
-        <label class="campo">Ancho (cm) *<input name="ancho_cm" type="number" min="1" max="${t.dim_max_cm}" value="${p.ancho_cm || ''}"></label>
-        <label class="campo">Alto (cm) *<input name="alto_cm" type="number" min="1" max="${t.dim_max_cm}" value="${p.alto_cm || ''}"></label>
+        <label class="campo">Largo (cm) *<input name="largo_cm" type="number" step="1" inputmode="numeric" min="1" max="${t.dim_max_cm}" value="${p.largo_cm || ''}"></label>
+        <label class="campo">Ancho (cm) *<input name="ancho_cm" type="number" step="1" inputmode="numeric" min="1" max="${t.dim_max_cm}" value="${p.ancho_cm || ''}"></label>
+        <label class="campo">Alto (cm) *<input name="alto_cm" type="number" step="1" inputmode="numeric" min="1" max="${t.dim_max_cm}" value="${p.alto_cm || ''}"></label>
       </div>
       <p class="muted" style="margin:6px 0 16px">Tarifa estándar hasta ${t.peso_max_kg} kg y ${t.dim_max_cm}×${t.dim_max_cm}×${t.dim_max_cm} cm por bulto.</p>
       <div class="card" style="box-shadow:none;background:rgba(224,33,138,.08);border-color:rgba(224,33,138,.35)">
@@ -202,7 +202,12 @@ export async function nuevo() {
     if (w.paso === 0) {
       if (esAdmin && d.cliente_id) w.clienteId = Number(d.cliente_id);
       if (w.modoDest === 'nuevo') w.nuevoDest = { nombre: d.nombre, telefono: d.telefono, correo: d.correo, rut: d.rut };
-      else w.destinatario = libreta.find((x) => String(x.id) === d.dest) || null;
+      else {
+        const elegido = libreta.find((x) => String(x.id) === d.dest) || null;
+        // Al cambiar de destinatario, la dirección elegida antes ya no le pertenece: se preselecciona la principal.
+        if (elegido?.id !== w.destinatario?.id) w.direccionId = elegido?.direcciones[0]?.id ?? null;
+        w.destinatario = elegido;
+      }
     } else if (w.paso === 1) {
       if (d.dir) w.direccionId = d.dir === 'nueva' ? 'nueva' : Number(d.dir);
       if ('calle' in d) w.nuevaDir = { calle: d.calle, numero: d.numero, depto: d.depto, comuna_id: d.comuna_id, alias: d.alias, referencia: d.referencia };

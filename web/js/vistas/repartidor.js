@@ -11,7 +11,7 @@ export async function ruta() {
   montar(vista, esqueleto(3));
   const [activos, hechos, disponibles] = await Promise.all([
     get('/api/envios?estado=asignado,en_ruta,reagendado,fallido&limite=100'),
-    get(`/api/envios?estado=entregado,devuelto&limite=100&desde=${new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' })}`),
+    get('/api/envios?estado=entregado,devuelto&cerrados=hoy&limite=1'),
     get('/api/envios/disponibles'),
   ]);
   const enRuta = activos.items.filter((e) => e.estado === 'en_ruta');

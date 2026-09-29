@@ -27,7 +27,7 @@ comunas.patch('/:id', autenticar, requiereRol('admin'), ruta(async (req, res) =>
   const id = idNumerico(req.params.id);
   const b = req.body || {};
   const tarifa = b.tarifa_base === '' || b.tarifa_base === null ? null : b.tarifa_base;
-  if (tarifa !== undefined && tarifa !== null && (!Number.isInteger(Number(tarifa)) || Number(tarifa) < 0)) throw falla(422, 'Tarifa inválida');
+  if (tarifa !== undefined && tarifa !== null && (!Number.isInteger(Number(tarifa)) || Number(tarifa) < 0 || Number(tarifa) > 10_000_000)) throw falla(422, 'Tarifa inválida');
   const c = await uno(
     `UPDATE comuna SET en_cobertura = COALESCE($1, en_cobertura), zona_id = CASE WHEN $2::boolean THEN $3::int ELSE zona_id END,
        tarifa_base = CASE WHEN $4::boolean THEN $5::int ELSE tarifa_base END
@@ -44,11 +44,12 @@ zonas.use(autenticar);
 zonas.get('/', ruta(async (_req, res) => res.json((await query('SELECT * FROM zona ORDER BY orden, nombre')).rows)));
 zonas.post('/', requiereRol('admin'), ruta(async (req, res) => {
   const { nombre, tarifa, color } = req.body || {};
-  if (!String(nombre || '').trim() || !Number.isInteger(Number(tarifa))) throw falla(422, 'Nombre y tarifa obligatorios');
+  if (!String(nombre || '').trim() || !Number.isInteger(Number(tarifa)) || Number(tarifa) < 0) throw falla(422, 'Nombre y tarifa obligatorios');
   res.status(201).json(await uno('INSERT INTO zona (nombre, tarifa, color) VALUES ($1, $2, $3) RETURNING *', [nombre.trim(), Number(tarifa), color || null]));
 }));
 zonas.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   const { nombre, tarifa, color } = req.body || {};
+  if (tarifa !== undefined && (!Number.isInteger(Number(tarifa)) || Number(tarifa) < 0)) throw falla(422, 'Tarifa inválida');
   const z = await uno('UPDATE zona SET nombre = COALESCE($1, nombre), tarifa = COALESCE($2, tarifa), color = COALESCE($3, color) WHERE id = $4 RETURNING *',
     [nombre ?? null, tarifa !== undefined ? Number(tarifa) : null, color ?? null, idNumerico(req.params.id)]);
   if (!z) throw falla(404, 'Zona no encontrada');
@@ -84,6 +85,19 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
     else nuevo[k] = String(v ?? '');
   }
   if (clave === 'operacion' && !['pagina', 'google', 'waze'].includes(nuevo.qr_destino)) throw falla(422, 'Destino de QR inválido');
+  // Valores que dejarían la operación sin sentido (sin intentos, sin espera, montos con decimales).
+  const errores = {};
+  if (clave === 'operacion') {
+    for (const k of ['intentos_max', 'espera_max_min']) if (!Number.isInteger(nuevo[k]) || nuevo[k] < 1 || nuevo[k] > 60) errores[k] = 'Debe ser un número entero entre 1 y 60';
+  }
+  if (clave === 'tarifas') {
+    for (const k of ['base', 'bulto_adicional_domicilio', 'bulto_adicional_punto', 'recargo_horario_especial']) if (!Number.isInteger(nuevo[k]) || nuevo[k] > 10_000_000) errores[k] = 'Pesos enteros';
+    if (!(nuevo.peso_max_kg > 0) || nuevo.peso_max_kg > 1000) errores.peso_max_kg = 'Entre 1 y 1000 kg';
+    if (!Number.isInteger(nuevo.dim_max_cm) || nuevo.dim_max_cm < 1 || nuevo.dim_max_cm > 500) errores.dim_max_cm = 'Entre 1 y 500 cm';
+  }
+  // Solo el simulador está conectado: elegir otra pasarela hoy dejaría a los clientes sin poder pagar.
+  if (clave === 'pagos' && nuevo.proveedor !== 'simulado') errores.proveedor = 'Esa pasarela aún no está integrada (etapa de desarrollo)';
+  exigirSinErrores(errores, 'Revisa los valores');
   await query('INSERT INTO config (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor', [clave, JSON.stringify(nuevo)]);
   await auditar(req, 'editar', 'config', clave, nuevo);
   res.json(nuevo);
@@ -125,7 +139,8 @@ async function destinatarioPropio(req, id) {
 }
 
 destinatarios.post('/', ruta(async (req, res) => {
-  const b = req.body || {};
+  const b = { ...(req.body || {}) };
+  for (const k of ['nombre', 'telefono', 'correo', 'rut', 'notas']) if (b[k] !== null && b[k] !== undefined) b[k] = String(b[k]);
   const clienteId = clienteObjetivo(req);
   if (!clienteId) throw falla(422, 'Indica el cliente');
   exigirSinErrores(validarDestinatario(b));
@@ -138,6 +153,7 @@ destinatarios.post('/', ruta(async (req, res) => {
 destinatarios.patch('/:id', ruta(async (req, res) => {
   const d = await destinatarioPropio(req, idNumerico(req.params.id));
   const b = { ...d, ...req.body };
+  for (const k of ['nombre', 'telefono', 'correo', 'rut', 'notas']) if (b[k] !== null && b[k] !== undefined) b[k] = String(b[k]);
   exigirSinErrores(validarDestinatario(b));
   const act = await uno(
     `UPDATE destinatario SET nombre = $1, telefono = $2, correo = $3, rut = $4, notas = $5, actualizado_en = now() WHERE id = $6 RETURNING *`,
