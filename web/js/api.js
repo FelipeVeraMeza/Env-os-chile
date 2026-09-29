@@ -19,6 +19,8 @@ export function fijarUrlApi(url) { escribirLS(LS_API, url === null ? null : url.
 export function perfilActual() { const v = Number(leerLS(LS_PERFIL)); return Number.isInteger(v) && v > 0 ? v : null; }
 export function fijarPerfil(id) { escribirLS(LS_PERFIL, id ? String(id) : null); }
 export function fijarClaveDemo(clave) { escribirLS(LS_CLAVE, clave || null); }
+export function fijarToken(token) { escribirLS(LS_TOKEN, token || null); }
+export function hayToken() { return Boolean(leerLS(LS_TOKEN)); }
 
 function cabeceras() {
   const h = {};
@@ -53,6 +55,11 @@ export async function api(ruta, { metodo = 'GET', json, form, blob = false } = {
   if (blob && res.ok) return res.blob();
   const tipo = res.headers.get('content-type') || '';
   const datos = tipo.includes('json') ? await res.json() : await res.text();
+  // Sesión vencida o cerrada desde otro lado (p. ej. cambio de contraseña): se vuelve a la pantalla de ingreso.
+  if (res.status === 401 && headers.Authorization && ruta !== '/api/auth/login') {
+    fijarToken(null);
+    window.dispatchEvent(new CustomEvent('sesion-expirada', { detail: datos?.error }));
+  }
   if (!res.ok) throw new ErrorApi(res.status, typeof datos === 'string' ? { error: datos } : datos);
   return datos;
 }

@@ -1,5 +1,5 @@
-import { fijarClaveDemo, fijarPerfil, fijarUrlApi, get, perfilActual, urlApi } from './api.js';
-import { $, errorToast, html, icono, modal, montar, raw, toast } from './ui.js';
+import { fijarClaveDemo, fijarPerfil, fijarToken, fijarUrlApi, get, hayToken, perfilActual, post, urlApi } from './api.js';
+import { $, datosForm, errorToast, html, icono, marcarErrores, modal, montar, raw, toast } from './ui.js';
 import * as cliente from './vistas/cliente.js';
 import * as envios from './vistas/envios.js';
 import * as repartidor from './vistas/repartidor.js';
@@ -58,7 +58,8 @@ export function ir(hash) { if (location.hash === hash) enrutar(); else location.
 async function enrutar() {
   const hash = location.hash || '';
   const rol = app.usuario?.rol;
-  if (!rol && !hash.startsWith('#/seguimiento')) return pantallaSinPerfil();
+  document.body.classList.toggle('sin-sesion', !rol);
+  if (!rol && !hash.startsWith('#/seguimiento')) return conSesion() ? pantallaLogin() : pantallaSinPerfil();
   const ruta = RUTAS.find(([re, , roles]) => re.test(hash) && (!roles || [].concat(roles).includes(rol)));
   if (!ruta) return ir(INICIO[rol] || '#/seguimiento');
   pintarMenu(hash);
@@ -72,6 +73,8 @@ async function enrutar() {
   }
   vista.focus({ preventScroll: true });
   window.scrollTo(0, 0);
+  // Contraseña asignada por administración: no se puede usar la plataforma sin cambiarla (también tras recargar).
+  if (conSesion() && app.usuario?.debe_cambiar_clave && !$('#f-clave-nueva')) dialogoCambiarClave({ obligatorio: true });
 }
 
 function pintarMenu(hash) {
@@ -86,14 +89,18 @@ function pintarMenu(hash) {
 // ---------- Celular: hoja "Más" (secciones extra y cambio de perfil) ----------
 const INICIALES = { admin: 'AD', cliente: 'CL', repartidor: 'RE' };
 
+const conSesion = () => app.conf?.auth_mode === 'jwt';
+const iniciales = (nombre) => String(nombre || '?').split(/\s+/).filter((p) => /^\p{L}/u.test(p)).slice(0, 2).map((p) => p[0].toUpperCase()).join('') || '?';
+
 function pintarChip() {
-  $('#chip-avatar').textContent = INICIALES[app.usuario?.rol] || '?';
-  $('#chip-rol').textContent = app.usuario ? ROL_TXT[app.usuario.rol] : 'Perfil';
+  $('#chip-avatar').textContent = conSesion() ? iniciales(app.usuario?.nombre) : INICIALES[app.usuario?.rol] || '?';
+  $('#chip-rol').textContent = !app.usuario ? 'Perfil' : conSesion() ? app.usuario.nombre.split(' ')[0] : ROL_TXT[app.usuario.rol];
 }
 
 function hojaMas() {
   const hash = location.hash;
   const ocultos = (MENUS[app.usuario?.rol] || []).filter(([, , , cls]) => cls === 'solo-escritorio');
+  if (conSesion()) return hojaCuenta(ocultos, hash);
   if (!ocultos.length && !app.perfiles.length) return; // nada que mostrar (p. ej. antes de ingresar la clave)
   const m = modal(html`
     ${ocultos.length ? html`<div class="hoja-titulo" style="margin-top:0">Secciones</div><div class="hoja-lista">${ocultos.map(([h, ic, txt]) => html`
@@ -103,6 +110,111 @@ function hojaMas() {
       <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>` : ''}`);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
   m.el.querySelectorAll('[data-perfil]').forEach((b) => { b.onclick = () => { m.cerrar(); cambiarPerfil(Number(b.dataset.perfil)); }; });
+}
+
+// ---------- Sesión real (AUTH_MODE=jwt) ----------
+function hojaCuenta(ocultos, hash) {
+  if (!app.usuario) return;
+  const m = modal(html`
+    ${ocultos.length ? html`<div class="hoja-titulo" style="margin-top:0">Secciones</div><div class="hoja-lista">${ocultos.map(([h, ic, txt]) => html`
+      <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}</a>`)}</div>` : ''}
+    <div class="hoja-titulo" ${ocultos.length ? '' : raw('style="margin-top:0"')}>Mi cuenta</div>
+    <div class="cuenta-resumen"><span class="avatar">${iniciales(app.usuario.nombre)}</span>
+      <div><b>${app.usuario.nombre}</b><div class="sub">${app.usuario.correo} · ${ROL_TXT[app.usuario.rol]}</div></div></div>
+    <div class="hoja-lista" style="margin-top:8px">
+      <button class="item" id="cambiar-clave">${icono('llave')}Cambiar contraseña</button>
+      <button class="item" id="cerrar-sesion">${icono('salir')}Cerrar sesión</button>
+    </div>`);
+  m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
+  $('#cambiar-clave', m.el).onclick = () => { m.cerrar(); dialogoCambiarClave(); };
+  $('#cerrar-sesion', m.el).onclick = () => { m.cerrar(); cerrarSesion(); };
+}
+
+function pantallaLogin(mensaje) {
+  montar($('#menu'), '');
+  const n = app.conf.negocio;
+  montar($('#vista'), html`<div class="login-caja"><div class="card login">
+    <img class="logo" src="${n.logo_url || 'icons/icono.svg'}" alt="">
+    <h1>Iniciar sesión</h1><p class="sub">${n.nombre} · Gestión de envíos</p>
+    ${mensaje ? html`<div class="aviso alerta" style="margin-top:14px">${mensaje}</div>` : ''}
+    <form id="f-login" novalidate>
+      <label class="campo">Correo<input name="correo" type="email" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="nombre@correo.cl" required></label>
+      <label class="campo">Contraseña<span class="clave"><input name="password" type="password" autocomplete="current-password" required>
+        <button type="button" class="btn sec chico ver-clave" aria-label="Mostrar contraseña">Mostrar</button></span></label>
+      <button class="btn grande ancho" id="entrar">Entrar</button>
+    </form>
+    <details><summary>¿Olvidaste tu contraseña?</summary><p style="margin-top:8px">Pídele a administración que te asigne una nueva. Al entrar con ella, la plataforma te pedirá cambiarla.</p></details>
+    <div class="pie"><a href="#/seguimiento">Seguir un envío con su folio →</a></div>
+  </div></div>`);
+  const f = $('#f-login');
+  const clave = $('input[name="password"]', f);
+  $('.ver-clave', f).onclick = (e) => {
+    const ver = clave.type === 'password';
+    clave.type = ver ? 'text' : 'password';
+    e.currentTarget.textContent = ver ? 'Ocultar' : 'Mostrar';
+    e.currentTarget.setAttribute('aria-label', ver ? 'Ocultar contraseña' : 'Mostrar contraseña');
+  };
+  $('input[name="correo"]', f).focus();
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const d = datosForm(f);
+    const errores = {};
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.correo.trim())) errores.correo = 'Escribe un correo válido';
+    if (!d.password) errores.password = 'Escribe tu contraseña';
+    if (marcarErrores(f, errores)) return;
+    const btn = $('#entrar', f);
+    btn.disabled = true;
+    btn.textContent = 'Entrando…';
+    try {
+      const r = await post('/api/auth/login', { correo: d.correo.trim(), password: d.password });
+      fijarToken(r.token);
+      app.usuario = r.usuario;
+      pintarSelector();
+      ir(INICIO[app.usuario.rol]);
+    } catch (err) {
+      // El error se muestra en el campo; solo lo que no tiene campo (bloqueo, sin conexión) va como aviso.
+      if (!marcarErrores(f, err.status === 401 ? { password: err.message } : err.detalles)) errorToast(err);
+      btn.disabled = false;
+      btn.textContent = 'Entrar';
+    }
+  };
+}
+
+function dialogoCambiarClave({ obligatorio = false } = {}) {
+  const m = modal(html`<h2>${obligatorio ? 'Crea tu contraseña' : 'Cambiar contraseña'}</h2>
+    <p class="sub">${obligatorio ? 'Administración te asignó una contraseña temporal. Crea una propia para continuar.' : 'Al cambiarla se cierran tus sesiones en otros dispositivos.'}</p>
+    <form class="pila" id="f-clave-nueva" novalidate>
+      <label class="campo">Contraseña actual<input name="actual" type="password" autocomplete="current-password"></label>
+      <label class="campo">Nueva contraseña <small>(mínimo 8 caracteres)</small><input name="nueva" type="password" autocomplete="new-password" minlength="8"></label>
+      <label class="campo">Repite la nueva contraseña<input name="repetir" type="password" autocomplete="new-password"></label>
+      <button class="btn grande">Guardar contraseña</button>
+    </form>`, { fijo: obligatorio });
+  $('#f-clave-nueva', m.el).onsubmit = async (e) => {
+    e.preventDefault();
+    const d = datosForm(e.target);
+    const errores = {};
+    if (!d.actual) errores.actual = 'Obligatoria';
+    if (d.nueva.length < 8) errores.nueva = 'Mínimo 8 caracteres';
+    else if (d.nueva !== d.repetir) errores.repetir = 'No coincide con la nueva contraseña';
+    if (marcarErrores(e.target, errores)) return;
+    try {
+      const r = await post('/api/auth/cambiar-clave', { actual: d.actual, nueva: d.nueva });
+      fijarToken(r.token);
+      if (app.usuario) app.usuario.debe_cambiar_clave = false;
+      m.cerrar();
+      toast('Contraseña actualizada', 'ok');
+    } catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+  };
+}
+
+function cerrarSesion(mensaje) {
+  fijarToken(null);
+  app.usuario = null;
+  $('#modal-raiz').replaceChildren();
+  pintarSelector();
+  if (location.hash && location.hash !== '#/') history.replaceState(null, '', location.pathname + location.search);
+  document.body.classList.add('sin-sesion');
+  pantallaLogin(mensaje);
 }
 
 // Elegir servidor (localhost / Railway) es una herramienta de desarrollo: el cliente no la ve.
@@ -199,10 +311,17 @@ async function iniciar() {
   try {
     const conf = await get('/api/config/publica');
     let perfiles = [];
-    try {
-      perfiles = await get('/api/demo/usuarios');
-    } catch (err) {
-      if (err.detalles?.demo_clave) return pedirClaveDemo(conf);
+    if (conf.auth_mode === 'jwt') {
+      app.conf = conf;
+      document.body.classList.add('modo-sesion');
+      // Sesión guardada en este dispositivo: se valida con el servidor (puede haber expirado).
+      if (hayToken()) app.usuario = await get('/api/auth/yo').catch(() => null);
+    } else {
+      try {
+        perfiles = await get('/api/demo/usuarios');
+      } catch (err) {
+        if (err.detalles?.demo_clave) return pedirClaveDemo(conf);
+      }
     }
     app.conf = conf;
     app.perfiles = perfiles;
@@ -214,8 +333,9 @@ async function iniciar() {
     $('#estado-api').className = 'punto-estado error';
     errorToast(err);
   }
-  app.usuario = app.perfiles.find((p) => p.id === perfilActual()) || null;
+  if (!conSesion()) app.usuario = app.perfiles.find((p) => p.id === perfilActual()) || null;
   pintarSelector();
+  window.addEventListener('sesion-expirada', (e) => { if (app.usuario) cerrarSesion(e.detail || 'Tu sesión expiró: vuelve a iniciar sesión.'); });
   window.addEventListener('hashchange', enrutar);
   enrutar();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

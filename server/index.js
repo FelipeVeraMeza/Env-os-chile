@@ -1,7 +1,7 @@
 import { config, validarProduccion } from './config.js';
 import { crearApp } from './app.js';
 import { migrar } from './db/migrate.js';
-import { sembrar } from './db/seed.js';
+import { cerrarCuentasDemo, sembrar } from './db/seed.js';
 import { conectar, explicarErrorConexion, pool } from './db/pool.js';
 import { asegurarAlmacenamiento } from './lib/archivos.js';
 
@@ -15,6 +15,7 @@ async function iniciar() {
   await pool.query('SELECT 1');
   await migrar();
   await sembrar();
+  if (config.authMode === 'jwt' && config.entorno === 'production') await cerrarCuentasDemo();
   const alm = await asegurarAlmacenamiento();
   console.log(`[archivos] fotos y boletas en ${alm.driver === 'supabase' ? `Supabase Storage (bucket "${alm.destino}")` : `disco local (${alm.destino})`}`);
 

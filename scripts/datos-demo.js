@@ -1,5 +1,6 @@
 // Carga envíos de ejemplo en distintos estados para recorrer la demo.
-// Uso: node scripts/datos-demo.js [local|railway|produccion]   (requiere AUTH_MODE=demo en el servidor)
+// Uso: node scripts/datos-demo.js [local|railway|produccion]
+// Con AUTH_MODE=jwt entra con las cuentas demo (Demo.2026) y el admin de QA_ADMIN_CORREO / QA_ADMIN_PASSWORD.
 import { cargarEntornos, resolverObjetivo } from '../qa/entornos.js';
 
 const vars = cargarEntornos();
@@ -7,8 +8,10 @@ const { api: API } = resolverObjetivo(process.argv[2] || 'local', vars);
 const CLAVE = vars.QA_DEMO_CLAVE ? { 'X-Demo-Clave': vars.QA_DEMO_CLAVE } : {};
 const jpeg = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
 
+const modo = (await (await fetch(`${API}/api/health`)).json()).auth_mode;
+const tokens = {};
 async function llamar(metodo, ruta, { usuario, json, form } = {}) {
-  const headers = { ...CLAVE, 'X-Demo-Usuario': String(usuario) };
+  const headers = { ...CLAVE, ...(modo === 'jwt' ? { Authorization: `Bearer ${tokens[usuario]}` } : { 'X-Demo-Usuario': String(usuario) }) };
   if (json) headers['Content-Type'] = 'application/json';
   const r = await fetch(`${API}${ruta}`, { method: metodo, headers, body: json ? JSON.stringify(json) : form });
   const d = await r.json().catch(() => ({}));
@@ -16,7 +19,20 @@ async function llamar(metodo, ruta, { usuario, json, form } = {}) {
   return d;
 }
 
-const perfiles = await (await fetch(`${API}/api/demo/usuarios`, { headers: CLAVE })).json();
+async function perfilesJwt() {
+  const cuentas = [[process.env.QA_ADMIN_CORREO || vars.QA_ADMIN_CORREO, process.env.QA_ADMIN_PASSWORD || vars.QA_ADMIN_PASSWORD],
+    ['cliente@demo.cl', 'Demo.2026'], ['tienda@demo.cl', 'Demo.2026'], ['repartidor@demo.cl', 'Demo.2026'], ['repartidora@demo.cl', 'Demo.2026']];
+  const lista = [];
+  for (const [correo, password] of cuentas) {
+    const r = await fetch(`${API}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ correo, password }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(`No se pudo entrar como ${correo}: ${d.error} (¿SEED_DEMO=true y QA_ADMIN_CORREO/QA_ADMIN_PASSWORD definidos?)`);
+    tokens[d.usuario.id] = d.token;
+    lista.push(d.usuario);
+  }
+  return lista;
+}
+const perfiles = modo === 'jwt' ? await perfilesJwt() : await (await fetch(`${API}/api/demo/usuarios`, { headers: CLAVE })).json();
 if (!Array.isArray(perfiles)) throw new Error(`No se pudieron leer los perfiles demo: ${JSON.stringify(perfiles)} (¿falta QA_DEMO_CLAVE en entornos.local.env?)`);
 const admin = perfiles.find((p) => p.rol === 'admin').id;
 const [clienteA, clienteB] = perfiles.filter((p) => p.rol === 'cliente').map((p) => p.id);

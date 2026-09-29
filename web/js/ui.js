@@ -40,15 +40,16 @@ export function toast(mensaje, tipo = '') {
 export function errorToast(err) { toast(err.message || 'Ocurrió un error', 'error'); }
 
 // Abre un modal; devuelve { el, cerrar }. onClose se ejecuta al cerrar.
-export function modal(contenido, { onClose } = {}) {
+// fijo: true → no se cierra con Escape, clic afuera ni ✕ (solo por código).
+export function modal(contenido, { onClose, fijo = false } = {}) {
   const fondo = document.createElement('div');
   fondo.className = 'modal-fondo';
-  fondo.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><button class="btn-icono cerrar" aria-label="Cerrar">✕</button><div class="modal-cuerpo"></div></div>`;
+  fondo.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${fijo ? '' : '<button class="btn-icono cerrar" aria-label="Cerrar">✕</button>'}<div class="modal-cuerpo"></div></div>`;
   montar($('.modal-cuerpo', fondo), contenido);
   const cerrar = () => { fondo.remove(); document.removeEventListener('keydown', esc); onClose?.(); };
-  const esc = (e) => { if (e.key === 'Escape') cerrar(); };
-  fondo.addEventListener('click', (e) => { if (e.target === fondo) cerrar(); });
-  $('.cerrar', fondo).addEventListener('click', cerrar);
+  const esc = (e) => { if (e.key === 'Escape' && !fijo) cerrar(); };
+  fondo.addEventListener('click', (e) => { if (e.target === fondo && !fijo) cerrar(); });
+  $('.cerrar', fondo)?.addEventListener('click', cerrar);
   document.addEventListener('keydown', esc);
   $('#modal-raiz').append(fondo);
   $('input, select, textarea, button:not(.cerrar)', fondo)?.focus();
@@ -133,6 +134,8 @@ export const ICONOS = {
   tarifas: '<path d="M20 12 12 20 4 12V4h8z"/><circle cx="8.5" cy="8.5" r="1.5"/>',
   usuarios: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>',
   ajustes: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 4.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  salir: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3"/>',
+  llave: '<circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.7-8.7M16 7l3 3M14 9l2 2"/>',
   cobranza: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M6.5 15h4"/>',
   caja: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
 };

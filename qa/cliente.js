@@ -46,9 +46,10 @@ export async function crearUsuarioQa(admin, rol, nombre) {
   });
   assert.equal(r.status, 201, `crear usuario QA: ${JSON.stringify(r.datos)}`);
   const usuario = r.datos;
-  if ((await modoAuth()) === 'demo') return { usuario, headers: { 'X-Demo-Usuario': String(usuario.id) } };
+  if ((await modoAuth()) === 'demo') return { usuario, password, headers: { 'X-Demo-Usuario': String(usuario.id) } };
   const login = await peticion('POST', '/api/auth/login', { json: { correo: usuario.correo, password } });
-  return { usuario, headers: { Authorization: `Bearer ${login.datos.token}` } };
+  assert.equal(login.status, 200, `login usuario QA: ${JSON.stringify(login.datos)}`);
+  return { usuario, password, headers: { Authorization: `Bearer ${login.datos.token}` } };
 }
 
 export async function comunaEnCobertura(nombre = 'Providencia') {

@@ -45,8 +45,23 @@ export async function sembrar() {
   });
 }
 
+export const CLAVE_DEMO_PUBLICA = 'Demo.2026';
+
+// Con inicio de sesión real en producción, las cuentas demo que siguen con la contraseña pública
+// (escrita en el repositorio) quedan sin contraseña: no se puede entrar con ellas. Sus envíos se conservan
+// y administración puede asignarles una contraseña nueva si quiere seguir usándolas.
+export async function cerrarCuentasDemo() {
+  const { rows } = await transaccion((db) => db.query("SELECT id, correo, password_hash FROM usuario WHERE correo LIKE '%@demo.cl' AND password_hash IS NOT NULL"));
+  const expuestas = [];
+  for (const u of rows) if (await bcrypt.compare(CLAVE_DEMO_PUBLICA, u.password_hash)) expuestas.push(u);
+  if (!expuestas.length) return 0;
+  await transaccion((db) => db.query('UPDATE usuario SET password_hash = NULL, sesion_version = sesion_version + 1 WHERE id = ANY($1)', [expuestas.map((u) => u.id)]));
+  console.warn(`[seguridad] ${expuestas.length} cuenta(s) demo con contraseña pública quedaron sin acceso: ${expuestas.map((u) => u.correo).join(', ')}`);
+  return expuestas.length;
+}
+
 async function sembrarDemo(db) {
-  const hash = await bcrypt.hash('Demo.2026', 10);
+  const hash = await bcrypt.hash(CLAVE_DEMO_PUBLICA, 10);
   const usuarios = [
     ['Camila Rojas (cliente demo)', 'cliente@demo.cl', 'cliente', '+56 9 1111 2222'],
     ['Tienda Los Aromos (cliente demo)', 'tienda@demo.cl', 'cliente', '+56 9 3333 4444'],

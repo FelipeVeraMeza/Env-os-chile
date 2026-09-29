@@ -1,39 +1,72 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { Router } from 'express';
 import { config } from '../config.js';
 import { query, uno } from '../db/pool.js';
 import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
 import { normalizarRut, normalizarTelefono, ROLES } from '../lib/reglas.js';
-import { autenticar, exigirClaveDemo, requiereRol } from '../middleware/auth.js';
+import { autenticar, exigirClaveDemo, firmarSesion, requiereRol } from '../middleware/auth.js';
 
 export const auth = Router();
 
-// Límite simple de intentos de inicio de sesión por IP (10 por 15 min).
-const intentos = new Map();
-function limitar(ip) {
+// Límite de intentos FALLIDOS de inicio de sesión cada 15 minutos: 5 por correo (protege cada cuenta)
+// y 50 por IP (una oficina comparte IP: no se bloquea a todos por los errores de uno).
+// Un inicio correcto limpia el contador de ese correo.
+const VENTANA = 15 * 60 * 1000;
+const fallidos = new Map();
+function contar(clave) {
   const ahora = Date.now();
-  const reg = intentos.get(ip) || { n: 0, desde: ahora };
-  if (ahora - reg.desde > 15 * 60 * 1000) Object.assign(reg, { n: 0, desde: ahora });
-  reg.n += 1;
-  intentos.set(ip, reg);
-  if (reg.n > 10) throw falla(429, 'Demasiados intentos. Espera unos minutos.');
+  const reg = fallidos.get(clave);
+  return reg && ahora - reg.desde < VENTANA ? reg : null;
 }
+function registrarFallo(clave) {
+  const reg = contar(clave) || { n: 0, desde: Date.now() };
+  reg.n += 1;
+  fallidos.set(clave, reg);
+}
+setInterval(() => { for (const [k, r] of fallidos) if (Date.now() - r.desde > VENTANA) fallidos.delete(k); }, VENTANA).unref();
+
+// Hash de relleno: con un correo inexistente se compara igual, para no revelar qué correos existen por el tiempo de respuesta.
+const HASH_RELLENO = bcrypt.hashSync('relleno-no-es-una-clave', 10);
 
 auth.post('/login', ruta(async (req, res) => {
-  limitar(req.ip);
-  const { correo, password } = req.body || {};
-  const u = await uno('SELECT * FROM usuario WHERE correo = $1', [String(correo || '').toLowerCase().trim()]);
-  if (!u || !u.activo || !u.password_hash || !(await bcrypt.compare(String(password || ''), u.password_hash))) {
+  const correo = String(req.body?.correo || '').toLowerCase().trim();
+  const password = String(req.body?.password || '');
+  const claves = [`ip:${req.ip}`, `correo:${correo}`];
+  if ((contar(claves[0])?.n || 0) >= 50 || (contar(claves[1])?.n || 0) >= 5) {
+    throw falla(429, 'Demasiados intentos fallidos. Espera 15 minutos o pide a administración una nueva contraseña.');
+  }
+  if (!correo || !password) throw falla(422, 'Ingresa tu correo y tu contraseña', { ...(correo ? {} : { correo: 'Obligatorio' }), ...(password ? {} : { password: 'Obligatoria' }) });
+  const u = await uno('SELECT * FROM usuario WHERE correo = $1', [correo]);
+  const ok = await bcrypt.compare(password, u?.password_hash || HASH_RELLENO);
+  if (!u || !u.password_hash || !ok) {
+    claves.forEach(registrarFallo);
     throw falla(401, 'Correo o contraseña incorrectos');
   }
-  const token = jwt.sign({ sub: u.id, rol: u.rol }, config.jwtSecret, { expiresIn: `${config.jwtDias}d` });
+  if (!u.activo) throw falla(403, 'Tu cuenta está desactivada. Contacta a administración.');
+  fallidos.delete(claves[1]);
+  await query('UPDATE usuario SET ultimo_acceso = now() WHERE id = $1', [u.id]);
   req.usuario = u;
   await auditar(req, 'login', 'usuario', u.id);
-  res.json({ token, usuario: { id: u.id, nombre: u.nombre, correo: u.correo, rol: u.rol } });
+  res.json({ token: firmarSesion(u), usuario: { id: u.id, nombre: u.nombre, correo: u.correo, rol: u.rol, debe_cambiar_clave: u.debe_cambiar_clave } });
 }));
 
 auth.get('/yo', autenticar, (req, res) => res.json(req.usuario));
+
+// Cambio de la propia contraseña: exige la actual. Cierra las demás sesiones y entrega una nueva.
+auth.post('/cambiar-clave', autenticar, ruta(async (req, res) => {
+  const { actual, nueva } = req.body || {};
+  const u = await uno('SELECT * FROM usuario WHERE id = $1', [req.usuario.id]);
+  const errores = {};
+  if (!u.password_hash || !(await bcrypt.compare(String(actual || ''), u.password_hash))) errores.actual = 'La contraseña actual no es correcta';
+  if (String(nueva || '').length < 8) errores.nueva = 'Mínimo 8 caracteres';
+  else if (String(nueva) === String(actual)) errores.nueva = 'Debe ser distinta a la actual';
+  exigirSinErrores(errores, 'Revisa las contraseñas');
+  const act = await uno(
+    'UPDATE usuario SET password_hash = $1, sesion_version = sesion_version + 1, debe_cambiar_clave = false WHERE id = $2 RETURNING id, rol, sesion_version',
+    [await bcrypt.hash(String(nueva), 10), u.id]);
+  await auditar(req, 'cambiar_clave', 'usuario', u.id);
+  res.json({ token: firmarSesion(act) });
+}));
 
 // Perfiles para el modo demostración (sin inicio de sesión).
 export const demo = Router();
@@ -51,7 +84,8 @@ usuarios.get('/', requiereRol('admin'), ruta(async (req, res) => {
   const params = [];
   let where = '';
   if (ROLES.includes(req.query.rol)) { params.push(req.query.rol); where = 'WHERE rol = $1'; }
-  const { rows } = await query(`SELECT id, nombre, correo, rol, telefono, rut, activo, creado_en FROM usuario ${where} ORDER BY rol, nombre`, params);
+  const { rows } = await query(`SELECT id, nombre, correo, rol, telefono, rut, activo, creado_en, ultimo_acceso, debe_cambiar_clave,
+    password_hash IS NOT NULL AS tiene_clave FROM usuario ${where} ORDER BY rol, nombre`, params);
   res.json(rows);
 }));
 
@@ -74,14 +108,16 @@ function validarUsuario(b, nuevo) {
 
 usuarios.post('/', requiereRol('admin'), ruta(async (req, res) => {
   const b = req.body || {};
-  exigirSinErrores(validarUsuario(b, true));
+  const errores = validarUsuario(b, true);
+  if (config.authMode === 'jwt' && !b.password) errores.password = 'Obligatoria: sin contraseña no podrá iniciar sesión';
+  exigirSinErrores(errores);
   const existe = await uno('SELECT id FROM usuario WHERE correo = $1', [b.correo.toLowerCase()]);
   if (existe) throw falla(409, 'Ya existe un usuario con ese correo', { correo: 'Duplicado' });
   const hash = b.password ? await bcrypt.hash(b.password, 10) : null;
   const u = await uno(
-    `INSERT INTO usuario (nombre, correo, password_hash, rol, telefono, rut) VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO usuario (nombre, correo, password_hash, rol, telefono, rut, debe_cambiar_clave) VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id, nombre, correo, rol, telefono, rut, activo, creado_en`,
-    [b.nombre.trim(), b.correo.toLowerCase(), hash, b.rol, normalizarTelefono(b.telefono), normalizarRut(b.rut)],
+    [String(b.nombre).trim(), String(b.correo).toLowerCase().trim(), hash, b.rol, normalizarTelefono(b.telefono), normalizarRut(b.rut), Boolean(hash) && b.cambiar_al_entrar !== false],
   );
   await auditar(req, 'crear', 'usuario', u.id, { rol: u.rol });
   res.status(201).json(u);
@@ -101,12 +137,18 @@ usuarios.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   const sets = [];
   const params = [];
   const set = (col, v) => { params.push(v); sets.push(`${col} = $${params.length}`); };
-  if (b.nombre !== undefined) set('nombre', b.nombre.trim());
+  if (b.nombre !== undefined) set('nombre', String(b.nombre).trim());
   if (b.rol !== undefined) set('rol', b.rol);
   if (b.telefono !== undefined) set('telefono', normalizarTelefono(b.telefono));
   if (b.rut !== undefined) set('rut', normalizarRut(b.rut));
   if (b.activo !== undefined) set('activo', Boolean(b.activo));
-  if (b.password) set('password_hash', await bcrypt.hash(b.password, 10));
+  if (b.password) {
+    // Clave asignada por administración: se cierran las sesiones abiertas y se pide cambiarla al entrar.
+    set('password_hash', await bcrypt.hash(String(b.password), 10));
+    sets.push('sesion_version = sesion_version + 1');
+    if (id !== req.usuario.id) sets.push('debe_cambiar_clave = true');
+  }
+  if (b.activo === false) sets.push('sesion_version = sesion_version + 1');
   if (!sets.length) throw falla(400, 'Nada que actualizar');
   params.push(id);
   const u = await uno(`UPDATE usuario SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING id, nombre, correo, rol, telefono, rut, activo`, params);

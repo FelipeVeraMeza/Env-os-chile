@@ -126,7 +126,7 @@ Mensaje sugerido:
 ## Notas importantes
 
 - **Plan gratuito de Supabase:** pausa el proyecto tras ~1 semana sin actividad. Para producción real, plan Pro.
-- **Seguridad de la demo:** con `AUTH_MODE=demo` cualquiera que tenga la clave entra como administrador. Es para mostrar, **no para datos reales**. Para operar de verdad: `AUTH_MODE=jwt` + pantalla de inicio de sesión (tarea D-01).
+- **Seguridad de la demo:** con `AUTH_MODE=demo` cualquiera que tenga la clave entra como administrador. Es para mostrar, **no para datos reales**. Para operar de verdad: `AUTH_MODE=jwt` y `SEED_DEMO=false` (inicio de sesión real, ver [16](16-inicio-de-sesion.md)).
 - **Los QR apuntan al dominio de Railway.** Cuando exista el dominio `.cl` (NIC.cl), define `PUBLIC_BASE_URL` y reimprime los tickets de prueba.
 - **Actualizaciones:** cada `git push` a la rama configurada redespliega solo. Las migraciones nuevas se aplican automáticamente y no se repiten.
 - **Respaldos:** Supabase hace respaldos diarios en los planes pagados; en el gratuito, exporta periódicamente (Database → Backups).

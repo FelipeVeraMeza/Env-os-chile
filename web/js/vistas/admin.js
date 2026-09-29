@@ -1,6 +1,6 @@
 import { app } from '../app.js';
 import { get, patch, post, put } from '../api.js';
-import { $, $$, clp, datosForm, errorToast, esqueleto, fecha, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
+import { $, $$, clp, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 import { limpiarCacheComunas } from './comun.js';
 
 // ================= Panel de ganancias =================
@@ -192,26 +192,49 @@ const ROL = { admin: 'Administrador', cliente: 'Cliente', repartidor: 'Repartido
 export async function usuarios() {
   const vista = $('#vista');
   montar(vista, esqueleto(3));
+  const conSesion = app.conf.auth_mode === 'jwt';
   const lista = (await get('/api/usuarios')).filter((u) => !u.correo.startsWith('qa-'));
   montar(vista, html`
-    <div class="encabezado"><div><h1>Usuarios</h1><p>Tres perfiles: administrador, cliente y repartidor.</p></div>
+    <div class="encabezado"><div><h1>Usuarios</h1><p>Tres perfiles: administrador, cliente y repartidor.${conSesion ? ' Cada persona entra con su correo y contraseña.' : ''}</p></div>
       <button class="btn" id="nuevo-u">${icono('nuevo')} Nuevo usuario</button></div>
-    <div class="tabla-wrap"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
-      <tbody>${lista.map((u) => html`<tr><td><b>${u.nombre}</b></td><td>${u.correo}</td><td><span class="badge ${u.rol === 'admin' ? 'e-en_ruta' : u.rol === 'cliente' ? 'e-creado' : 'e-asignado'}">${ROL[u.rol]}</span></td>
-        <td>${u.telefono || '—'}</td><td>${u.activo ? html`<span class="badge e-entregado">Activo</span>` : html`<span class="badge e-anulado">Inactivo</span>`}</td>
-        <td><button class="btn sec chico" data-activo="${u.id}" data-v="${u.activo ? '0' : '1'}">${u.activo ? 'Desactivar' : 'Activar'}</button></td></tr>`)}</tbody></table></div>`);
+    <div class="tabla-wrap"><table class="tabla-cards"><thead><tr><th>Nombre y correo</th><th>Perfil</th><th>Teléfono</th><th>Último acceso</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${lista.map((u) => html`<tr><td data-label="Nombre"><b>${u.nombre}</b>${u.id === app.usuario.id ? html` <span class="muted">(tú)</span>` : ''}<div class="sub">${u.correo}</div></td>
+        <td data-label="Perfil"><span class="badge ${u.rol === 'admin' ? 'e-en_ruta' : u.rol === 'cliente' ? 'e-creado' : 'e-asignado'}">${ROL[u.rol]}</span></td>
+        <td data-label="Teléfono">${u.telefono || '—'}</td>
+        <td data-label="Último acceso" class="sub">${u.ultimo_acceso ? fechaHora(u.ultimo_acceso) : 'Nunca'}${!u.tiene_clave ? html`<div><span class="badge e-pendiente">Sin contraseña</span></div>` : u.debe_cambiar_clave ? html`<div class="muted">Debe cambiar su clave</div>` : ''}</td>
+        <td data-label="Estado">${u.activo ? html`<span class="badge e-entregado">Activo</span>` : html`<span class="badge e-anulado">Inactivo</span>`}</td>
+        <td data-label=""><div class="fila"><button class="btn sec chico" data-clave="${u.id}">Contraseña</button>
+          ${u.id === app.usuario.id ? '' : html`<button class="btn sec chico" data-activo="${u.id}" data-v="${u.activo ? '0' : '1'}">${u.activo ? 'Desactivar' : 'Activar'}</button>`}</div></td></tr>`)}</tbody></table></div>`);
   $$('[data-activo]').forEach((b) => {
     b.onclick = async () => {
       try { await patch(`/api/usuarios/${b.dataset.activo}`, { activo: b.dataset.v === '1' }); toast('Usuario actualizado', 'ok'); usuarios(); } catch (err) { errorToast(err); }
     };
   });
+  $$('[data-clave]').forEach((b) => {
+    const u = lista.find((x) => String(x.id) === b.dataset.clave);
+    b.onclick = () => {
+      const propia = u.id === app.usuario.id;
+      const m = modal(html`<h2>Contraseña de ${u.nombre}</h2>
+        <p class="sub">${propia ? 'Tu nueva contraseña. Se cerrarán tus otras sesiones.' : 'Asigna una contraseña temporal y entrégasela por un medio seguro. Al entrar se le pedirá cambiarla y se cerrarán sus sesiones abiertas.'}</p>
+        <form class="pila" id="f-clave" novalidate><label class="campo">Nueva contraseña <small>(mínimo 8 caracteres)</small><input name="password" type="text" autocomplete="off" minlength="8" value="${propia ? '' : claveTemporal()}"></label>
+          <button class="btn">Guardar contraseña</button></form>`);
+      $('#f-clave', m.el).onsubmit = async (e) => {
+        e.preventDefault();
+        const password = e.target.password.value;
+        if (password.length < 8) return marcarErrores(e.target, { password: 'Mínimo 8 caracteres' });
+        try { await patch(`/api/usuarios/${u.id}`, { password }); m.cerrar(); toast(propia ? 'Contraseña actualizada: vuelve a iniciar sesión' : 'Contraseña asignada', 'ok'); usuarios(); }
+        catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+      };
+    };
+  });
   $('#nuevo-u').onclick = () => {
     const m = modal(html`<h2>Nuevo usuario</h2><form class="pila" id="f-u" novalidate>
       <label class="campo">Nombre *<input name="nombre"></label>
-      <label class="campo">Correo *<input name="correo" type="email"></label>
+      <label class="campo">Correo *<input name="correo" type="email" autocapitalize="none"></label>
       <label class="campo">Perfil *<select name="rol"><option value="cliente">Cliente</option><option value="repartidor">Repartidor</option><option value="admin">Administrador</option></select></label>
       <label class="campo">Teléfono<input name="telefono" placeholder="+56 9 1234 5678"></label>
-      <label class="campo">Contraseña inicial <small>(para cuando se active el inicio de sesión)</small><input name="password" type="password" minlength="8"></label>
+      <label class="campo">Contraseña inicial ${conSesion ? '*' : html`<small>(para cuando se active el inicio de sesión)</small>`}<input name="password" type="text" autocomplete="off" minlength="8" value="${claveTemporal()}">
+        <small>Entrégasela a la persona; al entrar por primera vez se le pedirá cambiarla.</small></label>
       <button class="btn">Crear usuario</button></form>`);
     $('#f-u', m.el).onsubmit = async (e) => {
       e.preventDefault();
@@ -221,6 +244,13 @@ export async function usuarios() {
       catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
     };
   };
+}
+
+// Contraseña temporal legible (sin letras confundibles) para entregar a un usuario nuevo.
+function claveTemporal() {
+  const letras = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const v = crypto.getRandomValues(new Uint32Array(10));
+  return Array.from(v, (n) => letras[n % letras.length]).join('');
 }
 
 // ================= Ajustes: negocio, ticket y costos =================

@@ -5,7 +5,7 @@
 --  CÓMO USARLO: Supabase → SQL Editor → New query → pegar TODO este archivo → Run.
 --  Se puede ejecutar más de una vez: si la base ya existe, no hace nada.
 --
---  Crea: 4 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
+--  Crea: 5 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
 --  dentro de Santiago), tarifas ($3.500 base, +$1.000 horario especial, 20 kg / 60 cm),
 --  reglas de operación (3 intentos, 5 min de espera) y el bucket privado de fotos y boletas.
 --  Los usuarios los crea la app en su primer arranque (ADMIN_EMAIL / ADMIN_PASSWORD en Railway).
@@ -410,6 +410,24 @@ BEGIN
     CREATE INDEX IF NOT EXISTS auditoria_fecha_idx ON auditoria (fecha);
     CREATE INDEX IF NOT EXISTS reclamo_estado_idx ON reclamo_seguro (estado);
     INSERT INTO schema_migracion (nombre) VALUES ('004_integridad.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
+-- Migración 005_sesiones.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '005_sesiones.sql') THEN
+    -- Inicio de sesión real (AUTH_MODE=jwt).
+    -- sesion_version: al cambiar la contraseña sube en 1 y todas las sesiones anteriores dejan de servir.
+    -- debe_cambiar_clave: la contraseña la puso administración; se pide cambiarla al entrar.
+    ALTER TABLE usuario
+      ADD COLUMN sesion_version     INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN debe_cambiar_clave BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN ultimo_acceso      TIMESTAMPTZ;
+    INSERT INTO schema_migracion (nombre) VALUES ('005_sesiones.sql');
   END IF;
 END
 $migracion$;

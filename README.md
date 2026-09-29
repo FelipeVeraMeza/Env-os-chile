@@ -51,10 +51,12 @@ Crea la base en Supabase (tablas, RLS, comunas, configuración, usuarios y bucke
 | 12 | [Subir la primera versión: Railway + Supabase](docs/12-primera-version-railway-supabase.md) |
 | 14 | [Plan de acción](docs/14-plan-de-accion.md) |
 | 15 | [Diagnóstico de envíos, cobranza y verificación de pagos](docs/15-diagnostico-envios-y-cobranza.md) |
+| 16 | [Inicio de sesión: cómo activarlo](docs/16-inicio-de-sesion.md) |
+| 📘 | [**Manual de usuario (PDF)**](docs/manual/manual-de-usuario.pdf) · se regenera con `npm run manual` |
 
 ## Reglas de negocio implementadas
 
-- **Tres perfiles:** Administrador, Cliente y Repartidor.
+- **Tres perfiles:** Administrador, Cliente y Repartidor, cada uno con **inicio de sesión** (correo y contraseña) cuando `AUTH_MODE=jwt`.
 - **Tarifa $3.500** dentro de Santiago hasta **20 kg y 60×60×60 cm** por bulto. Sobre eso, cotización especial (solo admin).
 - **Puntos Blue Express, Starken y otros:** sin límite de paquetes por $3.500.
 - **Envío especial por horario:** +$1.000, con franja obligatoria.

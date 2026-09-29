@@ -35,9 +35,10 @@ test('producción rechaza JWT_SECRET corto y ADMIN_PASSWORD débil', () => {
   assert.equal(validarProduccion({ ...completo, ADMIN_PASSWORD: 'abc' }).length, 1);
 });
 
-test('con AUTH_MODE=jwt no se exige DEMO_CLAVE', () => {
+test('con AUTH_MODE=jwt no se exige DEMO_CLAVE, pero sí SEED_DEMO=false', () => {
   const { DEMO_CLAVE, ...sinDemo } = completo;
-  assert.deepEqual(validarProduccion({ ...sinDemo, AUTH_MODE: 'jwt' }), []);
+  assert.deepEqual(validarProduccion({ ...sinDemo, AUTH_MODE: 'jwt', SEED_DEMO: 'false' }), []);
+  assert.ok(validarProduccion({ ...sinDemo, AUTH_MODE: 'jwt' }).some((f) => f.startsWith('SEED_DEMO')), 'cuentas demo con clave pública');
 });
 
 test('producción rechaza textos de ejemplo sin reemplazar', () => {

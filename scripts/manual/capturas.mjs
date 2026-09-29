@@ -78,8 +78,9 @@ export async function tomarCapturas({ url, credenciales, ejecutable, log = conso
           if (modo === 'demo' && id) localStorage.setItem('envios.perfil', String(id));
           if (token) localStorage.setItem('envios.token', token);
         }, { modo, id: rol ? ids[rol] : null, token: rol ? tokens[rol] : null });
+        // Cambiar solo el #fragmento no recarga la página: se recarga para que la app lea la sesión recién guardada.
         await page.goto(`${url}${ruta}${hash}`);
-        await page.waitForLoadState('networkidle');
+        await page.reload({ waitUntil: 'networkidle' });
         // Con perfil, la pantalla debe mostrar el menú de ese perfil (si no, se reintenta).
         if (rol) await page.waitForSelector('#menu a', { timeout: 5000 });
         await page.waitForTimeout(600);
@@ -103,6 +104,7 @@ export async function tomarCapturas({ url, credenciales, ejecutable, log = conso
   if (modo !== 'demo') {
     await captura('login', { tam: MOVIL });
     await captura('login-escritorio', { tam: ESCRITORIO });
+    await captura('cuenta', { rol: 'cliente', hash: '#/inicio', antes: clic('#chip-perfil') });
   }
 
   // ---------- Cliente ----------

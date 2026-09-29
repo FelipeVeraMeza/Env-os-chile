@@ -8,9 +8,9 @@ Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan
 ### Cuentas y acceso
 | ID | Requerimiento | Prio. | Proto. | QA |
 |---|---|---|---|---|
-| RF-01 | El usuario inicia sesión con correo y contraseña | I | 🟡 API lista (`/api/auth/login`); la interfaz demo no pide login | — |
-| RF-02 | Recuperación de contraseña por correo | A | ⬜ requiere proveedor de correo | — |
-| RF-03 | La sesión dura 30 días en el dispositivo | A | 🟡 token JWT de 30 días | — |
+| RF-01 | El usuario inicia sesión con correo y contraseña (bloqueo de la cuenta 15 min tras 5 intentos fallidos) | I | ✅ `AUTH_MODE=jwt` | CP-91 a CP-94 |
+| RF-02 | Recuperación de contraseña por correo | A | 🟡 administración asigna una clave temporal que se cambia al entrar; el envío por correo requiere proveedor | CP-96 |
+| RF-03 | La sesión dura 30 días en el dispositivo; cambiar la contraseña o desactivar al usuario cierra sus sesiones | A | ✅ | CP-95, CP-97 |
 | RF-04 | Tres perfiles (admin, cliente, repartidor) que limitan lo que se ve y hace | I | ✅ | CP-25, CP-60 a CP-62 |
 | RF-05 | El administrador crea, edita y desactiva usuarios | A | ✅ | CP-61 |
 

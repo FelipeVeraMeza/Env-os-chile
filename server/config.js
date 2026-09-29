@@ -110,6 +110,9 @@ export function validarProduccion(env) {
   } else if (env.ADMIN_PASSWORD.length < 12) {
     faltan.push('ADMIN_PASSWORD: debe tener 12 caracteres o más');
   }
+  if (env.AUTH_MODE === 'jwt' && env.SEED_DEMO !== 'false') {
+    faltan.push('SEED_DEMO=false: con inicio de sesión real no se crean cuentas demo (su contraseña es pública en el repositorio)');
+  }
   if ((env.AUTH_MODE || 'demo') === 'demo' && !env.DEMO_CLAVE) {
     faltan.push('DEMO_CLAVE: con AUTH_MODE=demo la demo publicada debe estar protegida con clave');
   }

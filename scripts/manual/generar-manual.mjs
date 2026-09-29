@@ -49,12 +49,16 @@ const entrar = conLogin ? `
   ${par(img('login', 'Pantalla de inicio de sesión en el celular'), img('login-escritorio', 'La misma pantalla en el computador'))}
   ${pasos([
     'Abre la dirección de la plataforma en el navegador (o el ícono instalado en el teléfono).',
-    'Escribe tu <b>correo</b> y tu <b>contraseña</b> y pulsa <b>Entrar</b>.',
-    'Si te equivocas 10 veces seguidas, espera 15 minutos antes de volver a intentar (protección contra accesos indebidos).',
-    '¿Olvidaste la contraseña? Pídele al administrador que te asigne una nueva desde <b>Usuarios</b>.',
-    'Para salir: menú <b>Más</b> (celular) o tu nombre arriba a la derecha (computador) → <b>Cerrar sesión</b>.',
-    'Para cambiar tu contraseña: <b>Más</b> → <b>Cambiar contraseña</b> (pide la actual y la nueva, mínimo 8 caracteres).',
+    'Escribe tu <b>correo</b> y tu <b>contraseña</b> y pulsa <b>Entrar</b>. Con <b>Mostrar</b> puedes ver lo que escribiste.',
+    'Si es tu primera vez (o administración te dio una contraseña temporal), la plataforma te pide <b>crear tu propia contraseña</b> antes de continuar.',
+    'Si te equivocas <b>5 veces</b>, esa cuenta queda bloqueada <b>15 minutos</b> (protección contra accesos indebidos).',
+    '¿Olvidaste la contraseña? Pídele a administración una nueva desde <b>Usuarios → Contraseña</b>.',
   ])}
+  <h3>Mi cuenta: cambiar contraseña y cerrar sesión</h3>
+  <p>Toca tu nombre arriba a la derecha (o <b>Más</b> en el celular). Ahí están tus datos, <b>Cambiar contraseña</b> (pide la actual y la nueva,
+  mínimo 8 caracteres) y <b>Cerrar sesión</b>. Al cambiar la contraseña se cierran tus sesiones en otros dispositivos.</p>
+  ${img('cuenta', 'Menú Mi cuenta', 'movil')}
+  ${nota('El <b>seguimiento por folio</b> no necesita sesión: el enlace "Seguir un envío con su folio" está en la misma pantalla de ingreso.')}
   ${nota('Las cuentas las crea el administrador (sección <b>Usuarios</b>). No hay registro público.')}`
   : `
   <h2 id="entrar">1.3 Cómo entrar (versión de demostración)</h2>
@@ -294,8 +298,9 @@ qué abre el QR, GPS obligatorio y si los repartidores pueden <b>tomar envíos</
 define una tarifa propia (vacía = tarifa base).</p>
 ${img('a-tarifas', 'Tarifas, reglas de operación y cobertura por comuna')}
 <h2 id="a-usuarios">5.7 Usuarios</h2>
-<p>Crea usuarios (nombre, correo, perfil, teléfono y contraseña inicial) y los activa o desactiva. Un repartidor con envíos en curso no se puede
-desactivar hasta reasignarlos. Un administrador no puede quitarse su propio acceso.${conLogin ? ' Con <b>Contraseña</b> se asigna una clave nueva a quien la olvidó.' : ''}</p>
+<p>Crea usuarios (nombre, correo, perfil, teléfono y <b>contraseña inicial</b>, que la plataforma propone al azar) y los activa o desactiva.
+La tabla muestra el <b>último acceso</b> de cada persona. Un repartidor con envíos en curso no se puede desactivar hasta reasignarlos,
+y un administrador no puede quitarse su propio acceso.${conLogin ? ' Con <b>Contraseña</b> se asigna una clave temporal a quien la olvidó: se cierran sus sesiones abiertas y, al entrar, se le pide crear una propia. Desactivar a alguien también cierra su sesión de inmediato.' : ''}</p>
 ${img('a-usuarios', 'Usuarios de la plataforma')}
 <h2 id="a-ajustes">5.8 Ajustes y costos</h2>
 <p><b>Empresa</b>: nombre, RUT, teléfono, correo y logo (aparecen en la app y en el ticket). <b>Ticket</b>: texto al pie.
@@ -311,6 +316,11 @@ ${nota('El ticket es un comprobante interno: <b>no es boleta ni factura</b>. La 
 
 <h1 id="faq">7. Preguntas frecuentes</h1>
 ${tabla(['Pregunta', 'Respuesta'], [
+  ...(conLogin ? [
+    ['Olvidé mi contraseña.', 'Administración te asigna una temporal en <b>Usuarios → Contraseña</b>; al entrar con ella se te pedirá crear una propia.'],
+    ['Dice "Demasiados intentos fallidos".', 'La cuenta se bloquea 15 minutos tras 5 intentos fallidos. Espera o pide una contraseña nueva a administración.'],
+    ['La app me sacó y pide iniciar sesión otra vez.', 'Tu contraseña cambió (o administración la cambió o te desactivó). Entra con la contraseña vigente.'],
+  ] : []),
   ['Creé un envío y el repartidor no lo ve.', 'Revisa que esté <b>pagado</b>. Los envíos pagados aparecen en <b>Disponibles para tomar</b> de todos los repartidores; si nadie lo toma, administración puede asignarlo en el detalle del envío.'],
   ['El repartidor no puede retirar.', 'El envío no está pagado. El cliente debe pagarlo o administración registrar un pago manual.'],
   ['No se habilita "Confirmar entrega".', 'Falta la foto o la ubicación GPS. Activa el permiso de ubicación del navegador para la plataforma y vuelve a abrir la ventana.'],

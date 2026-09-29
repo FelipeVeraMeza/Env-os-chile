@@ -68,7 +68,7 @@ Cuando respondan: nombre, logo, datos del negocio, tarifas, límites e intentos 
 ### Etapa de desarrollo (se cotiza aparte, ver [09](09-plan-de-desarrollo.md))
 | # | Tarea | Prio. |
 |---|---|---|
-| [ ] D-01 | Pantalla de **inicio de sesión** y `AUTH_MODE=jwt` en producción | Must |
+| [x] D-01 | Pantalla de **inicio de sesión** y `AUTH_MODE=jwt` (ver [16](16-inicio-de-sesion.md)) | Must |
 | [ ] D-02 | **Pasarela real** con webhook firmado (modelo de verificación, bitácora y conciliación ya hechos, ver [15](15-diagnostico-envios-y-cobranza.md)) | Must |
 | [ ] D-03 | **Dominio .cl** apuntado a Railway con HTTPS | Must |
 | [ ] D-04 | Logo, nombre y colores definitivos | Must |

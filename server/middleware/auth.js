@@ -18,7 +18,9 @@ export const autenticar = ruta(async (req, _res, next) => {
     } catch {
       throw falla(401, 'Sesión inválida o expirada');
     }
-    usuario = await uno('SELECT id, nombre, correo, rol, activo FROM usuario WHERE id = $1', [payload.sub]);
+    usuario = await uno('SELECT id, nombre, correo, rol, activo, sesion_version, debe_cambiar_clave FROM usuario WHERE id = $1', [payload.sub]);
+    // Tras cambiar la contraseña, las sesiones abiertas con la clave anterior dejan de servir.
+    if (usuario && (payload.v ?? 0) !== usuario.sesion_version) throw falla(401, 'Tu sesión expiró: vuelve a iniciar sesión', { sesion: 'expirada' });
   } else if (config.authMode === 'demo') {
     exigirClaveDemo(req);
     const id = Number(req.get('x-demo-usuario'));
@@ -30,11 +32,16 @@ export const autenticar = ruta(async (req, _res, next) => {
     }
   }
 
-  if (!usuario) throw falla(401, config.authMode === 'demo' ? 'Selecciona un perfil de demostración' : 'Debes iniciar sesión');
+  if (!usuario) throw falla(401, config.authMode === 'demo' ? 'Selecciona un perfil de demostración' : 'Debes iniciar sesión', { sesion: 'requerida' });
   if (!usuario.activo) throw falla(403, 'Usuario desactivado');
+  delete usuario.sesion_version;
   req.usuario = usuario;
   next();
 });
+
+export function firmarSesion(u) {
+  return jwt.sign({ sub: u.id, rol: u.rol, v: u.sesion_version ?? 0 }, config.jwtSecret, { expiresIn: `${config.jwtDias}d` });
+}
 
 export function requiereRol(...roles) {
   return (req, _res, next) => {
