@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { query, uno } from '../db/pool.js';
+import { query, transaccion, uno } from '../db/pool.js';
 import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
 import { normalizarRut, normalizarTelefono, validarDestinatario, validarDireccion, COURIERS, ESTADOS, ESTADOS_RECLAMO, MOTIVOS_FALLO, MOTIVOS_RECLAMO, CONFIG_POR_DEFECTO } from '../lib/reglas.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
 import { config } from '../config.js';
+import { registrarEvento } from '../lib/seguridad.js';
 
 // ---------- Comunas y zonas ----------
 export const comunas = Router();
@@ -100,6 +101,8 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
   exigirSinErrores(errores, 'Revisa los valores');
   await query('INSERT INTO config (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor', [clave, JSON.stringify(nuevo)]);
   await auditar(req, 'editar', 'config', clave, nuevo);
+  const cambios = Object.keys(nuevo).filter((k) => JSON.stringify(nuevo[k]) !== JSON.stringify(actual[k]));
+  if (cambios.length) await registrarEvento(req, 'config_cambiada', { detalle: { clave, cambios: Object.fromEntries(cambios.map((k) => [k, { antes: actual[k], despues: nuevo[k] }])) } });
   res.json(nuevo);
 }));
 
@@ -164,7 +167,8 @@ destinatarios.patch('/:id', ruta(async (req, res) => {
 // Agregar una nueva dirección (p. ej. cuando el destinatario se cambia de casa).
 destinatarios.post('/:id/direcciones', ruta(async (req, res) => {
   const d = await destinatarioPropio(req, idNumerico(req.params.id));
-  const b = req.body || {};
+  const b = { ...(req.body || {}) };
+  for (const k of ['alias', 'calle', 'numero', 'depto', 'referencia']) if (b[k] !== null && b[k] !== undefined) b[k] = String(b[k]);
   exigirSinErrores(validarDireccion(b));
   const comuna = await uno('SELECT id FROM comuna WHERE id = $1', [Number(b.comuna_id)]);
   if (!comuna) throw falla(422, 'Comuna inexistente', { comuna_id: 'Inexistente' });
@@ -181,10 +185,22 @@ destinatarios.post('/:id/direcciones', ruta(async (req, res) => {
 destinatarios.patch('/:id/direcciones/:dirId', ruta(async (req, res) => {
   const d = await destinatarioPropio(req, idNumerico(req.params.id));
   const dirId = idNumerico(req.params.dirId);
-  if (req.body.es_principal) await query('UPDATE direccion SET es_principal = false WHERE destinatario_id = $1', [d.id]);
-  const di = await uno(
-    'UPDATE direccion SET activa = COALESCE($1, activa), es_principal = COALESCE($2, es_principal) WHERE id = $3 AND destinatario_id = $4 RETURNING *',
-    [req.body.activa ?? null, req.body.es_principal ?? null, dirId, d.id]);
+  const bool = (v, campo) => {
+    if (v === undefined || v === null) return null;
+    if (typeof v !== 'boolean') throw falla(422, `${campo} debe ser verdadero o falso`, { [campo]: 'Inválido' });
+    return v;
+  };
+  const activa = bool(req.body?.activa, 'activa');
+  const principal = bool(req.body?.es_principal, 'es_principal');
+  // En una transacción: si la dirección no existe, no se desmarca la principal de las demás.
+  const di = await transaccion(async (db) => {
+    const { rows: [actual] } = await db.query('SELECT id FROM direccion WHERE id = $1 AND destinatario_id = $2 FOR UPDATE', [dirId, d.id]);
+    if (!actual) return null;
+    if (principal) await db.query('UPDATE direccion SET es_principal = false WHERE destinatario_id = $1', [d.id]);
+    const { rows: [r] } = await db.query(
+      'UPDATE direccion SET activa = COALESCE($1, activa), es_principal = COALESCE($2, es_principal) WHERE id = $3 RETURNING *', [activa, principal, dirId]);
+    return r;
+  });
   if (!di) throw falla(404, 'Dirección no encontrada');
   res.json(di);
 }));

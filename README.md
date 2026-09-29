@@ -52,10 +52,12 @@ Crea la base en Supabase (tablas, RLS, comunas, configuración, usuarios y bucke
 | 14 | [Plan de acción](docs/14-plan-de-accion.md) |
 | 15 | [Diagnóstico de envíos, cobranza y verificación de pagos](docs/15-diagnostico-envios-y-cobranza.md) |
 | 16 | [Inicio de sesión: cómo activarlo](docs/16-inicio-de-sesion.md) |
+| 17 | [**Seguridad**: vulnerabilidades corregidas, monitoreo y qué hacer ante un hackeo](docs/17-seguridad.md) |
 | 📘 | [**Manual de usuario (PDF)**](docs/manual/manual-de-usuario.pdf) · se regenera con `npm run manual` |
 
 ## Reglas de negocio implementadas
 
+- **Seguridad:** panel de alertas (fuerza bruta, robo de datos, sesiones falsas, extracción masiva), registro de quién exporta o descarga qué, bitácoras que no se pueden borrar y límites de peticiones.
 - **Tres perfiles:** Administrador, Cliente y Repartidor, cada uno con **inicio de sesión** (correo y contraseña) cuando `AUTH_MODE=jwt`.
 - **Tarifa $3.500** dentro de Santiago hasta **20 kg y 60×60×60 cm** por bulto. Sobre eso, cotización especial (solo admin).
 - **Puntos Blue Express, Starken y otros:** sin límite de paquetes por $3.500.

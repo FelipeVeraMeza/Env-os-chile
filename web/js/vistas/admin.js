@@ -1,6 +1,6 @@
 import { app } from '../app.js';
 import { get, patch, post, put } from '../api.js';
-import { $, $$, clp, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
+import { $, $$, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 import { limpiarCacheComunas } from './comun.js';
 
 // ================= Panel de ganancias =================
@@ -204,10 +204,18 @@ export async function usuarios() {
         <td data-label="Último acceso" class="sub">${u.ultimo_acceso ? fechaHora(u.ultimo_acceso) : 'Nunca'}${!u.tiene_clave ? html`<div><span class="badge e-pendiente">Sin contraseña</span></div>` : u.debe_cambiar_clave ? html`<div class="muted">Debe cambiar su clave</div>` : ''}</td>
         <td data-label="Estado">${u.activo ? html`<span class="badge e-entregado">Activo</span>` : html`<span class="badge e-anulado">Inactivo</span>`}</td>
         <td data-label=""><div class="fila"><button class="btn sec chico" data-clave="${u.id}">Contraseña</button>
+          ${conSesion && u.id !== app.usuario.id ? html`<button class="btn sec chico" data-sesiones="${u.id}" title="Cierra su sesión en todos sus dispositivos">Cerrar sesiones</button>` : ''}
           ${u.id === app.usuario.id ? '' : html`<button class="btn sec chico" data-activo="${u.id}" data-v="${u.activo ? '0' : '1'}">${u.activo ? 'Desactivar' : 'Activar'}</button>`}</div></td></tr>`)}</tbody></table></div>`);
   $$('[data-activo]').forEach((b) => {
     b.onclick = async () => {
       try { await patch(`/api/usuarios/${b.dataset.activo}`, { activo: b.dataset.v === '1' }); toast('Usuario actualizado', 'ok'); usuarios(); } catch (err) { errorToast(err); }
+    };
+  });
+  $$('[data-sesiones]').forEach((b) => {
+    const u = lista.find((x) => String(x.id) === b.dataset.sesiones);
+    b.onclick = async () => {
+      if (!(await confirmar(`¿Cerrar las sesiones de ${u.nombre}?`, 'Tendrá que volver a iniciar sesión en todos sus dispositivos (útil si perdió el teléfono).', 'Cerrar sesiones'))) return;
+      try { await post(`/api/usuarios/${u.id}/cerrar-sesiones`); toast('Sesiones cerradas', 'ok'); } catch (err) { errorToast(err); }
     };
   });
   $$('[data-clave]').forEach((b) => {
@@ -248,9 +256,11 @@ export async function usuarios() {
 
 // Contraseña temporal legible (sin letras confundibles) para entregar a un usuario nuevo.
 function claveTemporal() {
-  const letras = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const v = crypto.getRandomValues(new Uint32Array(10));
-  return Array.from(v, (n) => letras[n % letras.length]).join('');
+  const letras = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ';
+  const numeros = '23456789';
+  const v = crypto.getRandomValues(new Uint32Array(12));
+  // 8 letras + 4 números (la política exige ambos), sin caracteres que se confundan (0/O, 1/l/I).
+  return Array.from(v, (n, i) => (i % 3 === 2 ? numeros[n % numeros.length] : letras[n % letras.length])).join('');
 }
 
 // ================= Ajustes: negocio, ticket y costos =================
@@ -369,4 +379,113 @@ export async function cobranza(rango = {}) {
       };
     };
   });
+}
+
+// ================= Seguridad: alertas, intentos de ataque y extracción de datos =================
+const NIVEL_ALERTA = { critica: ['e-fallido', 'Crítica'], alerta: ['e-pendiente', 'Alerta'], aviso: ['e-asignado', 'Aviso'] };
+const NIVEL_EVENTO = { alerta: 'e-fallido', aviso: 'e-pendiente', info: 'e-creado' };
+
+export async function seguridad(filtro = {}) {
+  const vista = $('#vista');
+  montar(vista, esqueleto(4));
+  const horas = filtro.horas || 24;
+  const qs = new URLSearchParams({ limite: 150, ...(filtro.sospechosos ? { sospechosos: '1' } : {}), ...(filtro.tipo ? { tipo: filtro.tipo } : {}) });
+  const [r, alertas, extraccion, eventos] = await Promise.all([
+    get(`/api/seguridad/resumen?horas=${horas}`), get('/api/seguridad/alertas'), get(`/api/seguridad/extraccion?horas=${Math.max(horas, 24 * 7)}`), get(`/api/seguridad/eventos?${qs}`),
+  ]);
+  const t = r.totales;
+  const kpi = (etq, valor, nota, alerta) => html`<div class="kpi ${alerta ? 'destacado' : ''}"><div class="etiqueta">${etq}</div><div class="valor">${valor}</div><div class="nota">${nota}</div></div>`;
+  montar(vista, html`
+    <div class="encabezado"><div><h1>Seguridad</h1><p>Intentos de ataque, accesos indebidos y qué datos salieron de la plataforma. Los registros no se pueden borrar ni modificar.</p></div>
+      <div class="fila"><select id="horas" aria-label="Período">${[[24, 'Últimas 24 horas'], [168, 'Últimos 7 días'], [720, 'Últimos 30 días']].map(([v, txt]) => html`<option value="${v}" ${v === horas ? html`selected` : ''}>${txt}</option>`)}</select>
+        ${app.conf.auth_mode === 'jwt' ? html`<button class="btn peligro" id="emergencia">Cerrar todas las sesiones</button>` : ''}</div></div>
+    ${alertas.length ? html`<div class="card" style="border-color:var(--error)"><div class="card-titulo"><h2>Alertas abiertas (${alertas.length})</h2>${alertas.length > 1 ? html`<button class="btn sec chico" id="revisar-todas">Marcar todas revisadas</button>` : html`<span class="sub">Revísalas y anota qué hiciste</span>`}</div>
+      <div class="pila">${alertas.map((a) => html`<div class="fila entre" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.05)">
+        <div><span class="badge ${NIVEL_ALERTA[a.nivel][0]}">${NIVEL_ALERTA[a.nivel][1]}</span> <b>${a.titulo}</b>
+          <div class="sub">${fechaHora(a.creada_en)}${a.veces > 1 ? ` · se repitió ${a.veces} veces, última ${fechaHora(a.ultima_en)}` : ''}${a.ip ? ` · IP ${a.ip}` : ''}${a.usuario_nombre ? ` · ${a.usuario_nombre}` : ''}</div></div>
+        <button class="btn sec chico" data-revisar="${a.id}">Marcar revisada</button></div>`)}</div></div>`
+    : html`<div class="aviso ok" style="margin-bottom:16px">Sin alertas abiertas ✔</div>`}
+    <div class="grid g4">
+      ${kpi('Inicios de sesión fallidos', t.logins_fallidos, `${t.logins} correctos · ${t.bloqueos} bloqueo(s)`, t.bloqueos > 0)}
+      ${kpi('Intentos de ver datos ajenos', t.sondeos, `${t.denegados} acciones sin permiso`, t.sondeos > 0)}
+      ${kpi('Registros exportados', t.registros_exportados, `${t.exportaciones} exportación(es) · ${t.descargas} archivo(s) descargados`)}
+      ${kpi('Sesiones o enlaces falsos', t.falsificaciones, `${t.excesos} exceso(s) de peticiones`, t.falsificaciones > 0)}
+    </div>
+    <div class="grid g2" style="margin-top:16px;align-items:start">
+      <div class="card" style="margin:0"><h2>¿Quién sacó datos? <span class="sub">(últimos ${Math.max(horas, 168) / 24} días)</span></h2>
+        ${extraccion.usuarios.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Usuario</th><th class="num">Registros exportados</th><th class="num">Archivos</th><th class="num">Intentos ajenos</th><th>Último</th></tr></thead>
+          <tbody>${extraccion.usuarios.map((u) => html`<tr><td><b>${u.nombre || 'Sin sesión'}</b><div class="sub">${u.correo || ''}</div></td><td class="num">${u.registros_exportados}</td><td class="num">${u.archivos_descargados}</td>
+            <td class="num">${u.intentos_ajenos ? html`<span class="badge e-fallido">${u.intentos_ajenos}</span>` : 0}</td><td class="sub">${fechaHora(u.ultima)}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Nadie ha exportado ni descargado datos.</p>`}</div>
+      <div class="card" style="margin:0"><h2>IPs sospechosas</h2>
+        ${r.ips_sospechosas.length ? html`<div class="tabla-wrap"><table><thead><tr><th>IP</th><th class="num">Señales</th><th class="num">Cuentas probadas</th><th>Última</th></tr></thead>
+          <tbody>${r.ips_sospechosas.map((i) => html`<tr><td class="mono"><a href="#" data-ip="${i.ip}">${i.ip}</a></td><td class="num">${i.sospechosos}</td><td class="num">${i.cuentas_probadas}</td><td class="sub">${fechaHora(i.ultima)}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Ninguna en el período.</p>`}
+        <h3 style="margin-top:14px">Sesiones recientes</h3>
+        ${r.sesiones_recientes.length ? html`<div class="pila">${r.sesiones_recientes.slice(0, 8).map((u) => html`<div class="fila entre"><span><b>${u.nombre}</b> <span class="sub">${u.rol}</span></span><span class="sub">${fechaHora(u.ultimo_acceso)}${u.ultima_ip ? ` · ${u.ultima_ip}` : ''}</span></div>`)}</div>` : html`<p class="sub">Nadie entró en el período.</p>`}
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Registro de eventos</h2>
+      <form class="fila" id="f-eventos"><label class="interruptor"><input type="checkbox" name="sospechosos" ${filtro.sospechosos ? html`checked` : ''}> Solo sospechosos</label>
+        <select name="tipo" aria-label="Tipo"><option value="">Todos los tipos</option>${r.por_tipo.map((p) => html`<option value="${p.tipo}" ${filtro.tipo === p.tipo ? html`selected` : ''}>${p.etiqueta} (${p.n})</option>`)}</select></form></div>
+      ${eventos.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Fecha</th><th>Evento</th><th>Usuario</th><th>IP</th><th>Detalle</th></tr></thead>
+        <tbody>${eventos.map((e) => html`<tr><td class="sub">${fechaHora(e.fecha)}</td><td><span class="badge ${NIVEL_EVENTO[e.nivel]}">${e.etiqueta}</span></td>
+          <td>${e.usuario_nombre || e.correo || '—'}</td><td class="mono sub">${e.ip || ''}</td>
+          <td class="sub" style="white-space:normal;max-width:360px">${e.registros ? `${e.registros} registro(s) · ` : ''}${e.ruta || ''}${e.detalle ? ` · ${resumirDetalle(e.detalle)}` : ''}</td></tr>`)}</tbody></table></div>` : vacio('Sin eventos con estos filtros.')}
+    </div>
+    <div class="aviso" style="margin-top:16px"><b>¿Sospechas un hackeo?</b> 1) Pulsa <b>Cerrar todas las sesiones</b>. 2) Cambia tu contraseña. 3) Revisa aquí qué usuario e IP actuaron y qué datos exportaron. 4) Sigue el protocolo de <b>docs/17-seguridad.md</b> (cambiar claves de Railway y Supabase).</div>`);
+
+  $('#horas').onchange = (e) => seguridad({ ...filtro, horas: Number(e.target.value) });
+  $('#f-eventos').onchange = (e) => seguridad({ ...datosForm(e.currentTarget), horas });
+  $$('[data-ip]').forEach((a) => { a.onclick = async (ev) => { ev.preventDefault(); const lista = await get(`/api/seguridad/eventos?ip=${encodeURIComponent(a.dataset.ip)}&limite=50`); detalleIp(a.dataset.ip, lista); }; });
+  $$('[data-revisar]').forEach((b) => {
+    b.onclick = () => {
+      const m = modal(html`<h2>Revisar alerta</h2><form class="pila" id="f-rev" novalidate>
+        <label class="campo">¿Qué revisaste y qué hiciste? *<textarea name="nota" placeholder="Ej. era un cliente que olvidó su clave; se le asignó una nueva"></textarea></label>
+        <button class="btn">Marcar como revisada</button></form>`);
+      $('#f-rev', m.el).onsubmit = async (e) => {
+        e.preventDefault();
+        try { await post(`/api/seguridad/alertas/${b.dataset.revisar}/revisar`, datosForm(e.target)); m.cerrar(); toast('Alerta revisada', 'ok'); seguridad({ ...filtro, horas }); }
+        catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+      };
+    };
+  });
+  $('#revisar-todas')?.addEventListener('click', () => {
+    const m = modal(html`<h2>Revisar ${alertas.length} alertas</h2><p class="sub">Úsalo cuando ya investigaste (por ejemplo, alertas generadas por pruebas). La nota queda en cada alerta.</p>
+      <form class="pila" id="f-rev-todas" novalidate><label class="campo">¿Qué revisaste y qué hiciste? *<textarea name="nota"></textarea></label><button class="btn">Marcar todas como revisadas</button></form>`);
+    $('#f-rev-todas', m.el).onsubmit = async (e) => {
+      e.preventDefault();
+      try { const r2 = await post('/api/seguridad/alertas/revisar-todas', datosForm(e.target)); m.cerrar(); toast(`${r2.revisadas} alerta(s) revisadas`, 'ok'); seguridad({ ...filtro, horas }); }
+      catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+    };
+  });
+  $('#emergencia')?.addEventListener('click', () => {
+    const m = modal(html`<h2>Cerrar todas las sesiones</h2>
+      <p class="sub">Todos los usuarios (menos tú) tendrán que volver a iniciar sesión. Úsalo si sospechas que alguien robó una sesión o una contraseña.</p>
+      <form class="pila" id="f-emer" novalidate><label class="campo">Escribe CERRAR para confirmar<input name="confirmar" autocomplete="off"></label>
+        <button class="btn peligro">Cerrar todas las sesiones</button></form>`);
+    $('#f-emer', m.el).onsubmit = async (e) => {
+      e.preventDefault();
+      try { const r2 = await post('/api/seguridad/cerrar-todas-las-sesiones', datosForm(e.target)); m.cerrar(); toast(`Se cerraron las sesiones de ${r2.usuarios} usuario(s)`, 'ok'); seguridad({ ...filtro, horas }); }
+      catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+    };
+  });
+}
+
+function resumirDetalle(d) {
+  const partes = [];
+  if (d.motivo) partes.push(String(d.motivo).replace(/_/g, ' '));
+  if (d.entidad) partes.push(`${d.entidad} #${d.id}${d.existe === false ? ' (no existe)' : ''}`);
+  if (d.requiere) partes.push(`requiere ${d.requiere.join('/')}`);
+  if (d.adjunto) partes.push(`archivo #${d.adjunto}${d.envio ? ` del envío #${d.envio}` : ''}`);
+  if (d.correo) partes.push(d.correo);
+  if (d.cambios) partes.push(`cambió: ${Array.isArray(d.cambios) ? d.cambios.join(', ') : Object.keys(d.cambios).join(', ')}`);
+  if (d.alcance) partes.push(`alcance: ${d.alcance}`);
+  if (d.grupo) partes.push(`límite ${d.grupo}`);
+  return partes.join(' · ') || '';
+}
+
+function detalleIp(ip, eventos) {
+  modal(html`<h2>Actividad de la IP <span class="mono">${ip}</span></h2>
+    <p class="sub">Últimos ${eventos.length} eventos. Si es un ataque, bloquéala en el proveedor (Railway / Cloudflare) y revisa las cuentas que aparecen.</p>
+    <div class="pila" style="max-height:60vh;overflow:auto">${eventos.map((e) => html`<div><span class="badge ${NIVEL_EVENTO[e.nivel]}">${e.etiqueta}</span>
+      <span class="sub">${fechaHora(e.fecha)} · ${e.usuario_nombre || e.correo || 'sin sesión'}</span><div class="muted">${e.agente || ''}</div></div>`)}</div>`);
 }

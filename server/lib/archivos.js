@@ -6,7 +6,8 @@ import { config } from '../config.js';
 
 export const subida = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1 },
+  // Límites también para los campos de texto: evita formularios gigantes que agoten la memoria.
+  limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1, fields: 40, fieldSize: 64 * 1024, parts: 45 },
 });
 
 const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
@@ -124,17 +125,18 @@ function rutaLocal(relativa) {
   return abs;
 }
 
-// Enlaces temporales firmados: los archivos nunca son públicos (RNF-06).
-export function firmarEnlace(adjuntoId, segundos = 600) {
+// Enlaces temporales firmados: los archivos nunca son públicos (RNF-06). La firma incluye a quién se le
+// entregó el enlace, así cada descarga queda atribuida a un usuario en la bitácora de seguridad.
+const firma = (adjuntoId, exp, usuarioId) => crypto.createHmac('sha256', config.jwtSecret).update(`${adjuntoId}.${exp}.${usuarioId}`).digest('base64url');
+
+export function firmarEnlace(adjuntoId, usuarioId, segundos = 600) {
   const exp = Math.floor(Date.now() / 1000) + segundos;
-  const sig = crypto.createHmac('sha256', config.jwtSecret).update(`${adjuntoId}.${exp}`).digest('base64url');
-  return `/api/adjuntos/${adjuntoId}/archivo?exp=${exp}&sig=${sig}`;
+  return `/api/adjuntos/${adjuntoId}/archivo?exp=${exp}&u=${usuarioId}&sig=${firma(adjuntoId, exp, usuarioId)}`;
 }
 
-export function verificarFirma(adjuntoId, exp, sig) {
-  if (!exp || !sig || Number(exp) < Math.floor(Date.now() / 1000)) return false;
-  const esperado = crypto.createHmac('sha256', config.jwtSecret).update(`${adjuntoId}.${exp}`).digest('base64url');
-  const a = Buffer.from(esperado);
+export function verificarFirma(adjuntoId, exp, usuarioId, sig) {
+  if (!exp || !sig || !/^\d+$/.test(String(usuarioId || '')) || Number(exp) < Math.floor(Date.now() / 1000)) return false;
+  const a = Buffer.from(firma(adjuntoId, exp, usuarioId));
   const b = Buffer.from(String(sig));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }

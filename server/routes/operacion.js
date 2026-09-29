@@ -6,6 +6,7 @@ import { guardarArchivo, leerArchivo, subida, verificarFirma, firmarEnlace } fro
 import { quitarExif } from '../lib/exif.js';
 import { MIME_BOLETA, validarReclamo } from '../lib/reglas.js';
 import { verificarConfirmacion } from '../lib/cobranza.js';
+import { registrarEvento } from '../lib/seguridad.js';
 import { costoDelCobro, registrarEventoPago } from '../lib/pagos.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
 
@@ -13,14 +14,23 @@ import { autenticar, requiereRol } from '../middleware/auth.js';
 export const adjuntos = Router();
 adjuntos.get('/:id/archivo', ruta(async (req, res) => {
   const id = idNumerico(req.params.id);
-  if (!verificarFirma(id, req.query.exp, req.query.sig)) throw falla(403, 'Enlace inválido o expirado');
+  if (!verificarFirma(id, req.query.exp, req.query.u, req.query.sig)) {
+    await registrarEvento(req, 'enlace_invalido', { usuarioId: null, detalle: { adjunto: id } });
+    throw falla(403, 'Enlace inválido o expirado');
+  }
   const a = await uno('SELECT * FROM adjunto WHERE id = $1', [id]);
   if (!a) throw falla(404, 'Archivo no encontrado');
   const contenido = await leerArchivo(a.ruta);
   if (!contenido) throw falla(410, 'El archivo ya no está disponible');
+  await registrarEvento(req, 'descarga_archivo', { usuarioId: Number(req.query.u), registros: 1, detalle: { adjunto: a.id, envio: a.envio_id, tipo: a.tipo } });
   res.setHeader('Content-Type', a.mime);
   res.setHeader('Cache-Control', 'private, max-age=300');
-  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(a.nombre_original || `adjunto-${a.id}`)}"`);
+  // El archivo lo subió un usuario: las imágenes se muestran aisladas (sin scripts ni acceso a la app) y los PDF
+  // se descargan en vez de abrirse dentro del dominio de la plataforma (un PDF manipulado no puede actuar en ella).
+  res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  const nombre = encodeURIComponent(a.nombre_original || `adjunto-${a.id}`);
+  res.setHeader('Content-Disposition', `${a.mime === 'application/pdf' ? 'attachment' : 'inline'}; filename="${nombre}"`);
   res.send(contenido);
 }));
 
@@ -55,7 +65,13 @@ pagos.post('/:token/confirmar', ruta(async (req, res) => {
     }
     const transaccionId = `SIM-${Date.now().toString(36).toUpperCase()}`;
     const informe = { estado: resultado, token: p.token, monto: p.monto, moneda: 'CLP', transaccion_id: transaccionId };
-    const { aprobado } = verificarConfirmacion(p, informe);
+    let aprobado;
+    try {
+      ({ aprobado } = verificarConfirmacion(p, informe));
+    } catch (err) {
+      if (err.status === 422) await registrarEvento(req, 'pago_no_calza', { detalle: { pago: p.id, errores: err.detalles } });
+      throw err;
+    }
     if (!aprobado) {
       await db.query("UPDATE pago SET estado = 'rechazado', referencia = $1, actualizado_en = now() WHERE id = $2", [transaccionId, p.id]);
       await registrarEventoPago(db, { pagoId: p.id, tipo: 'rechazo', estado: 'rechazado', monto: p.monto, datos: informe, usuarioId: req.usuario.id });
@@ -130,7 +146,7 @@ reclamos.get('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   if (req.usuario.rol === 'cliente') { params.push(req.usuario.id); cond.push(`e.cliente_id = $${params.length}`); }
   if (req.query.estado) { params.push(req.query.estado); cond.push(`r.estado = $${params.length}`); }
   const { rows } = await query(`${SELECT_RECLAMO} ${cond.length ? `WHERE ${cond.join(' AND ')}` : ''} ORDER BY r.creado_en DESC`, params);
-  res.json(rows.map((r) => ({ ...r, boleta_url: firmarEnlace(r.boleta_adjunto_id) })));
+  res.json(rows.map((r) => ({ ...r, boleta_url: firmarEnlace(r.boleta_adjunto_id, req.usuario.id) })));
 }));
 
 async function reclamoAccesible(req) {
@@ -142,7 +158,7 @@ async function reclamoAccesible(req) {
 
 reclamos.get('/:id', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const r = await reclamoAccesible(req);
-  res.json({ ...r, boleta_url: firmarEnlace(r.boleta_adjunto_id) });
+  res.json({ ...r, boleta_url: firmarEnlace(r.boleta_adjunto_id, req.usuario.id) });
 }));
 
 // Flujo: solicitado → en_revision → aprobado | rechazado → pagado (solo administración).

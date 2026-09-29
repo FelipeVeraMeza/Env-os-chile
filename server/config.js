@@ -87,10 +87,22 @@ export const config = {
   servirWeb: process.env.SERVE_WEB !== 'false',
 };
 
+// Firmas de sesión: con inicio de sesión real, la clave secreta no puede ser corta ni un valor de ejemplo conocido
+// (con una clave conocida cualquiera podría fabricar una sesión de administrador). Aplica aunque falte NODE_ENV.
+const CLAVES_CONOCIDAS = ['solo-para-desarrollo-cambiar', 'cambia-esto-por-una-cadena-larga-y-aleatoria', 'CAMBIAR_POR_UNA_CADENA_LARGA_ALEATORIA'];
+export function validarSecreto(env) {
+  const local = /localhost|127\.0\.0\.1/.test(env.PUBLIC_BASE_URL || 'http://localhost') && !env.RAILWAY_PUBLIC_DOMAIN;
+  if ((env.AUTH_MODE || 'demo') !== 'jwt' || local) return null;
+  const s = env.JWT_SECRET || '';
+  if (s.length < 32 || CLAVES_CONOCIDAS.includes(s)) return 'JWT_SECRET: con AUTH_MODE=jwt fuera de este equipo se necesita una clave propia de 32 caracteres o más (npm run secreto)';
+  return null;
+}
+
 // En producción no se aceptan valores de respaldo: el servidor no arranca si falta algo crítico.
 // Devuelve la lista de problemas (vacía si todo está bien).
 export function validarProduccion(env) {
-  if ((env.NODE_ENV || 'development') !== 'production') return [];
+  const secreto = validarSecreto(env);
+  if ((env.NODE_ENV || 'development') !== 'production') return secreto ? [secreto] : [];
   const faltan = [];
   // Textos de ejemplo de las plantillas (.env.railway.example / guía) que quedaron sin reemplazar.
   const plantilla = /PEGAR_AQUI|CAMBIAR|TU_REF|LA_CLAVE_DE_LA_BASE/i;

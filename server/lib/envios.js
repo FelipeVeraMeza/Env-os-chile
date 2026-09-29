@@ -19,7 +19,7 @@ export const SELECT_ENVIO = `
 
 export async function cargarEnvio(id, db = { query }) {
   const { rows } = await db.query(`${SELECT_ENVIO} WHERE e.id = $1`, [id]);
-  if (!rows[0]) throw falla(404, 'Envío no encontrado');
+  if (!rows[0]) throw Object.assign(falla(404, 'Envío no encontrado'), { sondeo: { entidad: 'envio', id, existe: false } });
   return rows[0];
 }
 
@@ -30,8 +30,9 @@ export function puedeVer(usuario, envio) {
   return false;
 }
 
+// Responde 404 (no 403) para no confirmar que el registro existe; el intento queda registrado como sondeo.
 export function exigirAcceso(usuario, envio) {
-  if (!puedeVer(usuario, envio)) throw falla(404, 'Envío no encontrado');
+  if (!puedeVer(usuario, envio)) throw Object.assign(falla(404, 'Envío no encontrado'), { sondeo: { entidad: 'envio', id: envio.envio_id ?? envio.id, existe: true } });
 }
 
 // Representación pública para la API según el rol (el repartidor no ve montos).
@@ -57,7 +58,7 @@ export async function detalleCompleto(envio, usuario) {
   return {
     ...presentar(envio, usuario),
     historial: historial.rows,
-    adjuntos: visibles.map((a) => ({ ...a, url: firmarEnlace(a.id) })),
+    adjuntos: visibles.map((a) => ({ ...a, url: firmarEnlace(a.id, usuario.id) })),
     reclamos: reclamos.rows,
     pagos: pagos.rows,
   };

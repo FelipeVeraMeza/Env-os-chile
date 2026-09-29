@@ -46,3 +46,12 @@ test('producción rechaza textos de ejemplo sin reemplazar', () => {
   assert.equal(faltan.length, 1);
   assert.match(faltan[0], /SUPABASE_DB_PASSWORD, JWT_SECRET/);
 });
+
+test('con inicio de sesión fuera de localhost exige un JWT_SECRET propio aunque falte NODE_ENV', () => {
+  const base = { AUTH_MODE: 'jwt', PUBLIC_BASE_URL: 'https://envios.ejemplo.cl' };
+  assert.equal(validarProduccion({ ...base }).length, 1);
+  assert.equal(validarProduccion({ ...base, JWT_SECRET: 'cambia-esto-por-una-cadena-larga-y-aleatoria' }).length, 1);
+  assert.equal(validarProduccion({ ...base, RAILWAY_PUBLIC_DOMAIN: 'x.up.railway.app', JWT_SECRET: 'corta' }).length, 1);
+  assert.deepEqual(validarProduccion({ ...base, JWT_SECRET: 'b'.repeat(64) }), []);
+  assert.deepEqual(validarProduccion({ AUTH_MODE: 'jwt' }), [], 'en el propio equipo (localhost) no se exige');
+});

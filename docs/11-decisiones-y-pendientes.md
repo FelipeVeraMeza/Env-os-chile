@@ -19,7 +19,8 @@
 | DEC-13 | Despliegue en Railway y posiblemente Vercel | Pedido del cliente |
 | DEC-14 | Prototipo sin inicio de sesión para revisar el visual | Pedido del cliente |
 | DEC-15 | Los **repartidores toman** los pedidos pagados que les aparecen, **de cualquier zona** (sin filtro por comuna); administración puede igual asignar o reasignar | Respuesta a P-17 (29/09/2026) |
-| DEC-16 | La **boleta/factura electrónica** por cada cobro **queda para más adelante**: la plataforma no la emite por ahora | Respuesta a P-18 (29/09/2026) |
+| DEC-16 | La **boleta/factura electrónica** por cada cobro se deja **como último recurso**: no se integra con el SII salvo que sea indispensable; el ticket es un comprobante interno | Respuesta a P-18 (29/09/2026, confirmado) |
+| DEC-18 | **La seguridad es la prioridad**: monitoreo de ataques y de extracción de datos, bitácoras inmutables y protocolo de incidentes (ver [17](17-seguridad.md)) | Pedido del cliente (29/09/2026) |
 | DEC-17 | Se agrega **inicio de sesión** con correo y contraseña para administrador, cliente y repartidor (`AUTH_MODE=jwt`) | Pedido del cliente (29/09/2026) |
 
 ## Pendientes que necesitamos del cliente

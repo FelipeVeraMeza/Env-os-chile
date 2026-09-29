@@ -31,6 +31,7 @@ const MENUS = {
     ['#/reclamos', 'seguro', 'Seguros', 'solo-escritorio'],
     ['#/tarifas', 'tarifas', 'Tarifas'],
     ['#/usuarios', 'usuarios', 'Usuarios', 'solo-escritorio'],
+    ['#/seguridad', 'candado', 'Seguridad', 'solo-escritorio'],
     ['#/ajustes', 'ajustes', 'Ajustes', 'solo-escritorio'],
   ],
 };
@@ -48,6 +49,7 @@ const RUTAS = [
   [/^#\/cobranza$/, () => admin.cobranza(), 'admin'],
   [/^#\/tarifas$/, () => admin.tarifas(), 'admin'],
   [/^#\/usuarios$/, () => admin.usuarios(), 'admin'],
+  [/^#\/seguridad$/, () => admin.seguridad(), 'admin'],
   [/^#\/ajustes$/, () => admin.ajustes(), 'admin'],
 ];
 
@@ -123,11 +125,16 @@ function hojaCuenta(ocultos, hash) {
       <div><b>${app.usuario.nombre}</b><div class="sub">${app.usuario.correo} · ${ROL_TXT[app.usuario.rol]}</div></div></div>
     <div class="hoja-lista" style="margin-top:8px">
       <button class="item" id="cambiar-clave">${icono('llave')}Cambiar contraseña</button>
+      <button class="item" id="cerrar-todas">${icono('candado')}Cerrar sesión en mis otros dispositivos</button>
       <button class="item" id="cerrar-sesion">${icono('salir')}Cerrar sesión</button>
     </div>`);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
   $('#cambiar-clave', m.el).onclick = () => { m.cerrar(); dialogoCambiarClave(); };
   $('#cerrar-sesion', m.el).onclick = () => { m.cerrar(); cerrarSesion(); };
+  $('#cerrar-todas', m.el).onclick = async () => {
+    try { const r = await post('/api/auth/cerrar-sesiones'); fijarToken(r.token); m.cerrar(); toast('Listo: se cerró tu sesión en los demás dispositivos', 'ok'); }
+    catch (err) { errorToast(err); }
+  };
 }
 
 function pantallaLogin(mensaje) {
@@ -185,7 +192,7 @@ function dialogoCambiarClave({ obligatorio = false } = {}) {
     <p class="sub">${obligatorio ? 'Administración te asignó una contraseña temporal. Crea una propia para continuar.' : 'Al cambiarla se cierran tus sesiones en otros dispositivos.'}</p>
     <form class="pila" id="f-clave-nueva" novalidate>
       <label class="campo">Contraseña actual<input name="actual" type="password" autocomplete="current-password"></label>
-      <label class="campo">Nueva contraseña <small>(mínimo 8 caracteres)</small><input name="nueva" type="password" autocomplete="new-password" minlength="8"></label>
+      <label class="campo">Nueva contraseña <small>(mínimo 8 caracteres, con letras y números)</small><input name="nueva" type="password" autocomplete="new-password" minlength="8"></label>
       <label class="campo">Repite la nueva contraseña<input name="repetir" type="password" autocomplete="new-password"></label>
       <button class="btn grande">Guardar contraseña</button>
     </form>`, { fijo: obligatorio });
@@ -195,6 +202,7 @@ function dialogoCambiarClave({ obligatorio = false } = {}) {
     const errores = {};
     if (!d.actual) errores.actual = 'Obligatoria';
     if (d.nueva.length < 8) errores.nueva = 'Mínimo 8 caracteres';
+    else if (!/\p{L}/u.test(d.nueva) || !/\d/.test(d.nueva)) errores.nueva = 'Debe tener letras y números';
     else if (d.nueva !== d.repetir) errores.repetir = 'No coincide con la nueva contraseña';
     if (marcarErrores(e.target, errores)) return;
     try {

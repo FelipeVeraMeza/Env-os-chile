@@ -5,7 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { config } from './config.js';
 import { pool } from './db/pool.js';
-import { manejadorErrores } from './lib/http.js';
+import { falla, manejadorErrores } from './lib/http.js';
 import { autenticar } from './middleware/auth.js';
 import { envios } from './routes/envios.js';
 import { auth, demo, usuarios } from './routes/cuentas.js';
@@ -13,9 +13,17 @@ import { comunas, configuracion, destinatarios, zonas } from './routes/catalogos
 import { adjuntos, costos, pagos, reclamos, reportes } from './routes/operacion.js';
 import { paginaQr, seguimiento } from './routes/publico.js';
 import { cobranza } from './routes/cobranza.js';
+import { seguridad } from './routes/seguridad.js';
+import { limitarPeticiones } from './lib/seguridad.js';
 
 const raiz = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const version = '0.1.0';
+
+function contieneNulo(v, prof = 0) {
+  if (typeof v === 'string') return v.includes('\u0000');
+  if (v && typeof v === 'object' && prof < 8) return Object.entries(v).some(([k, x]) => k.includes('\u0000') || contieneNulo(x, prof + 1));
+  return false;
+}
 
 export function crearApp() {
   const app = express();
@@ -39,7 +47,20 @@ export function crearApp() {
     origin: (origen, cb) => cb(null, !origen || config.corsOrigins.includes(origen) || config.corsOrigins.includes('*')),
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Demo-Usuario', 'X-Demo-Rol', 'X-Demo-Clave'],
   }));
+  // Cámara y ubicación solo para la propia app; nada de micrófono, pagos del navegador ni USB.
+  app.use((_req, res, next) => { res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(self), microphone=(), payment=(), usb=()'); next(); });
+
+  // Límite de peticiones por IP y por minuto (configurable). En desarrollo no se limita el propio equipo.
+  const sinLimite = (req) => config.entorno !== 'production' && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.ip);
+  const limite = (nombre, max) => { const m = limitarPeticiones(nombre, max); return (req, res, next) => (sinLimite(req) ? next() : m(req, res, next)); };
+  app.use('/api/auth/login', limite('login', 20));
+  app.use(['/api/seguimiento', '/q', '/api/comunas', '/api/config/publica'], limite('publico', Number(process.env.LIMITE_PUBLICO_POR_MINUTO || 120)));
+  app.use('/api', (req, res, next) => (req.is('multipart/form-data') ? limite('subidas', 30)(req, res, next) : next()));
+  app.use('/api', limite('api', Number(process.env.LIMITE_API_POR_MINUTO || 600)));
   app.use(express.json({ limit: '1mb' }));
+  // El carácter nulo (\u0000) no es texto válido para la base: se rechaza en cualquier dato recibido.
+  app.use((req, _res, next) => (contieneNulo(req.query) || contieneNulo(req.body) || String(req.path).includes('\u0000')
+    ? next(falla(400, 'Los datos contienen caracteres no permitidos')) : next()));
 
   app.get('/api/health', async (_req, res) => {
     let db = 'ok';
@@ -65,6 +86,7 @@ export function crearApp() {
   app.use('/api/costos', costos);
   app.use('/api/reportes', reportes);
   app.use('/api/cobranza', cobranza);
+  app.use('/api/seguridad', seguridad);
   app.use('/q', paginaQr);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 

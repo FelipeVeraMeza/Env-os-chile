@@ -96,7 +96,9 @@ p { margin: 0 0 .6em; }
 .menu a:hover { background: var(--superficie); color: var(--texto); }
 .menu a.activo { background: var(--degradado-btn); color: var(--blanco); box-shadow: 0 6px 18px rgba(224, 33, 138, .35); }
 .menu .titulo-menu { font-size: .7rem; text-transform: uppercase; letter-spacing: .1em; color: var(--texto-3); padding: 8px 14px; }
-.vista { padding: 28px clamp(16px, 3vw, 40px) 110px; max-width: 1200px; width: 100%; outline: none; }
+.vista { padding: 28px clamp(16px, 3vw, 40px) 110px; max-width: 1200px; width: 100%; outline: none; overflow-wrap: break-word; }
+/* Textos largos sin espacios (correos, números) no deben ensanchar la pantalla. */
+.vista b, .vista .sub, .vista h2, .vista h3, .vista .dir, .vista .folio { overflow-wrap: anywhere; }
 
 @media (max-width: 860px) {
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: 60px 1fr; }
@@ -257,7 +259,7 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, a:focus-visible, 
 
 .lista-envios { display: grid; gap: 10px; }
 .item-envio {
-  display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; padding: 16px 18px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; padding: 16px 18px;
   border-radius: 16px; background: var(--superficie); border: 1px solid var(--borde); color: var(--texto); text-decoration: none;
   transition: background .15s, border-color .15s, transform .08s;
 }

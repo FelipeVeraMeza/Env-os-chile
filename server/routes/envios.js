@@ -14,6 +14,7 @@ import { guardarArchivo, subida } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
 import { costoDelCobro, registrarEventoPago } from '../lib/pagos.js';
+import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
 
 export const envios = Router();
@@ -222,9 +223,15 @@ envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, re
     ['Tarifa total', 'tarifa_total'], ['Repartidor', 'repartidor_nombre'], ['Intentos', 'intentos'],
     ['Entregado', (e) => (e.entregado_en ? new Date(e.entregado_en).toLocaleString('es-CL', { timeZone: 'America/Santiago' }) : '')],
   ];
-  const celda = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  // Inyección de fórmulas: un texto que empieza con = + - @ se ejecutaría como fórmula al abrirlo en Excel.
+  const celda = (v) => {
+    let t = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`;
+    return `"${t.replace(/"/g, '""')}"`;
+  };
   const lineas = [cols.map(([t]) => celda(t)).join(';')];
   for (const e of rows) lineas.push(cols.map(([, c]) => celda(typeof c === 'function' ? c(e) : e[c])).join(';'));
+  await registrarEvento(req, 'exportacion', { registros: rows.length, detalle: { filtros: req.query } });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="envios-${new Date().toISOString().slice(0, 10)}.csv"`);
   res.send('﻿' + lineas.join('\r\n'));

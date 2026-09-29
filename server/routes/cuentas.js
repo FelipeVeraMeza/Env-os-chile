@@ -5,6 +5,7 @@ import { query, uno } from '../db/pool.js';
 import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
 import { normalizarRut, normalizarTelefono, ROLES } from '../lib/reglas.js';
 import { autenticar, exigirClaveDemo, firmarSesion, requiereRol } from '../middleware/auth.js';
+import { exigirClaveSegura, registrarEvento } from '../lib/seguridad.js';
 
 export const auth = Router();
 
@@ -33,6 +34,7 @@ auth.post('/login', ruta(async (req, res) => {
   const password = String(req.body?.password || '');
   const claves = [`ip:${req.ip}`, `correo:${correo}`];
   if ((contar(claves[0])?.n || 0) >= 50 || (contar(claves[1])?.n || 0) >= 5) {
+    await registrarEvento(req, 'cuenta_bloqueada', { usuarioId: null, correo });
     throw falla(429, 'Demasiados intentos fallidos. Espera 15 minutos o pide a administración una nueva contraseña.');
   }
   if (!correo || !password) throw falla(422, 'Ingresa tu correo y tu contraseña', { ...(correo ? {} : { correo: 'Obligatorio' }), ...(password ? {} : { password: 'Obligatoria' }) });
@@ -40,13 +42,18 @@ auth.post('/login', ruta(async (req, res) => {
   const ok = await bcrypt.compare(password, u?.password_hash || HASH_RELLENO);
   if (!u || !u.password_hash || !ok) {
     claves.forEach(registrarFallo);
+    await registrarEvento(req, 'login_fallido', { usuarioId: u?.id ?? null, correo, detalle: { motivo: !u ? 'correo_inexistente' : !u.password_hash ? 'sin_contraseña' : 'contraseña_incorrecta' } });
     throw falla(401, 'Correo o contraseña incorrectos');
   }
-  if (!u.activo) throw falla(403, 'Tu cuenta está desactivada. Contacta a administración.');
+  if (!u.activo) {
+    await registrarEvento(req, 'login_fallido', { usuarioId: u.id, correo, detalle: { motivo: 'cuenta_desactivada' } });
+    throw falla(403, 'Tu cuenta está desactivada. Contacta a administración.');
+  }
   fallidos.delete(claves[1]);
   await query('UPDATE usuario SET ultimo_acceso = now() WHERE id = $1', [u.id]);
   req.usuario = u;
   await auditar(req, 'login', 'usuario', u.id);
+  await registrarEvento(req, 'login_ok', { usuarioId: u.id, correo });
   res.json({ token: firmarSesion(u), usuario: { id: u.id, nombre: u.nombre, correo: u.correo, rol: u.rol, debe_cambiar_clave: u.debe_cambiar_clave } });
 }));
 
@@ -58,13 +65,21 @@ auth.post('/cambiar-clave', autenticar, ruta(async (req, res) => {
   const u = await uno('SELECT * FROM usuario WHERE id = $1', [req.usuario.id]);
   const errores = {};
   if (!u.password_hash || !(await bcrypt.compare(String(actual || ''), u.password_hash))) errores.actual = 'La contraseña actual no es correcta';
-  if (String(nueva || '').length < 8) errores.nueva = 'Mínimo 8 caracteres';
-  else if (String(nueva) === String(actual)) errores.nueva = 'Debe ser distinta a la actual';
+  if (String(nueva) === String(actual)) errores.nueva = 'Debe ser distinta a la actual';
   exigirSinErrores(errores, 'Revisa las contraseñas');
+  exigirClaveSegura(nueva, u, 'nueva');
   const act = await uno(
     'UPDATE usuario SET password_hash = $1, sesion_version = sesion_version + 1, debe_cambiar_clave = false WHERE id = $2 RETURNING id, rol, sesion_version',
     [await bcrypt.hash(String(nueva), 10), u.id]);
   await auditar(req, 'cambiar_clave', 'usuario', u.id);
+  await registrarEvento(req, 'cambio_clave');
+  res.json({ token: firmarSesion(act) });
+}));
+
+// Cerrar la sesión en todos los dispositivos (por ejemplo, si se perdió el teléfono).
+auth.post('/cerrar-sesiones', autenticar, ruta(async (req, res) => {
+  const act = await uno('UPDATE usuario SET sesion_version = sesion_version + 1 WHERE id = $1 RETURNING id, rol, sesion_version', [req.usuario.id]);
+  await registrarEvento(req, 'sesiones_cerradas', { detalle: { alcance: 'propias' } });
   res.json({ token: firmarSesion(act) });
 }));
 
@@ -111,6 +126,7 @@ usuarios.post('/', requiereRol('admin'), ruta(async (req, res) => {
   const errores = validarUsuario(b, true);
   if (config.authMode === 'jwt' && !b.password) errores.password = 'Obligatoria: sin contraseña no podrá iniciar sesión';
   exigirSinErrores(errores);
+  if (b.password) exigirClaveSegura(b.password, b);
   const existe = await uno('SELECT id FROM usuario WHERE correo = $1', [b.correo.toLowerCase()]);
   if (existe) throw falla(409, 'Ya existe un usuario con ese correo', { correo: 'Duplicado' });
   const hash = b.password ? await bcrypt.hash(b.password, 10) : null;
@@ -120,6 +136,7 @@ usuarios.post('/', requiereRol('admin'), ruta(async (req, res) => {
     [String(b.nombre).trim(), String(b.correo).toLowerCase().trim(), hash, b.rol, normalizarTelefono(b.telefono), normalizarRut(b.rut), Boolean(hash) && b.cambiar_al_entrar !== false],
   );
   await auditar(req, 'crear', 'usuario', u.id, { rol: u.rol });
+  await registrarEvento(req, 'usuario_creado', { nivel: u.rol === 'admin' ? 'alerta' : 'info', detalle: { usuario: u.id, correo: u.correo, rol: u.rol } });
   res.status(201).json(u);
 }));
 
@@ -129,7 +146,9 @@ usuarios.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   exigirSinErrores(validarUsuario(b, false));
   if (id === req.usuario.id && (b.activo === false || (b.rol && b.rol !== 'admin'))) throw falla(409, 'No puedes quitarte tu propio acceso de administrador');
   // Un repartidor con envíos en curso no se desactiva ni cambia de perfil: sus envíos quedarían sin nadie.
-  const actual = await uno('SELECT rol FROM usuario WHERE id = $1', [id]);
+  const actual = await uno('SELECT rol, correo, nombre FROM usuario WHERE id = $1', [id]);
+  if (!actual) throw falla(404, 'Usuario no encontrado');
+  if (b.password) exigirClaveSegura(b.password, actual);
   if (actual?.rol === 'repartidor' && (b.activo === false || (b.rol && b.rol !== 'repartidor'))) {
     const { n } = await uno("SELECT count(*)::int AS n FROM envio WHERE repartidor_id = $1 AND estado IN ('asignado','en_ruta','fallido','reagendado')", [id]);
     if (n) throw falla(409, `Este repartidor tiene ${n} envío(s) en curso: reasígnalos antes de desactivarlo`);
@@ -154,5 +173,20 @@ usuarios.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   const u = await uno(`UPDATE usuario SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING id, nombre, correo, rol, telefono, rut, activo`, params);
   if (!u) throw falla(404, 'Usuario no encontrado');
   await auditar(req, 'editar', 'usuario', id, { ...b, password: b.password ? '***' : undefined });
+  const cambios = Object.keys(b).filter((k) => k !== 'password');
+  if (b.password) await registrarEvento(req, 'clave_asignada', { detalle: { usuario: id, correo: u.correo } });
+  if (cambios.length) {
+    const aAdmin = b.rol === 'admin' && actual.rol !== 'admin';
+    await registrarEvento(req, 'usuario_modificado', { nivel: aAdmin ? 'alerta' : undefined, detalle: { usuario: id, correo: u.correo, cambios, rol_anterior: actual.rol, rol_nuevo: b.rol } });
+  }
   res.json(u);
+}));
+
+// Cerrar las sesiones de un usuario (por ejemplo, un repartidor que perdió el teléfono).
+usuarios.post('/:id/cerrar-sesiones', requiereRol('admin'), ruta(async (req, res) => {
+  const id = idNumerico(req.params.id);
+  const u = await uno('UPDATE usuario SET sesion_version = sesion_version + 1 WHERE id = $1 RETURNING id, correo', [id]);
+  if (!u) throw falla(404, 'Usuario no encontrado');
+  await registrarEvento(req, 'sesiones_cerradas', { detalle: { alcance: 'usuario', usuario: id, correo: u.correo } });
+  res.json({ ok: true });
 }));

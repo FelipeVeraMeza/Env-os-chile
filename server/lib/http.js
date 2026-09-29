@@ -1,5 +1,6 @@
 import { ErrorNegocio } from './reglas.js';
 import { query } from '../db/pool.js';
+import { registrarEvento } from './seguridad.js';
 
 // Envuelve un handler async para que los errores lleguen al manejador central.
 export const ruta = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -40,6 +41,8 @@ export async function auditar(req, accion, entidad, entidadId, datos, db = { que
 }
 
 export function manejadorErrores(err, req, res, _next) {
+  if (err?.sondeo && req.usuario) registrarEvento(req, 'sondeo_ajeno', { detalle: err.sondeo });
+  if (err?.archivoInvalido) registrarEvento(req, 'archivo_rechazado', { detalle: { tipo_declarado: req.file?.mimetype, nombre: String(req.file?.originalname || '').slice(0, 100) } });
   if (err instanceof ErrorNegocio) {
     return res.status(err.status).json({ error: err.message, detalles: err.detalles });
   }
@@ -49,8 +52,19 @@ export function manejadorErrores(err, req, res, _next) {
   if (err?.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ error: 'El archivo supera el tamaño máximo permitido' });
   }
+  if (err?.name === 'MulterError') {
+    // Archivo en un campo que no corresponde, demasiados campos o partes, campo de texto demasiado largo.
+    return res.status(400).json({ error: 'El formulario enviado no es válido', detalles: { formulario: err.code } });
+  }
   if (err?.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'JSON inválido' });
+  }
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'La petición es demasiado grande' });
+  }
+  if (err?.expose && err.status >= 400 && err.status < 500) {
+    // Otros errores del lector de peticiones (codificación no soportada, cuerpo cortado…).
+    return res.status(err.status).json({ error: 'La petición no es válida' });
   }
   if (err?.code === '23514' || err?.code === '23502') {
     // Violación de una restricción de la base (CHECK / NOT NULL): es una regla de negocio.
@@ -60,7 +74,7 @@ export function manejadorErrores(err, req, res, _next) {
     // Referencia a un registro que no existe (p. ej. un envío o comuna inexistente).
     return res.status(422).json({ error: 'Uno de los datos hace referencia a un registro que no existe', detalles: { restriccion: err.constraint } });
   }
-  if (['22P02', '22007', '22008', '22003', '22001'].includes(err?.code)) {
+  if (['22P02', '22007', '22008', '22003', '22001', '22021', '22025', '2201B', '54000'].includes(err?.code)) {
     // Texto donde va un número o una fecha, fecha imposible o número fuera de rango.
     return res.status(400).json({ error: 'Hay un dato con formato inválido o fuera de rango' });
   }
