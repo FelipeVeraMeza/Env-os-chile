@@ -12,6 +12,7 @@ import { auth, demo, usuarios } from './routes/cuentas.js';
 import { comunas, configuracion, destinatarios, zonas } from './routes/catalogos.js';
 import { adjuntos, costos, pagos, reclamos, reportes } from './routes/operacion.js';
 import { paginaQr, seguimiento } from './routes/publico.js';
+import { cobranza } from './routes/cobranza.js';
 
 const raiz = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const version = '0.1.0';
@@ -63,6 +64,7 @@ export function crearApp() {
   app.use('/api/reclamos', reclamos);
   app.use('/api/costos', costos);
   app.use('/api/reportes', reportes);
+  app.use('/api/cobranza', cobranza);
   app.use('/q', paginaQr);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 

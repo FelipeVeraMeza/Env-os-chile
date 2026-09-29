@@ -1,0 +1,105 @@
+import { Router } from 'express';
+import { query, transaccion, uno } from '../db/pool.js';
+import { auditar, falla, idNumerico, ruta } from '../lib/http.js';
+import { compararProveedores, PROVEEDORES_PAGO, validarConciliacion } from '../lib/cobranza.js';
+import { leerConfig } from '../lib/configuracion.js';
+import { registrarEventoPago } from '../lib/pagos.js';
+import { autenticar, requiereRol } from '../middleware/auth.js';
+
+// Cobranza (solo administración): qué se cobró, qué falta cobrar, cuánto se lleva la pasarela,
+// qué abonos faltan por llegar a la cuenta y comparación de costos entre proveedores de pago.
+export const cobranza = Router();
+cobranza.use(autenticar, requiereRol('admin'));
+
+const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+function rango(q) {
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+  return { desde: FECHA.test(q.desde || '') ? q.desde : `${hoy.slice(0, 8)}01`, hasta: FECHA.test(q.hasta || '') ? q.hasta : hoy };
+}
+const TZ = "AT TIME ZONE 'America/Santiago'";
+
+cobranza.get('/resumen', ruta(async (req, res) => {
+  const { desde, hasta } = rango(req.query);
+  const p = [desde, hasta];
+  const [cobrado, porProveedor, porCobrar, porConciliar, iniciados] = await Promise.all([
+    uno(`SELECT count(*)::int AS pagos, COALESCE(sum(monto), 0)::int AS bruto, COALESCE(sum(comision_estimada), 0)::int AS comision_estimada,
+           COALESCE(sum(COALESCE(comision_real, comision_estimada)), 0)::int AS comision, COALESCE(sum(monto - COALESCE(comision_real, comision_estimada)), 0)::int AS neto
+         FROM pago WHERE estado = 'aprobado' AND (verificado_en ${TZ})::date BETWEEN $1 AND $2`, p),
+    query(`SELECT proveedor, COALESCE(medio, proveedor) AS medio, count(*)::int AS pagos, sum(monto)::int AS bruto,
+             sum(COALESCE(comision_real, comision_estimada))::int AS comision
+           FROM pago WHERE estado = 'aprobado' AND (verificado_en ${TZ})::date BETWEEN $1 AND $2 GROUP BY 1, 2 ORDER BY bruto DESC`, p),
+    // Cuentas por cobrar: envíos confirmados que siguen sin pago (bloquean el retiro).
+    uno(`SELECT count(*)::int AS envios, COALESCE(sum(tarifa_total), 0)::int AS monto,
+           COALESCE(max(EXTRACT(EPOCH FROM now() - confirmado_en) / 86400), 0)::int AS dias_mas_antiguo
+         FROM envio WHERE estado_pago = 'pendiente' AND estado IN ('creado', 'asignado')`),
+    // Abonos que la pasarela aún no deposita (o que administración no ha revisado en la cartola).
+    uno(`SELECT count(*)::int AS pagos, COALESCE(sum(monto - comision_estimada), 0)::int AS monto_esperado,
+           count(*) FILTER (WHERE abono_estimado_en < CURRENT_DATE)::int AS atrasados
+         FROM pago WHERE estado = 'aprobado' AND abonado_en IS NULL AND proveedor NOT IN ('manual', 'simulado')`),
+    // Pagos iniciados hace más de 30 minutos sin respuesta: el cliente abandonó o la pasarela no avisó.
+    uno(`SELECT count(*)::int AS n FROM pago WHERE estado = 'iniciado' AND creado_en < now() - interval '30 minutes'`),
+  ]);
+  const conf = await leerConfig();
+  res.json({
+    desde, hasta, proveedor_actual: conf.pagos.proveedor,
+    cobrado, por_proveedor: porProveedor.rows, por_cobrar: porCobrar, por_conciliar: porConciliar, sin_respuesta: iniciados.n,
+  });
+}));
+
+cobranza.get('/pagos', ruta(async (req, res) => {
+  const cond = [];
+  const params = [];
+  const p = (v) => { params.push(v); return `$${params.length}`; };
+  if (req.query.estado) cond.push(`pg.estado = ${p(req.query.estado)}`);
+  if (req.query.conciliado === 'no') cond.push("pg.estado = 'aprobado' AND pg.abonado_en IS NULL AND pg.proveedor NOT IN ('manual', 'simulado')");
+  if (req.query.conciliado === 'si') cond.push('pg.abonado_en IS NOT NULL');
+  const { rows } = await query(
+    `SELECT pg.id, pg.envio_id, pg.proveedor, pg.medio, pg.monto, pg.estado, pg.referencia, pg.transaccion_id, pg.verificacion, pg.verificado_en,
+       pg.comision_estimada, pg.neto_estimado, pg.abono_estimado_en, pg.monto_abonado, pg.comision_real, pg.abonado_en, pg.creado_en,
+       e.folio, u.nombre AS cliente_nombre, v.nombre AS verificado_por_nombre
+     FROM pago pg JOIN envio e ON e.id = pg.envio_id JOIN usuario u ON u.id = e.cliente_id LEFT JOIN usuario v ON v.id = pg.verificado_por
+     ${cond.length ? `WHERE ${cond.join(' AND ')}` : ''} ORDER BY pg.creado_en DESC, pg.id DESC LIMIT 200`, params);
+  res.json(rows);
+}));
+
+cobranza.get('/pagos/:id/eventos', ruta(async (req, res) => {
+  const { rows } = await query(
+    `SELECT ev.*, u.nombre AS usuario_nombre FROM pago_evento ev LEFT JOIN usuario u ON u.id = ev.usuario_id
+     WHERE ev.pago_id = $1 ORDER BY ev.fecha, ev.id`, [idNumerico(req.params.id)]);
+  res.json(rows);
+}));
+
+// Conciliación: administración confirma que el abono llegó a la cuenta (cartola). La comisión real
+// de la pasarela se registra como costo "pasarela" y descuenta de la ganancia neta.
+cobranza.post('/pagos/:id/conciliar', ruta(async (req, res) => {
+  const id = idNumerico(req.params.id);
+  const act = await transaccion(async (db) => {
+    const { rows: [pg] } = await db.query('SELECT pg.*, e.folio FROM pago pg JOIN envio e ON e.id = pg.envio_id WHERE pg.id = $1 FOR UPDATE OF pg', [id]);
+    if (!pg) throw falla(404, 'Pago no encontrado');
+    const c = validarConciliacion(pg, req.body || {});
+    const { rows: [a] } = await db.query(
+      `UPDATE pago SET monto_abonado = $1, comision_real = $2, abonado_en = $3, conciliado_por = $4, actualizado_en = now() WHERE id = $5 RETURNING *`,
+      [c.monto_abonado, c.comision_real, c.abonado_en, req.usuario.id, id]);
+    await registrarEventoPago(db, { pagoId: id, tipo: 'conciliacion', monto: c.monto_abonado, datos: c, usuarioId: req.usuario.id });
+    if (c.comision_real > 0) {
+      await db.query(
+        "INSERT INTO costo (fecha, tipo, monto, envio_id, pago_id, nota, creado_por) VALUES ($1, 'pasarela', $2, $3, $4, $5, $6)",
+        [c.abonado_en, c.comision_real, pg.envio_id, id, `Comisión ${PROVEEDORES_PAGO[pg.proveedor]?.nombre || pg.proveedor} (${pg.folio})`, req.usuario.id]);
+    }
+    return a;
+  });
+  await auditar(req, 'conciliar', 'pago', id, { monto_abonado: act.monto_abonado, comision_real: act.comision_real });
+  res.json(act);
+}));
+
+// Comparador: cuánto cuesta cobrar un envío con cada proveedor y cuánto sería al mes.
+cobranza.get('/estimar', ruta(async (req, res) => {
+  const conf = await leerConfig();
+  const monto = Number(req.query.monto) || conf.tarifas.base;
+  let enviosMes = Number(req.query.envios_mes);
+  if (!Number.isFinite(enviosMes) || enviosMes < 0) {
+    const r = await uno(`SELECT count(*)::int AS n FROM envio WHERE confirmado_en >= now() - interval '30 days'`);
+    enviosMes = r.n;
+  }
+  res.json({ monto, envios_mes: enviosMes, proveedor_actual: conf.pagos.proveedor, proveedores: compararProveedores(monto, enviosMes) });
+}));

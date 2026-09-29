@@ -49,6 +49,8 @@ Crea la base en Supabase (tablas, RLS, comunas, configuración, usuarios y bucke
 | 10 | [Despliegue: localhost, Railway, Vercel y NIC.cl](docs/10-despliegue.md) |
 | 11 | [Decisiones tomadas y pendientes del cliente](docs/11-decisiones-y-pendientes.md) |
 | 12 | [Subir la primera versión: Railway + Supabase](docs/12-primera-version-railway-supabase.md) |
+| 14 | [Plan de acción](docs/14-plan-de-accion.md) |
+| 15 | [Diagnóstico de envíos, cobranza y verificación de pagos](docs/15-diagnostico-envios-y-cobranza.md) |
 
 ## Reglas de negocio implementadas
 
@@ -57,6 +59,8 @@ Crea la base en Supabase (tablas, RLS, comunas, configuración, usuarios y bucke
 - **Puntos Blue Express, Starken y otros:** sin límite de paquetes por $3.500.
 - **Envío especial por horario:** +$1.000, con franja obligatoria.
 - **Pago previo:** sin pago el repartidor **no puede retirar** (regla de la API y de la base de datos).
+- **Pago verificado:** un envío queda "pagado" solo con un pago verificado (monto exacto, ID de transacción); cada cobro queda en una bitácora y se concilia con la cartola en **Cobranza**.
+- **Envíos disponibles:** los envíos pagados sin repartidor aparecen en *Mi ruta* y el repartidor los **toma** (configurable).
 - **Entrega:** "Llegué" → espera máxima de **5 minutos** → entrega con **foto obligatoria + GPS**, o intento fallido con motivo. **Máximo 3 intentos**; después se devuelve.
 - **Seguro:** valor declarado por envío; para cobrarlo **la boleta es obligatoria** (archivo + N°, fecha y monto). El monto no puede superar el valor declarado ni la boleta.
 - **Libreta:** cada destinatario queda registrado y puede tener **varias direcciones**.

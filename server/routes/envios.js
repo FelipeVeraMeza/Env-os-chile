@@ -13,6 +13,7 @@ import {
 import { guardarArchivo, subida } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
+import { costoDelCobro, registrarEventoPago } from '../lib/pagos.js';
 import { requiereRol } from '../middleware/auth.js';
 
 export const envios = Router();
@@ -215,6 +216,41 @@ envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, re
   res.send('﻿' + lineas.join('\r\n'));
 }));
 
+// Envíos pagados que aún no tienen repartidor: el repartidor los ve y puede tomarlos.
+// Sin esto, un envío recién pagado no le aparece a ningún repartidor hasta que administración lo asigne.
+const SIN_ASIGNAR = "e.estado = 'creado' AND e.repartidor_id IS NULL AND e.estado_pago = 'pagado'";
+
+envios.get('/disponibles', requiereRol('admin', 'repartidor'), ruta(async (req, res) => {
+  const conf = await leerConfig();
+  if (req.usuario.rol === 'repartidor' && !conf.operacion.autoasignacion) return res.json({ autoasignacion: false, total: 0, items: [] });
+  const { rows } = await query(`${SELECT_ENVIO} WHERE ${SIN_ASIGNAR} ORDER BY e.horario_especial DESC, e.pagado_en, e.id LIMIT 100`);
+  res.json({ autoasignacion: conf.operacion.autoasignacion, total: rows.length, items: rows.map((e) => presentar(e, req.usuario)) });
+}));
+
+// El repartidor toma un envío disponible. La condición va en el UPDATE para que, si dos
+// repartidores lo toman al mismo tiempo, solo uno lo consiga.
+envios.post('/:id/tomar', requiereRol('repartidor'), ruta(async (req, res) => {
+  const id = idNumerico(req.params.id);
+  const conf = await leerConfig();
+  if (!conf.operacion.autoasignacion) throw falla(403, 'Administración asigna los envíos: espera a que te asignen uno');
+  const tomado = await transaccion(async (db) => {
+    const { rows: [e] } = await db.query(
+      `UPDATE envio e SET repartidor_id = $1, estado = 'asignado', actualizado_en = now() WHERE e.id = $2 AND ${SIN_ASIGNAR} RETURNING e.id`,
+      [req.usuario.id, id]);
+    if (!e) return null;
+    await registrarEstado(db, { envioId: id, anterior: 'creado', nuevo: 'asignado', usuarioId: req.usuario.id, motivo: 'Tomado por el repartidor' });
+    return e;
+  });
+  if (!tomado) {
+    const actual = await uno('SELECT estado, estado_pago, repartidor_id FROM envio WHERE id = $1', [id]);
+    if (!actual) throw falla(404, 'Envío no encontrado');
+    if (actual.estado_pago !== 'pagado') throw falla(409, 'El envío aún no está pagado');
+    throw falla(409, 'Este envío ya fue tomado por otro repartidor o ya no está disponible');
+  }
+  await auditar(req, 'tomar', 'envio', id);
+  res.json(presentar(await cargarEnvio(id), req.usuario));
+}));
+
 async function envioAccesible(req) {
   const envio = await cargarEnvio(idNumerico(req.params.id));
   exigirAcceso(req.usuario, envio);
@@ -347,10 +383,15 @@ envios.post('/:id/pago', requiereRol('admin', 'cliente'), ruta(async (req, res) 
   if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
   const conf = await leerConfig();
   const token = crypto.randomBytes(18).toString('base64url');
-  const pago = await uno(
-    'INSERT INTO pago (envio_id, proveedor, monto, token) VALUES ($1, $2, $3, $4) RETURNING id, proveedor, monto, estado, token',
-    [envio.id, conf.pagos.proveedor, envio.tarifa_total, token],
-  );
+  const costo = costoDelCobro(envio.tarifa_total, conf.pagos.proveedor);
+  const pago = await transaccion(async (db) => {
+    const { rows: [p] } = await db.query(
+      `INSERT INTO pago (envio_id, proveedor, medio, monto, token, comision_estimada, neto_estimado, creado_por)
+       VALUES ($1, $2, 'en_linea', $3, $4, $5, $6, $7) RETURNING id, proveedor, monto, estado, token`,
+      [envio.id, conf.pagos.proveedor, envio.tarifa_total, token, costo.comision_estimada, costo.neto_estimado, req.usuario.id]);
+    await registrarEventoPago(db, { pagoId: p.id, tipo: 'inicio', estado: 'iniciado', monto: p.monto, usuarioId: req.usuario.id });
+    return p;
+  });
   await auditar(req, 'iniciar_pago', 'envio', envio.id, { pago_id: pago.id, monto: pago.monto });
   res.status(201).json(pago);
 }));
@@ -361,10 +402,19 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
   if (!['transferencia', 'efectivo', 'otro'].includes(medio)) throw falla(422, 'Medio de pago inválido');
   if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
   if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'No se puede registrar pago en este estado');
-  await query(
-    `UPDATE envio SET estado_pago = 'pagado', pago_medio = $1, pago_referencia = $2, pagado_en = now(), actualizado_en = now() WHERE id = $3`,
-    [medio, req.body.referencia || null, envio.id],
-  );
+  const referencia = String(req.body.referencia || '').trim() || null;
+  await transaccion(async (db) => {
+    // Administración declara que revisó el pago (cartola, efectivo recibido): queda verificado a su nombre.
+    const { rows: [p] } = await db.query(
+      `INSERT INTO pago (envio_id, proveedor, medio, monto, estado, token, referencia, transaccion_id, verificacion, verificado_en,
+         verificado_por, comision_estimada, neto_estimado, creado_por)
+       VALUES ($1, 'manual', $2, $3, 'aprobado', $4, $5, NULL, 'manual', now(), $6, 0, $3, $6) RETURNING id`,
+      [envio.id, medio, envio.tarifa_total, crypto.randomBytes(18).toString('base64url'), referencia, req.usuario.id]);
+    await registrarEventoPago(db, { pagoId: p.id, tipo: 'verificacion', estado: 'aprobado', monto: envio.tarifa_total, datos: { medio, referencia }, usuarioId: req.usuario.id });
+    await db.query(
+      `UPDATE envio SET estado_pago = 'pagado', pago_medio = $1, pago_referencia = $2, pagado_en = now(), actualizado_en = now() WHERE id = $3`,
+      [medio, referencia, envio.id]);
+  });
   await auditar(req, 'pago_manual', 'envio', envio.id, { medio, referencia: req.body.referencia });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));

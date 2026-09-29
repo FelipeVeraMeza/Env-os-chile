@@ -5,6 +5,8 @@ import { cargarEnvio, exigirAcceso, siguienteFolio } from '../lib/envios.js';
 import { guardarArchivo, leerArchivo, subida, verificarFirma, firmarEnlace } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { MIME_BOLETA, validarReclamo } from '../lib/reglas.js';
+import { verificarConfirmacion } from '../lib/cobranza.js';
+import { costoDelCobro, registrarEventoPago } from '../lib/pagos.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
 
 // ---------- Archivos (fotos y boletas) vía enlace firmado temporal ----------
@@ -34,6 +36,8 @@ pagos.get('/:token', ruta(async (req, res) => {
 }));
 
 // En producción esta confirmación la hace la pasarela (webhook / URL de retorno), no el navegador.
+// Aun con el simulador se aplica la misma verificación que se exigirá a la pasarela real:
+// mismo token, monto exacto en CLP e identificador de transacción; todo queda en la bitácora.
 pagos.post('/:token/confirmar', ruta(async (req, res) => {
   const resultado = req.body?.resultado === 'rechazado' ? 'rechazado' : 'aprobado';
   const envioId = await transaccion(async (db) => {
@@ -43,15 +47,24 @@ pagos.post('/:token/confirmar', ruta(async (req, res) => {
     if (!p) throw falla(404, 'Pago no encontrado');
     exigirAcceso(req.usuario, p);
     if (p.proveedor !== 'simulado') throw falla(409, 'Este pago lo confirma la pasarela');
-    if (p.estado !== 'iniciado') throw falla(409, 'El pago ya fue procesado');
-    const referencia = `SIM-${Date.now().toString(36).toUpperCase()}`;
-    await db.query('UPDATE pago SET estado = $1, referencia = $2, actualizado_en = now() WHERE id = $3', [resultado, referencia, p.id]);
-    if (resultado === 'aprobado') {
-      if (p.estado_pago === 'pagado') throw falla(409, 'El envío ya estaba pagado');
-      await db.query(
-        `UPDATE envio SET estado_pago = 'pagado', pago_medio = 'en_linea', pago_referencia = $1, pagado_en = now(), actualizado_en = now() WHERE id = $2`,
-        [referencia, p.envio_id]);
+    const transaccionId = `SIM-${Date.now().toString(36).toUpperCase()}`;
+    const informe = { estado: resultado, token: p.token, monto: p.monto, moneda: 'CLP', transaccion_id: transaccionId };
+    const { aprobado } = verificarConfirmacion(p, informe);
+    if (!aprobado) {
+      await db.query("UPDATE pago SET estado = 'rechazado', referencia = $1, actualizado_en = now() WHERE id = $2", [transaccionId, p.id]);
+      await registrarEventoPago(db, { pagoId: p.id, tipo: 'rechazo', estado: 'rechazado', monto: p.monto, datos: informe, usuarioId: req.usuario.id });
+      return p.envio_id;
     }
+    if (p.estado_pago === 'pagado') throw falla(409, 'El envío ya estaba pagado');
+    const costo = costoDelCobro(p.monto, p.proveedor);
+    await db.query(
+      `UPDATE pago SET estado = 'aprobado', referencia = $1, transaccion_id = $1, verificacion = 'simulado', verificado_en = now(),
+         comision_estimada = $2, neto_estimado = $3, abono_estimado_en = $4, actualizado_en = now() WHERE id = $5`,
+      [transaccionId, costo.comision_estimada, costo.neto_estimado, costo.abono_estimado_en, p.id]);
+    await registrarEventoPago(db, { pagoId: p.id, tipo: 'verificacion', estado: 'aprobado', monto: p.monto, firmaValida: true, datos: informe, usuarioId: req.usuario.id });
+    await db.query(
+      `UPDATE envio SET estado_pago = 'pagado', pago_medio = 'en_linea', pago_referencia = $1, pagado_en = now(), actualizado_en = now() WHERE id = $2`,
+      [transaccionId, p.envio_id]);
     return p.envio_id;
   });
   await auditar(req, `pago_${resultado}`, 'envio', envioId);

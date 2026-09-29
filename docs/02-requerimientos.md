@@ -84,6 +84,15 @@ Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan
 | RF-50 | Administración revisa, aprueba (con monto) o rechaza (con motivo) y paga; el pago queda como costo "seguro" | I | ✅ | CP-57 a CP-59 |
 | RF-51 | Nombre y logo de la empresa configurables (por definir) | M | ✅ | — |
 
+### Nuevos (29/09/2026: repartidor sin envíos visibles y cobranza, ver [15](15-diagnostico-envios-y-cobranza.md))
+| ID | Requerimiento | Prio. | Proto. | QA |
+|---|---|---|---|---|
+| RF-52 | El repartidor ve los envíos **pagados sin asignar** y puede **tomarlos** (configurable); si dos lo toman a la vez, solo uno lo consigue | I | ✅ | CP-70 a CP-73 |
+| RF-53 | Un envío solo queda "pagado" con un **pago verificado** (orden, monto exacto en CLP e ID de transacción); regla también en la base de datos | I | ✅ | CP-74, CP-75 |
+| RF-54 | **Bitácora de cada pago** (inicio, notificación, verificación, rechazo, conciliación) | I | ✅ | CP-74 |
+| RF-55 | **Cobranza**: cobrado, por cobrar, comisiones de la pasarela y abonos por llegar; conciliación con la cartola (la comisión real es costo "pasarela") | A | ✅ | CP-76 |
+| RF-56 | **Comparador** del costo de cobrar con cada proveedor de pago y proyección mensual | M | ✅ | CP-76 |
+
 ## Requerimientos no funcionales
 
 | ID | Requerimiento | Cómo se verifica |

@@ -62,6 +62,9 @@ export const CONFIG_POR_DEFECTO = {
     espera_max_min: 5,
     gps_obligatorio: true,
     qr_destino: 'pagina', // pagina | google | waze
+    // Los repartidores ven los envíos pagados sin asignar y pueden tomarlos ellos mismos.
+    // Si es false, solo administración asigna (el repartidor no ve nada hasta que lo asignen).
+    autoasignacion: true,
   },
   ticket: {
     pie: 'Conserve este ticket. Consultas y reclamos indicando el folio.',

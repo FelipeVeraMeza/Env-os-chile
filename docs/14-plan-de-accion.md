@@ -69,7 +69,7 @@ Cuando respondan: nombre, logo, datos del negocio, tarifas, límites e intentos 
 | # | Tarea | Prio. |
 |---|---|---|
 | [ ] D-01 | Pantalla de **inicio de sesión** y `AUTH_MODE=jwt` en producción | Must |
-| [ ] D-02 | **Pasarela real** con webhook firmado y conciliación | Must |
+| [ ] D-02 | **Pasarela real** con webhook firmado (modelo de verificación, bitácora y conciliación ya hechos, ver [15](15-diagnostico-envios-y-cobranza.md)) | Must |
 | [ ] D-03 | **Dominio .cl** apuntado a Railway con HTTPS | Must |
 | [ ] D-04 | Logo, nombre y colores definitivos | Must |
 | [ ] D-05 | Recuperación de contraseña por correo | Should |

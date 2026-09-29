@@ -44,6 +44,10 @@ export function manejadorErrores(err, req, res, _next) {
     // Violación de una restricción de la base (CHECK / NOT NULL): es una regla de negocio.
     return res.status(409).json({ error: 'La operación viola una regla del sistema', detalles: { restriccion: err.constraint || err.column } });
   }
+  if (err?.code === '23505') {
+    // Registro duplicado (p. ej. dos cobros aprobados para el mismo envío al mismo tiempo).
+    return res.status(409).json({ error: 'La operación ya fue registrada', detalles: { restriccion: err.constraint } });
+  }
   console.error(err);
   return res.status(500).json({ error: 'Error interno del servidor' });
 }

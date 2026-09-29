@@ -41,6 +41,8 @@ Ordenados por impacto. **Sin P-01 a P-05 no se puede cotizar el desarrollo.**
 | P-14 | ¿Se necesita funcionar sin señal? | Arquitectura | No |
 | P-15 | ¿Impresora térmica 80 mm, A4 o ambas? ¿Modelo? | Prueba de ticket | Ambas |
 | P-16 | ¿Quién será responsable de los datos personales (RUT)? ¿Retención de fotos y boletas? | Legal | Fotos 12 meses, envíos 5 años |
+| P-17 | ¿Los repartidores **toman** los envíos pagados o **solo administración asigna**? | Cómo le llegan los envíos al repartidor | Pueden tomarlos (se apaga en Tarifas → Operación) |
+| P-18 | ¿Se emitirá boleta/factura electrónica por cada cobro desde la plataforma? | Integración SII y costo | No, la emite el cliente por fuera |
 
 ## Control de versiones
 

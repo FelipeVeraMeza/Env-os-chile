@@ -132,6 +132,8 @@ export async function tarifas() {
           <label class="campo">Al escanear el QR<select name="qr_destino">${[['pagina', 'Página con Maps y Waze (recomendado)'], ['google', 'Abrir Google Maps directo'], ['waze', 'Abrir Waze directo']].map(([v, txt]) => html`<option value="${v}" ${op.qr_destino === v ? html`selected` : ''}>${txt}</option>`)}</select></label>
         </div>
         <label class="interruptor" style="margin-top:14px"><input type="checkbox" name="gps_obligatorio" ${op.gps_obligatorio ? html`checked` : ''}> GPS obligatorio para cerrar la entrega</label>
+        <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="autoasignacion" ${op.autoasignacion ? html`checked` : ''}> Los repartidores pueden tomar envíos pagados sin asignar</label>
+        <p class="muted">Si lo desactivas, el repartidor solo ve lo que administración le asigna.</p>
         <p class="muted">La foto de entrega es siempre obligatoria.</p>
         <button class="btn" style="margin-top:6px">Guardar reglas</button>
       </form>
@@ -268,4 +270,73 @@ export async function ajustes() {
       catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
     };
   };
+}
+
+// ================= Cobranza: pagos verificados, por cobrar, comisiones y abonos =================
+const VERIFICACION = { simulado: 'Simulador', webhook: 'Aviso de la pasarela', consulta_api: 'Consulta a la pasarela', manual: 'Revisado por administración' };
+
+export async function cobranza(rango = {}) {
+  const vista = $('#vista');
+  const hoy = hoyISO();
+  const desde = rango.desde || `${hoy.slice(0, 8)}01`;
+  const hasta = rango.hasta || hoy;
+  montar(vista, esqueleto(4));
+  const [r, pagos, est] = await Promise.all([
+    get(`/api/cobranza/resumen?desde=${desde}&hasta=${hasta}`),
+    get('/api/cobranza/pagos'),
+    get(`/api/cobranza/estimar${rango.envios_mes ? `?envios_mes=${rango.envios_mes}` : ''}`),
+  ]);
+  const pendienteAbono = (p) => p.estado === 'aprobado' && !p.abonado_en && !['manual', 'simulado'].includes(p.proveedor);
+  montar(vista, html`
+    <div class="encabezado"><div><h1>Cobranza</h1><p>Un envío queda "pagado" solo con un pago verificado. Aquí ves lo cobrado, lo que falta cobrar, lo que se lleva la pasarela y los abonos por llegar.</p></div>
+      <form class="fila" id="rango-c">
+        <label class="campo">Desde<input type="date" name="desde" value="${desde}" max="${hoy}"></label>
+        <label class="campo">Hasta<input type="date" name="hasta" value="${hasta}" max="${hoy}"></label>
+      </form></div>
+    <div class="grid g4">
+      <div class="kpi destacado"><div class="etiqueta">Cobrado (verificado)</div><div class="valor">${clp(r.cobrado.bruto)}</div><div class="nota">${r.cobrado.pagos} pagos · neto ${clp(r.cobrado.neto)}</div></div>
+      <div class="kpi"><div class="etiqueta">Comisiones de pago</div><div class="valor">${clp(r.cobrado.comision)}</div><div class="nota">${r.cobrado.bruto ? ((r.cobrado.comision / r.cobrado.bruto) * 100).toFixed(2) : '0.00'}% de lo cobrado</div></div>
+      <div class="kpi"><div class="etiqueta">Por cobrar</div><div class="valor">${clp(r.por_cobrar.monto)}</div><div class="nota">${r.por_cobrar.envios} envíos sin pagar${r.por_cobrar.envios ? ` · el más antiguo hace ${r.por_cobrar.dias_mas_antiguo} día(s)` : ''}</div></div>
+      <div class="kpi"><div class="etiqueta">Abonos por llegar</div><div class="valor">${clp(r.por_conciliar.monto_esperado)}</div><div class="nota">${r.por_conciliar.pagos} pagos${r.por_conciliar.atrasados ? ` · ${r.por_conciliar.atrasados} atrasado(s)` : ''}</div></div>
+    </div>
+    ${r.sin_respuesta ? html`<div class="aviso alerta" style="margin-top:16px">${r.sin_respuesta} pago(s) iniciados hace más de 30 minutos sin respuesta de la pasarela: el cliente abandonó el pago o el aviso no llegó.</div>` : ''}
+    ${r.proveedor_actual === 'simulado' ? html`<div class="aviso magenta" style="margin-top:16px">Los pagos en línea están en <b>modo simulado</b>: no se mueve dinero real. Elige un proveedor con el comparador de abajo para conectarlo en la etapa de desarrollo.</div>` : ''}
+    <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Pagos</h2><span class="sub">Últimos 200</span></div>
+      ${pagos.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Fecha</th><th>Folio</th><th>Cliente</th><th>Medio</th><th>Estado</th><th>Verificación</th><th class="num">Monto</th><th class="num">Comisión</th><th>Abono</th></tr></thead>
+        <tbody>${pagos.map((p) => html`<tr>
+          <td>${fecha(p.creado_en)}</td><td class="mono"><a href="#/envio/${p.envio_id}">${p.folio || '—'}</a></td><td>${p.cliente_nombre}</td>
+          <td>${p.proveedor === 'manual' ? p.medio : p.proveedor}</td>
+          <td><span class="badge ${p.estado === 'aprobado' ? 'e-pagado' : p.estado === 'iniciado' ? 'e-pendiente' : 'e-anulado'}">${p.estado}</span></td>
+          <td class="sub">${p.verificacion ? html`${VERIFICACION[p.verificacion]}${p.verificado_por_nombre ? ` · ${p.verificado_por_nombre}` : ''}<div class="muted">${p.transaccion_id || p.referencia || ''}</div>` : '—'}</td>
+          <td class="num">${clp(p.monto)}</td><td class="num">${clp(p.comision_real ?? p.comision_estimada)}${p.comision_real === null && p.comision_estimada ? html`<div class="muted">estimada</div>` : ''}</td>
+          <td>${p.abonado_en ? html`<span class="sub">${fecha(p.abonado_en)} · ${clp(p.monto_abonado)}</span>` : pendienteAbono(p) ? html`<button class="btn sec chico" data-conciliar="${p.id}">Conciliar</button><div class="muted">esperado ${fecha(p.abono_estimado_en)}</div>` : html`<span class="muted">—</span>`}</td>
+        </tr>`)}</tbody></table></div>` : vacio('Aún no hay pagos registrados.')}
+    </div>
+    <div class="card"><div class="card-titulo"><h2>¿Qué proveedor de pago conviene?</h2>
+      <form class="fila" id="f-est"><label class="campo">Envíos al mes<input type="number" name="envios_mes" min="0" value="${est.envios_mes}" style="max-width:120px"></label></form></div>
+      <p class="sub">Costo de cobrar un envío de ${clp(est.monto)}. <b>Comisiones referenciales</b>: confírmalas con cada proveedor antes de firmar (varían por contrato y volumen).</p>
+      <div class="tabla-wrap"><table><thead><tr><th>Proveedor</th><th class="num">Comisión</th><th class="num">Costo por envío</th><th class="num">Recibes</th><th class="num">Costo al mes</th><th>Abono</th><th>Cómo se verifica</th></tr></thead>
+        <tbody>${est.proveedores.map((p) => html`<tr><td style="white-space:normal;min-width:220px;max-width:340px"><b>${p.nombre}</b><div class="muted">${p.nota}</div></td>
+          <td class="num">${p.porcentaje}%${p.lleva_iva ? ' + IVA' : ''}</td><td class="num">${clp(p.costo)}</td><td class="num">${clp(p.neto)}</td><td class="num">${clp(p.costo_mes)}</td>
+          <td>${p.dias_abono ? `${p.dias_abono} día(s) hábil(es)` : 'Inmediato'}</td><td class="sub" style="white-space:normal">${VERIFICACION[p.verificacion]}</td></tr>`)}</tbody></table></div>
+    </div>`);
+  $('#rango-c').addEventListener('change', (e) => cobranza(datosForm(e.currentTarget)));
+  $('#f-est').addEventListener('change', (e) => cobranza({ desde, hasta, envios_mes: e.target.value }));
+  $('#f-est').onsubmit = (e) => { e.preventDefault(); cobranza({ desde, hasta, envios_mes: e.target.envios_mes.value }); };
+  $$('[data-conciliar]').forEach((b) => {
+    const p = pagos.find((x) => String(x.id) === b.dataset.conciliar);
+    b.onclick = () => {
+      const m = modal(html`<h2>Conciliar abono</h2>
+        <p class="sub">Revisa la cartola del banco y registra lo que realmente llegó por el envío ${p.folio}. La diferencia con lo cobrado (${clp(p.monto)}) queda como costo "pasarela".</p>
+        <form class="pila" id="f-con" novalidate>
+          <div class="grid g2"><label class="campo">Monto abonado<input name="monto_abonado" type="number" min="0" max="${p.monto}" value="${p.neto_estimado ?? p.monto}"></label>
+          <label class="campo">Fecha del abono<input name="abonado_en" type="date" value="${hoyISO()}" max="${hoyISO()}"></label></div>
+          <button class="btn">Guardar conciliación</button></form>`);
+      $('#f-con', m.el).onsubmit = async (e) => {
+        e.preventDefault();
+        try { await post(`/api/cobranza/pagos/${p.id}/conciliar`, datosForm(e.target)); m.cerrar(); toast('Abono conciliado', 'ok'); cobranza({ desde, hasta }); }
+        catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+      };
+    };
+  });
 }

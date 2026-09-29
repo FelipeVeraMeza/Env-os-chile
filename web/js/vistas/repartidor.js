@@ -9,9 +9,10 @@ import { direccionTexto } from './comun.js';
 export async function ruta() {
   const vista = $('#vista');
   montar(vista, esqueleto(3));
-  const [activos, hechos] = await Promise.all([
+  const [activos, hechos, disponibles] = await Promise.all([
     get('/api/envios?estado=asignado,en_ruta,reagendado,fallido&limite=100'),
     get(`/api/envios?estado=entregado,devuelto&limite=100&desde=${new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' })}`),
+    get('/api/envios/disponibles'),
   ]);
   const enRuta = activos.items.filter((e) => e.estado === 'en_ruta');
   const porRetirar = activos.items.filter((e) => e.estado !== 'en_ruta');
@@ -22,12 +23,30 @@ export async function ruta() {
       <div class="dir">${e.comuna_nombre.toUpperCase()} · ${e.destinatario_nombre}</div></div>
     <div class="der">${badge(e.estado)}${e.estado_pago !== 'pagado' ? html`<span class="badge e-pendiente">Sin pagar</span>` : ''}${e.intentos ? html`<span class="sub">Intento ${e.intentos + 1}/${app.conf.operacion.intentos_max}</span>` : ''}</div>
   </a>`;
+  // Envíos pagados que nadie ha tomado: el repartidor los acepta y pasan a su ruta.
+  const libre = (e) => html`<div class="item-envio">
+    <div><div class="fila"><span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
+      ${e.tipo_destino === 'punto_courier' ? html`<span class="badge e-asignado">${e.courier_empresa}</span>` : ''}</div>
+      <div style="font-size:1.05rem;font-weight:700">${e.comuna_nombre.toUpperCase()}</div>
+      <div class="dir">${e.calle} ${e.numero} · ${e.bultos} bulto(s) · ${e.peso_kg} kg</div></div>
+    <div class="der"><button class="btn chico" data-tomar="${e.id}">Tomar</button></div>
+  </div>`;
   montar(vista, html`
     <section class="hero"><p>${new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Santiago' })}</p>
       <h1>Mi ruta</h1>
-      <div class="fila"><span class="badge" style="background:rgba(255,255,255,.2)">${enRuta.length} en ruta</span><span class="badge" style="background:rgba(255,255,255,.2)">${porRetirar.length} por retirar</span><span class="badge" style="background:rgba(255,255,255,.2)">${hechos.total} cerrados hoy</span></div></section>
+      <div class="fila"><span class="badge" style="background:rgba(255,255,255,.2)">${enRuta.length} en ruta</span><span class="badge" style="background:rgba(255,255,255,.2)">${porRetirar.length} por retirar</span><span class="badge" style="background:rgba(255,255,255,.2)">${hechos.total} cerrados hoy</span>${disponibles.total ? html`<span class="badge" style="background:rgba(255,255,255,.2)">${disponibles.total} disponibles</span>` : ''}</div></section>
     <div class="card"><h2>En ruta</h2><div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
-    <div class="card"><h2>Por retirar / reintentar</h2><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>`);
+    <div class="card"><h2>Por retirar / reintentar</h2><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
+    ${disponibles.autoasignacion ? html`<div class="card"><div class="card-titulo"><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
+      <div class="lista-envios">${disponibles.items.length ? disponibles.items.map(libre) : vacio('No hay envíos nuevos por tomar.')}</div></div>`
+    : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
+  $$('[data-tomar]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try { await post(`/api/envios/${b.dataset.tomar}/tomar`); toast('Envío agregado a tu ruta', 'ok'); ruta(); }
+      catch (err) { errorToast(err); ruta(); }
+    };
+  });
 }
 
 // ================= Detalle para el repartidor: acciones grandes para usar en la calle =================
