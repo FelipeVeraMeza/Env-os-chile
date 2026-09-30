@@ -188,9 +188,9 @@ usuarios.get('/', requiereRol('admin'), ruta(async (req, res) => {
   res.json(rows);
 }));
 
-// Lista mínima de repartidores para asignar (sin datos sensibles).
+// Lista mínima de quienes pueden repartir, para asignar (sin datos sensibles). Administración también reparte.
 usuarios.get('/repartidores', requiereRol('admin'), ruta(async (_req, res) => {
-  const { rows } = await query("SELECT id, nombre, telefono FROM usuario WHERE rol = 'repartidor' AND activo ORDER BY nombre");
+  const { rows } = await query("SELECT id, nombre, telefono, rol FROM usuario WHERE rol IN ('repartidor', 'admin') AND activo ORDER BY rol DESC, nombre");
   res.json(rows);
 }));
 
@@ -243,7 +243,13 @@ usuarios.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   const actual = await uno('SELECT rol, correo, nombre FROM usuario WHERE id = $1', [id]);
   if (!actual) throw falla(404, 'Usuario no encontrado');
   if (b.password) exigirClaveSegura(b.password, actual);
-  if (actual?.rol === 'repartidor' && (b.activo === false || (b.rol && b.rol !== 'repartidor'))) {
+  // Un cliente con envíos no cambia de perfil: sus envíos quedarían sin dueño visible.
+  if (actual.rol === 'cliente' && b.rol && b.rol !== 'cliente') {
+    const { n } = await uno('SELECT count(*)::int AS n FROM envio WHERE cliente_id = $1', [id]);
+    if (n) throw falla(409, `Este cliente tiene ${n} envío(s): no se puede cambiar su perfil. Crea una cuenta nueva para el otro perfil`, { envios: n });
+  }
+  // Quien reparte (repartidor o administración) no se desactiva ni deja de poder repartir con envíos en curso.
+  if (['repartidor', 'admin'].includes(actual.rol) && (b.activo === false || (b.rol && !['repartidor', 'admin'].includes(b.rol)))) {
     const { n } = await uno("SELECT count(*)::int AS n FROM envio WHERE repartidor_id = $1 AND estado IN ('asignado','en_ruta','fallido','reagendado')", [id]);
     if (n) throw falla(409, `Este repartidor tiene ${n} envío(s) en curso: reasígnalos antes de desactivarlo`, { envios_pendientes: n });
   }

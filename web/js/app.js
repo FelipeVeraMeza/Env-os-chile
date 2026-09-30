@@ -27,6 +27,7 @@ const MENUS = {
   admin: [
     ['#/panel', 'panel', 'Panel'],
     ['#/envios', 'envios', 'Envíos'],
+    ['#/ruta', 'ruta', 'Mi ruta'], // administración también reparte
     ['#/cobranza', 'cobranza', 'Cobranza'],
     ['#/nuevo', 'nuevo', 'Nuevo', 'solo-escritorio'],
     ['#/reclamos', 'seguro', 'Seguros', 'solo-escritorio'],
@@ -50,7 +51,8 @@ const RUTAS = [
   [/^#\/nuevo$/, () => cliente.nuevo(), ['cliente', 'admin']],
   [/^#\/libreta$/, () => cliente.libreta(), 'cliente'],
   [/^#\/reclamos$/, () => envios.reclamos(), ['cliente', 'admin']],
-  [/^#\/ruta$/, () => repartidor.ruta(), 'repartidor'],
+  [/^#\/ruta$/, () => repartidor.ruta(), ['repartidor', 'admin']],
+  [/^#\/entrega\/(\d+)$/, (m) => repartidor.detalleRepartidor(Number(m[1])), ['repartidor', 'admin']],
   [/^#\/panel$/, () => admin.panel(), 'admin'],
   [/^#\/cobranza$/, () => admin.cobranza(), 'admin'],
   [/^#\/tarifas$/, () => admin.tarifas(), 'admin'],

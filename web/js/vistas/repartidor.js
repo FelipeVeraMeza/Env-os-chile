@@ -9,9 +9,13 @@ import { avisoWhatsapp, direccionTexto } from './comun.js';
 export async function ruta() {
   const vista = $('#vista');
   montar(vista, esqueleto(3));
+  // Administración también reparte: su ruta son los envíos asignados a sí mismo (abre la vista de entrega).
+  const esAdmin = app.usuario.rol === 'admin';
+  const propios = esAdmin ? `&repartidor_id=${app.usuario.id}` : '';
+  const enlace = (e) => (esAdmin ? `#/entrega/${e.id}` : `#/envio/${e.id}`);
   const [activos, hechos, disponibles] = await Promise.all([
-    get('/api/envios?estado=asignado,en_ruta,reagendado,fallido&limite=100&orden=ruta'),
-    get('/api/envios?estado=entregado,devuelto&cerrados=hoy&limite=1'),
+    get(`/api/envios?estado=asignado,en_ruta,reagendado,fallido&limite=100&orden=ruta${propios}`),
+    get(`/api/envios?estado=entregado,devuelto&cerrados=hoy&limite=1${propios}`),
     get('/api/envios/disponibles'),
   ]);
   const enRuta = activos.items.filter((e) => e.estado === 'en_ruta');
@@ -27,7 +31,7 @@ export async function ruta() {
   };
   const flechas = (e) => html`<div class="flechas-ruta"><button class="btn-icono" data-mover="${e.id}" data-paso="-1" aria-label="Subir parada">▲</button>
     <span class="sub">${orden.indexOf(e.id) + 1}</span><button class="btn-icono" data-mover="${e.id}" data-paso="1" aria-label="Bajar parada">▼</button></div>`;
-  const tarjeta = (e) => html`<div class="parada">${flechas(e)}<a class="item-envio" href="#/envio/${e.id}">
+  const tarjeta = (e) => html`<div class="parada">${flechas(e)}<a class="item-envio" href="${enlace(e)}">
     <div><div class="fila"><span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
       ${e.tipo_destino === 'punto_courier' ? html`<span class="badge e-asignado">${e.courier_empresa}</span>` : ''}</div>
       <div style="font-size:1.05rem;font-weight:700">${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}</div>
@@ -48,7 +52,7 @@ export async function ruta() {
       <div class="fila"><span class="badge" style="background:rgba(255,255,255,.2)">${enRuta.length} en ruta</span><span class="badge" style="background:rgba(255,255,255,.2)">${porRetirar.length} por retirar</span><span class="badge" style="background:rgba(255,255,255,.2)">${hechos.total} cerrados hoy</span>${disponibles.total ? html`<span class="badge" style="background:rgba(255,255,255,.2)">${disponibles.total} disponibles</span>` : ''}</div></section>
     <div class="card"><h2>En ruta</h2><div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
     <div class="card"><h2>Por retirar / reintentar</h2><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
-    ${disponibles.autoasignacion ? html`<div class="card"><div class="card-titulo"><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
+    ${disponibles.autoasignacion || esAdmin ? html`<div class="card"><div class="card-titulo"><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
       <div class="lista-envios">${disponibles.items.length ? disponibles.items.map(libre) : vacio('No hay envíos nuevos por tomar.')}</div></div>`
     : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
   $$('[data-mover]').forEach((b) => { b.onclick = () => mover(Number(b.dataset.mover), Number(b.dataset.paso)); });

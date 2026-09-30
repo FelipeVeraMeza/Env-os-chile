@@ -25,6 +25,7 @@
     "sql:supabase": "node scripts/generar-sql-supabase.js",
     "publicar": "node scripts/publicar.js",
     "reiniciar": "node scripts/reiniciar-datos.js",
+    "borrar-envios": "node scripts/borrar-envios.js",
     "manual": "node scripts/manual/generar-manual.mjs",
     "carga": "node scripts/prueba-carga.js",
     "e2e": "node qa/e2e/flujo-completo.js",

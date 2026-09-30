@@ -109,6 +109,13 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
   if (clave === 'pagos' && nuevo.en_linea && nuevo.proveedor === 'simulado' && config.entorno === 'production') {
     errores.en_linea = 'El pago en línea simulado no cobra dinero real: en producción se paga por transferencia';
   }
+  // Logo subido desde Ajustes: la interfaz lo achica y lo convierte a PNG; se guarda en la base como data URL.
+  if (clave === 'negocio' && nuevo.logo_url) {
+    const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(nuevo.logo_url);
+    const png = m && Buffer.from(m[1], 'base64');
+    if (!png || !png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) errores.logo_url = 'Sube el logo como imagen (PNG, JPG, WebP o SVG)';
+    else if (nuevo.logo_url.length > 400_000) errores.logo_url = 'El logo es demasiado grande';
+  }
   if (clave === 'transferencia') {
     for (const [k, v] of Object.entries(nuevo)) {
       nuevo[k] = String(v).trim();

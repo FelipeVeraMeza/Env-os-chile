@@ -6,3 +6,4 @@ qa/reportes/
 .DS_Store
 *.log
 .env.railway
+respaldos/

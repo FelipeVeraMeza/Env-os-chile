@@ -250,10 +250,10 @@ envios.get('/disponibles', requiereRol('admin', 'repartidor'), ruta(async (req, 
 
 // El repartidor toma un envío disponible. La condición va en el UPDATE para que, si dos
 // repartidores lo toman al mismo tiempo, solo uno lo consiga.
-envios.post('/:id/tomar', requiereRol('repartidor'), ruta(async (req, res) => {
+envios.post('/:id/tomar', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
   const id = idNumerico(req.params.id);
   const conf = await leerConfig();
-  if (!conf.operacion.autoasignacion) throw falla(403, 'Administración asigna los envíos: espera a que te asignen uno');
+  if (req.usuario.rol === 'repartidor' && !conf.operacion.autoasignacion) throw falla(403, 'Administración asigna los envíos: espera a que te asignen uno');
   const tomado = await transaccion(async (db) => {
     const { rows: [e] } = await db.query(
       `UPDATE envio e SET repartidor_id = $1, estado = 'asignado', actualizado_en = now() WHERE e.id = $2 AND ${SIN_ASIGNAR} RETURNING e.id`,
@@ -278,7 +278,8 @@ envios.put('/ruta/orden', requiereRol('repartidor', 'admin'), ruta(async (req, r
   if (!ids.length || ids.length > 200 || ids.some((n) => !Number.isInteger(n) || n <= 0) || new Set(ids).size !== ids.length) {
     throw falla(422, 'Lista de envíos inválida');
   }
-  const repartidorId = req.usuario.rol === 'repartidor' ? req.usuario.id : Number(req.body.repartidor_id);
+  // Sin repartidor_id, administración ordena su propia ruta (también reparte).
+  const repartidorId = req.usuario.rol === 'repartidor' || !req.body.repartidor_id ? req.usuario.id : Number(req.body.repartidor_id);
   // En una transacción: si hay un envío ajeno en la lista no se cambia nada.
   const n = await transaccion(async (db) => {
     const r = await db.query(
@@ -320,7 +321,8 @@ envios.post('/:id/asignar', requiereRol('admin'), ruta(async (req, res) => {
         ? 'El comprobante de pago está en revisión: apruébalo antes de asignar un repartidor'
         : 'El envío aún no está pagado: se asigna cuando el pago esté aprobado');
     }
-    const rep = await uno("SELECT id FROM usuario WHERE id = $1 AND rol = 'repartidor' AND activo", [repartidorId]);
+    // Administración también reparte: se le puede asignar un envío a un administrador.
+    const rep = await uno("SELECT id FROM usuario WHERE id = $1 AND rol IN ('repartidor', 'admin') AND activo", [repartidorId]);
     if (!rep) throw falla(422, 'Repartidor no válido');
   }
   // Un envío reagendado cambia de repartidor pero sigue "reagendado" (conserva sus intentos).

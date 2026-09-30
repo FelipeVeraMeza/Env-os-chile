@@ -159,8 +159,12 @@ function accionesAdmin(e, repartidores) {
   if (['creado', 'asignado', 'reagendado'].includes(e.estado) && e.estado_pago !== 'pagado') {
     botones.push(html`<p class="sub">Se asigna repartidor cuando el pago esté aprobado.</p>`);
   } else if (['creado', 'asignado', 'reagendado'].includes(e.estado)) {
-    botones.push(html`<label class="campo">Repartidor asignado<select id="asignar">${e.estado === 'reagendado' ? '' : html`<option value="">Sin asignar</option>`}${repartidores.map((r) => html`<option value="${r.id}" ${r.id === e.repartidor_id ? html`selected` : ''}>${r.nombre}</option>`)}</select></label>`);
+    botones.push(html`<label class="campo">Repartidor asignado<select id="asignar">${e.estado === 'reagendado' ? '' : html`<option value="">Sin asignar</option>`}${repartidores.map((r) => html`<option value="${r.id}" ${r.id === e.repartidor_id ? html`selected` : ''}>${r.nombre}${r.id === app.usuario.id ? ' (yo)' : r.rol === 'admin' ? ' (administración)' : ''}</option>`)}</select></label>`);
   } else if (e.repartidor_nombre) botones.push(html`<p class="sub">Repartidor: <b>${e.repartidor_nombre}</b></p>`);
+  // Administración también reparte: si el envío es suyo, abre la vista de entrega (retirar, foto y GPS).
+  if (e.repartidor_id === app.usuario.id && ['asignado', 'en_ruta', 'reagendado', 'fallido'].includes(e.estado)) {
+    botones.push(html`<a class="btn" href="#/entrega/${e.id}">Lo reparto yo: retirar / entregar</a>`);
+  }
   if (e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado)) botones.push(html`<button class="btn sec" id="pago-manual">Registrar pago manual</button>`);
   if (e.estado === 'fallido') {
     const puede = e.intentos < app.conf.operacion.intentos_max;

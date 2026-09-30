@@ -21,7 +21,9 @@ const arg = (nombre) => {
   return i > -1 ? process.argv[i + 1] : undefined;
 };
 const confirmado = process.argv.includes('--confirmar');
-const correo = String(arg('correo') || '').trim().toLowerCase();
+// --mantener correo: conserva ese administrador tal cual (con su contraseña) en vez de crear uno nuevo.
+const mantener = String(arg('mantener') || '').trim().toLowerCase();
+const correo = mantener || String(arg('correo') || '').trim().toLowerCase();
 const clave = String(arg('clave') || '');
 const nombre = String(arg('nombre') || 'Administración').trim();
 
@@ -30,9 +32,9 @@ function salir(mensaje) {
   process.exit(1);
 }
 
-if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) salir('Indica el correo del administrador: --correo admin@empresa.cl');
-if (clave.length < 8) salir('Indica la contraseña del administrador (8 caracteres o más): --clave "LaClave"');
-const debilidad = validarClave(clave, { correo, nombre });
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) salir('Indica el correo del administrador: --correo admin@empresa.cl (o --mantener admin@empresa.cl)');
+if (!mantener && clave.length < 8) salir('Indica la contraseña del administrador (8 caracteres o más): --clave "LaClave"');
+const debilidad = mantener ? null : validarClave(clave, { correo, nombre });
 
 try {
   const db = await conectar();
@@ -45,7 +47,16 @@ try {
   console.log(`Se borrarán: ${conteo.usuario ?? 0} usuarios, ${conteo.envio ?? 0} envíos, ${conteo.pago ?? 0} pagos, ${conteo.adjunto ?? 0} archivos,`);
   console.log(`             ${conteo.reclamo_seguro ?? 0} reclamos, ${conteo.costo ?? 0} costos, ${conteo.destinatario ?? 0} destinatarios y las bitácoras.`);
   console.log('Se conservan: comunas, zonas, tarifas, datos de la empresa y cuenta para transferencias.');
-  console.log(`Administrador que se creará: ${nombre} <${correo}>`);
+  let conservado = null;
+  if (mantener) {
+    conservado = (await pool.query("SELECT id, nombre, correo FROM usuario WHERE correo = $1 AND rol = 'admin' AND activo AND password_hash IS NOT NULL", [correo])).rows[0];
+    if (!conservado) salir(`No existe un administrador activo con contraseña y correo ${correo}: no se puede conservar`);
+    console.log(`Administrador que se conserva (con su contraseña actual): ${conservado.nombre} <${conservado.correo}>`);
+    const otros = (await pool.query('SELECT correo, rol FROM usuario WHERE id <> $1 ORDER BY id', [conservado.id])).rows;
+    if (otros.length) console.log(`Usuarios que se borran: ${otros.map((u) => `${u.correo} (${u.rol})`).join(', ')}`);
+  } else {
+    console.log(`Administrador que se creará: ${nombre} <${correo}>`);
+  }
   if (debilidad) console.log(`⚠ La contraseña no cumple la política de la plataforma (${debilidad.toLowerCase()}). Cámbiala en "Mi cuenta" apenas entres.`);
 
   if (!confirmado) {
@@ -54,7 +65,7 @@ try {
   }
 
   const rutas = (await pool.query('SELECT ruta FROM adjunto')).rows.map((r) => r.ruta);
-  const hash = await bcrypt.hash(clave, 10);
+  const hash = mantener ? null : await bcrypt.hash(clave, 10);
   const cliente = await pool.connect();
   try {
     await cliente.query('BEGIN');
@@ -62,11 +73,20 @@ try {
     // Las bitácoras son inmutables (triggers): se desactivan solo dentro de esta transacción para vaciarlas.
     // Si algo falla, el ROLLBACK deja todo como estaba, triggers incluidos.
     for (const t of tablas) await cliente.query(`ALTER TABLE ${t} DISABLE TRIGGER USER`);
-    await cliente.query(`TRUNCATE ${tablas.join(', ')} RESTART IDENTITY CASCADE`);
+    let admin;
+    if (conservado) {
+      // Se vacía todo menos la tabla de usuarios, y de ella se borran todos salvo el administrador conservado.
+      const sinUsuario = tablas.filter((t) => t !== 'usuario');
+      await cliente.query(`TRUNCATE ${sinUsuario.join(', ')} RESTART IDENTITY`);
+      await cliente.query('DELETE FROM usuario WHERE id <> $1', [conservado.id]);
+      admin = conservado;
+    } else {
+      await cliente.query(`TRUNCATE ${tablas.join(', ')} RESTART IDENTITY CASCADE`);
+      ({ rows: [admin] } = await cliente.query(
+        `INSERT INTO usuario (nombre, correo, password_hash, rol, password_cambiado_en) VALUES ($1, $2, $3, 'admin', now()) RETURNING id`,
+        [nombre, correo, hash]));
+    }
     for (const t of tablas) await cliente.query(`ALTER TABLE ${t} ENABLE TRIGGER USER`);
-    const { rows: [admin] } = await cliente.query(
-      `INSERT INTO usuario (nombre, correo, password_hash, rol, password_cambiado_en) VALUES ($1, $2, $3, 'admin', now()) RETURNING id`,
-      [nombre, correo, hash]);
     // El reinicio queda como primer registro de la nueva bitácora.
     await cliente.query(
       "INSERT INTO auditoria (usuario_id, accion, entidad, entidad_id, datos) VALUES ($1, 'reiniciar_datos', 'sistema', NULL, $2)",
@@ -89,7 +109,7 @@ try {
     console.warn(`⚠ Los datos se borraron, pero no se pudieron borrar los archivos guardados: ${err.message}`);
   }
   console.log(`\n✔ Plataforma reiniciada. ${archivos} de ${rutas.length} archivo(s) borrados del almacenamiento (${config.almacenamiento.driver}).`);
-  console.log(`✔ Entra con ${correo} y la contraseña indicada. Con AUTH_MODE=jwt los clientes crean su cuenta en "Crear cuenta de cliente".\n`);
+  console.log(`✔ Entra con ${correo} y ${mantener ? 'su contraseña de siempre' : 'la contraseña indicada'}. Con AUTH_MODE=jwt los clientes crean su cuenta en "Crear cuenta de cliente".\n`);
 } catch (err) {
   const ayuda = explicarErrorConexion(err);
   salir(`${err.message}${ayuda ? `\n  👉 ${ayuda}` : ''}`);

@@ -203,11 +203,12 @@ export async function usuarios() {
   const conSesion = app.conf.auth_mode === 'jwt';
   const lista = (await get('/api/usuarios')).filter((u) => !u.correo.startsWith('qa-'));
   montar(vista, html`
-    <div class="encabezado"><div><h1>Usuarios</h1><p>Tres perfiles: administrador, cliente y repartidor.${conSesion ? ' Cada persona entra con su correo y contraseña.' : ''}</p></div>
+    <div class="encabezado"><div><h1>Usuarios</h1><p>Tres perfiles: administrador (también puede repartir), cliente y repartidor. Los clientes se registran solos; aquí puedes cambiar el perfil de cada uno.${conSesion ? ' Cada persona entra con su correo y contraseña.' : ''}</p></div>
       <button class="btn" id="nuevo-u">${icono('nuevo')} Nuevo usuario</button></div>
     <div class="tabla-wrap"><table class="tabla-cards"><thead><tr><th>Nombre y correo</th><th>Perfil</th><th>Teléfono</th><th>Último acceso</th><th>Estado</th><th></th></tr></thead>
       <tbody>${lista.map((u) => html`<tr><td data-label="Nombre"><b>${u.nombre}</b>${u.id === app.usuario.id ? html` <span class="muted">(tú)</span>` : ''}<div class="sub">${u.correo}</div></td>
-        <td data-label="Perfil"><span class="badge ${u.rol === 'admin' ? 'e-en_ruta' : u.rol === 'cliente' ? 'e-creado' : 'e-asignado'}">${ROL[u.rol]}</span></td>
+        <td data-label="Perfil">${u.id === app.usuario.id ? html`<span class="badge e-en_ruta">${ROL[u.rol]}</span>`
+          : html`<select data-rol="${u.id}" aria-label="Perfil de ${u.nombre}" style="min-height:36px;padding:4px 8px">${Object.entries(ROL).map(([k, v]) => html`<option value="${k}" ${u.rol === k ? html`selected` : ''}>${v}</option>`)}</select>`}</td>
         <td data-label="Teléfono">${u.telefono || '—'}</td>
         <td data-label="Último acceso" class="sub">${u.ultimo_acceso ? fechaHora(u.ultimo_acceso) : 'Nunca'}${!u.tiene_clave ? html`<div><span class="badge e-pendiente">Sin contraseña</span></div>` : u.debe_cambiar_clave ? html`<div class="muted">Debe cambiar su clave</div>` : ''}</td>
         <td data-label="Estado">${u.activo ? html`<span class="badge e-entregado">Activo</span>` : html`<span class="badge e-anulado">Inactivo</span>`}</td>
@@ -237,6 +238,17 @@ export async function usuarios() {
   $$('[data-activo]').forEach((b) => {
     b.onclick = async () => {
       try { await patch(`/api/usuarios/${b.dataset.activo}`, { activo: b.dataset.v === '1' }); toast('Usuario actualizado', 'ok'); usuarios(); } catch (err) { errorToast(err); }
+    };
+  });
+  // Cambiar el perfil (p. ej. alguien que se registró como cliente y va a repartir).
+  $$('[data-rol]').forEach((s) => {
+    const u = lista.find((x) => String(x.id) === s.dataset.rol);
+    s.onchange = async () => {
+      const nuevo = s.value;
+      const aviso = nuevo === 'admin' ? ' Tendrá acceso completo: pagos, usuarios y configuración.' : '';
+      if (!(await confirmar(`¿Cambiar a ${u.nombre} a ${ROL[nuevo]}?`, `Pasará de ${ROL[u.rol]} a ${ROL[nuevo]}.${aviso}`, 'Cambiar perfil'))) { s.value = u.rol; return; }
+      try { await patch(`/api/usuarios/${u.id}`, { rol: nuevo }); toast(`${u.nombre} ahora es ${ROL[nuevo]}`, 'ok'); usuarios(); }
+      catch (err) { s.value = u.rol; errorToast(err); }
     };
   });
   $$('[data-sesiones]').forEach((b) => {
@@ -311,7 +323,14 @@ export async function ajustes() {
           <label class="campo">Nombre de la empresa<input name="nombre" value="${n.nombre}"></label>
           <div class="grid g2"><label class="campo">RUT<input name="rut" value="${n.rut}"></label><label class="campo">Teléfono<input name="telefono" value="${n.telefono}"></label></div>
           <label class="campo">Correo de contacto<input name="correo" value="${n.correo}"></label>
-          <label class="campo">URL del logo <small>(PNG o SVG, fondo transparente)</small><input name="logo_url" value="${n.logo_url}" placeholder="https://…/logo.svg"></label>
+          <div class="campo">Logo <small>(PNG, JPG, WebP o SVG; ideal cuadrado y con fondo transparente)</small>
+            <div class="fila" style="margin-top:6px;align-items:center">
+              <img id="logo-vista" src="${n.logo_url || 'icons/icono.svg'}" alt="Logo actual" style="width:64px;height:64px;object-fit:contain;border-radius:14px;background:rgba(255,255,255,.08)">
+              <label class="btn sec chico" style="cursor:pointer">Subir logo<input type="file" id="logo-archivo" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden></label>
+              <button type="button" class="btn sec chico" id="logo-quitar" ${n.logo_url ? '' : html`hidden`}>Quitar</button>
+            </div>
+            <input type="hidden" name="logo_url" value="${n.logo_url}">
+          </div>
           <button class="btn">Guardar empresa</button></div></form>
       <div>
         <form class="card" id="f-ticket" style="margin:0 0 16px"><h2>Ticket</h2>
@@ -352,10 +371,28 @@ export async function ajustes() {
     try {
       app.conf[clave] = await put(`/api/config/${clave}`, datosForm(e.target));
       toast('Cambios guardados', 'ok');
-      if (clave === 'negocio') $('#marca-nombre').textContent = app.conf.negocio.nombre;
+      if (clave === 'negocio') {
+        $('#marca-nombre').textContent = app.conf.negocio.nombre;
+        const marca = document.querySelector('.marca img');
+        if (marca) marca.src = app.conf.negocio.logo_url || 'icons/icono.svg';
+      }
     } catch (err) { errorToast(err); }
   };
   $('#f-negocio').onsubmit = guardar('negocio');
+  // El logo se achica a 256 px y se convierte a PNG en el teléfono/computador antes de guardarlo.
+  const fNeg = $('#f-negocio');
+  $('#logo-archivo').onchange = async (ev) => {
+    const archivo = ev.target.files[0];
+    if (!archivo) return;
+    try {
+      const png = await logoPng(archivo);
+      fNeg.logo_url.value = png;
+      $('#logo-vista').src = png;
+      $('#logo-quitar').hidden = false;
+      toast('Logo listo: toca "Guardar empresa" para aplicarlo');
+    } catch { toast('No se pudo leer la imagen. Prueba con otro archivo PNG o JPG.', 'error'); }
+  };
+  $('#logo-quitar').onclick = () => { fNeg.logo_url.value = ''; $('#logo-vista').src = 'icons/icono.svg'; $('#logo-quitar').hidden = true; };
   $('#f-ticket').onsubmit = guardar('ticket');
   $('#f-transferencia').onsubmit = guardar('transferencia');
   $('#f-listas').onsubmit = async (e) => {
@@ -380,6 +417,24 @@ export async function ajustes() {
       catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
     };
   };
+}
+
+function logoPng(archivo, lado = 256) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(archivo);
+    const img = new Image();
+    img.onload = () => {
+      const escala = Math.min(1, lado / Math.max(img.naturalWidth || lado, img.naturalHeight || lado));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round((img.naturalWidth || lado) * escala));
+      canvas.height = Math.max(1, Math.round((img.naturalHeight || lado) * escala));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('imagen inválida')); };
+    img.src = url;
+  });
 }
 
 // ================= Cobranza: pagos verificados, por cobrar, comisiones y abonos =================
