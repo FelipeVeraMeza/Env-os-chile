@@ -9,7 +9,7 @@ export const SELECT_ENVIO = `
     d.nombre AS destinatario_nombre, d.telefono AS destinatario_telefono, d.correo AS destinatario_correo,
     di.calle, di.numero, di.depto, di.referencia, di.lat, di.lon, di.alias AS direccion_alias,
     c.nombre AS comuna_nombre, c.region, c.provincia,
-    cli.nombre AS cliente_nombre, rep.nombre AS repartidor_nombre
+    cli.nombre AS cliente_nombre, cli.telefono AS cliente_telefono, rep.nombre AS repartidor_nombre
   FROM envio e
   JOIN destinatario d ON d.id = e.destinatario_id
   JOIN direccion di ON di.id = e.direccion_id
@@ -62,6 +62,14 @@ export async function detalleCompleto(envio, usuario) {
     reclamos: reclamos.rows,
     pagos: pagos.rows,
   };
+}
+
+// Varias personas pueden operar el mismo envío a la vez (admin, cliente, repartidor). Cada cambio se
+// aplica solo si el envío sigue como estaba al leerlo (bloqueo optimista); si no, 409 sin pisar nada.
+export const MENSAJE_CONFLICTO = 'Otra persona modificó este envío al mismo tiempo. Recarga para ver su estado actual.';
+export function exigirSinConflicto(resultado) {
+  if (!resultado.rowCount) throw falla(409, MENSAJE_CONFLICTO, { conflicto: true });
+  return resultado;
 }
 
 export async function registrarEstado(db, { envioId, anterior, nuevo, motivo = null, usuarioId, lat = null, lon = null }) {

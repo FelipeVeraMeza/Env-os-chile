@@ -36,7 +36,7 @@ ALTER TABLE pago ADD CONSTRAINT pago_aprobado_verificado CHECK (estado <> 'aprob
 ALTER TABLE pago ADD CONSTRAINT pago_conciliado_cuadra CHECK (abonado_en IS NULL OR monto_abonado + comision_real = monto);
 CREATE UNIQUE INDEX pago_aprobado_unico ON pago (envio_id) WHERE estado = 'aprobado';
 CREATE UNIQUE INDEX pago_transaccion_unica ON pago (proveedor, transaccion_id) WHERE transaccion_id IS NOT NULL;
-CREATE INDEX pago_envio_idx ON pago (envio_id);
+CREATE INDEX IF NOT EXISTS pago_envio_idx ON pago (envio_id);
 
 -- Bitácora inmutable de todo lo que informa la pasarela o hace administración sobre un pago
 -- (inicio, notificación, verificación, rechazo, conciliación). Sirve de respaldo ante reclamos.

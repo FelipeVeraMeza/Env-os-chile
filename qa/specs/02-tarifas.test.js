@@ -68,3 +68,23 @@ test('CP-19 · Solo administración puede cotizar con tarifa manual un paquete s
   assert.deepEqual(adm.datos.errores, {});
   assert.equal(adm.datos.tarifa_total, 9000);
 });
+
+test('CP-67 · Couriers y franjas se editan desde Ajustes y se aplican al cotizar', async () => {
+  const antes = (await peticion('GET', '/api/config/publica')).datos;
+  const cli = await peticion('PUT', '/api/config/listas', { sesion: esc.cliente, json: { couriers: 'X' } });
+  assert.equal(cli.status, 403);
+  const vacia = await peticion('PUT', '/api/config/listas', { sesion: esc.admin, json: { couriers: '\n' } });
+  assert.equal(vacia.status, 422);
+  try {
+    const r = await peticion('PUT', '/api/config/listas', { sesion: esc.admin, json: { couriers: `${antes.couriers.join('\n')}\nCourier QA`, franjas: `${antes.franjas.join('\n')}\n06:00 – 07:00` } });
+    assert.equal(r.status, 200);
+    const pub = (await peticion('GET', '/api/config/publica')).datos;
+    assert.ok(pub.couriers.includes('Courier QA') && pub.franjas.includes('06:00 – 07:00'));
+    const ok = await cotizar({ tipo_destino: 'punto_courier', courier_empresa: 'Courier QA', courier_punto: 'Sucursal QA', horario_especial: true, franja_horaria: '06:00 - 07:00' });
+    assert.deepEqual(ok.datos.errores, {});
+    const fuera = await cotizar({ horario_especial: true, franja_horaria: '03:00 – 04:00' });
+    assert.ok(fuera.datos.errores.franja_horaria);
+  } finally {
+    await peticion('PUT', '/api/config/listas', { sesion: esc.admin, json: { couriers: antes.couriers, franjas: antes.franjas } });
+  }
+});

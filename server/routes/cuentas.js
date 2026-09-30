@@ -1,11 +1,14 @@
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { Router } from 'express';
 import { config } from '../config.js';
 import { query, uno } from '../db/pool.js';
-import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
+import { auditar, exigirSinErrores, falla, idNumerico, limitador, ruta } from '../lib/http.js';
 import { normalizarRut, normalizarTelefono, ROLES } from '../lib/reglas.js';
 import { autenticar, exigirClaveDemo, firmarSesion, requiereRol } from '../middleware/auth.js';
 import { exigirClaveSegura, registrarEvento } from '../lib/seguridad.js';
+import { leerConfig } from '../lib/configuracion.js';
+import { correoConfigurado, enviarCorreo } from '../lib/correo.js';
 
 export const auth = Router();
 
@@ -60,7 +63,7 @@ auth.post('/login', ruta(async (req, res) => {
 auth.get('/yo', autenticar, (req, res) => res.json(req.usuario));
 
 // Cambio de la propia contraseña: exige la actual. Cierra las demás sesiones y entrega una nueva.
-auth.post('/cambiar-clave', autenticar, ruta(async (req, res) => {
+async function cambiarClavePropia(req, res) {
   const { actual, nueva } = req.body || {};
   const u = await uno('SELECT * FROM usuario WHERE id = $1', [req.usuario.id]);
   const errores = {};
@@ -68,19 +71,100 @@ auth.post('/cambiar-clave', autenticar, ruta(async (req, res) => {
   if (String(nueva) === String(actual)) errores.nueva = 'Debe ser distinta a la actual';
   exigirSinErrores(errores, 'Revisa las contraseñas');
   exigirClaveSegura(nueva, u, 'nueva');
-  const act = await uno(
-    'UPDATE usuario SET password_hash = $1, sesion_version = sesion_version + 1, debe_cambiar_clave = false WHERE id = $2 RETURNING id, rol, sesion_version',
-    [await bcrypt.hash(String(nueva), 10), u.id]);
+  const act = await fijarPassword(u.id, nueva);
   await auditar(req, 'cambiar_clave', 'usuario', u.id);
   await registrarEvento(req, 'cambio_clave');
-  res.json({ token: firmarSesion(act) });
-}));
+  res.json({ ok: true, token: firmarSesion(act) });
+}
+auth.post('/cambiar-clave', autenticar, ruta(cambiarClavePropia));
+auth.post('/cambiar-password', autenticar, ruta(cambiarClavePropia)); // nombre usado por versiones anteriores de la interfaz
 
 // Cerrar la sesión en todos los dispositivos (por ejemplo, si se perdió el teléfono).
 auth.post('/cerrar-sesiones', autenticar, ruta(async (req, res) => {
   const act = await uno('UPDATE usuario SET sesion_version = sesion_version + 1 WHERE id = $1 RETURNING id, rol, sesion_version', [req.usuario.id]);
   await registrarEvento(req, 'sesiones_cerradas', { detalle: { alcance: 'propias' } });
   res.json({ token: firmarSesion(act) });
+}));
+
+// ---------- Recuperar la contraseña (RF-02) ----------
+// Una contraseña nueva siempre: queda con hash, cierra todas las sesiones abiertas e invalida los enlaces anteriores.
+async function fijarPassword(id, password, { debeCambiar = false } = {}) {
+  return uno(
+    `UPDATE usuario SET password_hash = $1, password_cambiado_en = now(), sesion_version = sesion_version + 1, debe_cambiar_clave = $2
+     WHERE id = $3 RETURNING id, rol, sesion_version`, [await bcrypt.hash(String(password), 10), debeCambiar, id]);
+}
+const sello = (u) => (u.password_cambiado_en ? new Date(u.password_cambiado_en).getTime() : 0);
+
+// Enlace de un solo uso (1 hora): deja de servir cuando la contraseña cambia. Nunca sirve como sesión (lleva "tipo").
+function enlaceRestablecer(u) {
+  const token = jwt.sign({ sub: u.id, tipo: 'restablecer', pc: sello(u) }, config.jwtSecret, { algorithm: 'HS256', expiresIn: '1h' });
+  return `${config.publicBaseUrl}/#/restablecer/${token}`;
+}
+
+// Siempre responde lo mismo, exista o no el correo (no revela qué cuentas existen).
+const limiteRecuperar = limitador({ nombre: 'recuperar', max: 10, ventanaMs: 15 * 60 * 1000, mensaje: 'Demasiadas solicitudes. Espera unos minutos.' });
+const limiteRestablecer = limitador({ nombre: 'restablecer', max: 20, ventanaMs: 15 * 60 * 1000, mensaje: 'Demasiados intentos. Espera unos minutos.' });
+auth.post('/recuperar', limiteRecuperar, ruta(async (req, res) => {
+  const correo = String(req.body?.correo || '').toLowerCase().trim();
+  const u = correo ? await uno('SELECT id, nombre, correo, activo, password_cambiado_en FROM usuario WHERE correo = $1', [correo]) : null;
+  await registrarEvento(req, 'recuperacion_solicitada', { usuarioId: u?.id ?? null, correo, detalle: { existe: Boolean(u) } });
+  if (u?.activo && correoConfigurado()) {
+    const conf = await leerConfig();
+    await enviarCorreo({
+      para: u.correo,
+      asunto: `${conf.negocio.nombre}: restablecer tu contraseña`,
+      texto: `Hola ${u.nombre}:\n\nPara crear una nueva contraseña abre este enlace (vale por 1 hora y una sola vez):\n${enlaceRestablecer(u)}\n\nSi no lo pediste, ignora este correo y avisa a administración.`,
+    }).catch((err) => console.error('[correo] no se pudo enviar', err.message));
+    req.usuario = u;
+    await auditar(req, 'recuperar_password', 'usuario', u.id);
+  }
+  res.json({
+    ok: true,
+    mensaje: correoConfigurado()
+      ? 'Si el correo está registrado, te enviamos un enlace para crear una nueva contraseña.'
+      : 'Pide a administración un enlace para restablecer tu contraseña.',
+  });
+}));
+
+auth.post('/restablecer', limiteRestablecer, ruta(async (req, res) => {
+  const { token, password } = req.body || {};
+  let datos;
+  try { datos = jwt.verify(String(token || ''), config.jwtSecret, { algorithms: ['HS256'] }); } catch { datos = null; }
+  if (datos?.tipo !== 'restablecer') {
+    await registrarEvento(req, 'enlace_invalido', { usuarioId: null, detalle: { motivo: 'enlace de contraseña inválido o vencido' } });
+    throw falla(400, 'El enlace no es válido o ya venció. Pide uno nuevo.');
+  }
+  const u = await uno('SELECT id, rol, nombre, correo, activo, password_cambiado_en FROM usuario WHERE id = $1', [datos.sub]);
+  if (!u?.activo || sello(u) !== datos.pc) throw falla(400, 'El enlace ya fue usado o venció. Pide uno nuevo.');
+  exigirClaveSegura(password, u);
+  await fijarPassword(u.id, password);
+  req.usuario = u;
+  await auditar(req, 'restablecer_password', 'usuario', u.id);
+  await registrarEvento(req, 'cambio_clave', { detalle: { via: 'enlace' } });
+  res.json({ ok: true });
+}));
+
+// Registro de clientes por su cuenta (RF-56): solo si administración lo habilita en Tarifas y reglas.
+const limiteRegistro = limitador({ nombre: 'registro', max: 30, ventanaMs: 60 * 60 * 1000, mensaje: 'Demasiados registros desde esta conexión. Intenta más tarde.' });
+auth.post('/registro', limiteRegistro, ruta(async (req, res) => {
+  const conf = await leerConfig();
+  if (!conf.operacion.registro_clientes) throw falla(403, 'El registro está cerrado: pide tu cuenta a administración');
+  const b = { ...(req.body || {}), rol: 'cliente' };
+  for (const k of ['nombre', 'correo', 'telefono', 'rut']) if (b[k] !== undefined && b[k] !== null) b[k] = String(b[k]);
+  const errores = validarUsuario(b, true);
+  if (!normalizarTelefono(b.telefono)) errores.telefono = 'Teléfono móvil chileno obligatorio (+56 9…)';
+  if (!b.password) errores.password = 'Obligatoria';
+  exigirSinErrores(errores);
+  exigirClaveSegura(b.password, b);
+  if (await uno('SELECT id FROM usuario WHERE correo = $1', [b.correo.toLowerCase().trim()])) throw falla(409, 'Ya existe una cuenta con ese correo', { correo: 'Ya registrado' });
+  const u = await uno(
+    `INSERT INTO usuario (nombre, correo, password_hash, rol, telefono, rut, password_cambiado_en, ultimo_acceso) VALUES ($1, $2, $3, 'cliente', $4, $5, now(), now())
+     RETURNING id, nombre, correo, rol, sesion_version`,
+    [b.nombre.trim(), b.correo.toLowerCase().trim(), await bcrypt.hash(String(b.password), 10), normalizarTelefono(b.telefono), normalizarRut(b.rut)]);
+  req.usuario = u;
+  await auditar(req, 'registro', 'usuario', u.id);
+  await registrarEvento(req, 'usuario_creado', { usuarioId: u.id, correo: u.correo, detalle: { via: 'registro_propio', rol: 'cliente' } });
+  res.status(201).json({ token: firmarSesion(u), usuario: { id: u.id, nombre: u.nombre, correo: u.correo, rol: u.rol } });
 }));
 
 // Perfiles para el modo demostración (sin inicio de sesión).
@@ -140,6 +224,16 @@ usuarios.post('/', requiereRol('admin'), ruta(async (req, res) => {
   res.status(201).json(u);
 }));
 
+// Administración genera un enlace para que la persona cree una nueva contraseña (lo comparte por WhatsApp o correo).
+usuarios.post('/:id/restablecer', requiereRol('admin'), ruta(async (req, res) => {
+  const u = await uno('SELECT id, nombre, correo, activo, password_cambiado_en FROM usuario WHERE id = $1', [idNumerico(req.params.id)]);
+  if (!u) throw falla(404, 'Usuario no encontrado');
+  if (!u.activo) throw falla(409, 'El usuario está desactivado');
+  await auditar(req, 'enlace_password', 'usuario', u.id);
+  await registrarEvento(req, 'enlace_restablecer', { detalle: { usuario: u.id, correo: u.correo } });
+  res.json({ enlace: enlaceRestablecer(u), vence_en_min: 60 });
+}));
+
 usuarios.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   const id = idNumerico(req.params.id);
   const b = req.body || {};
@@ -151,7 +245,7 @@ usuarios.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   if (b.password) exigirClaveSegura(b.password, actual);
   if (actual?.rol === 'repartidor' && (b.activo === false || (b.rol && b.rol !== 'repartidor'))) {
     const { n } = await uno("SELECT count(*)::int AS n FROM envio WHERE repartidor_id = $1 AND estado IN ('asignado','en_ruta','fallido','reagendado')", [id]);
-    if (n) throw falla(409, `Este repartidor tiene ${n} envío(s) en curso: reasígnalos antes de desactivarlo`);
+    if (n) throw falla(409, `Este repartidor tiene ${n} envío(s) en curso: reasígnalos antes de desactivarlo`, { envios_pendientes: n });
   }
   const sets = [];
   const params = [];
@@ -162,9 +256,10 @@ usuarios.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   if (b.rut !== undefined) set('rut', normalizarRut(b.rut));
   if (b.activo !== undefined) set('activo', Boolean(b.activo));
   if (b.password) {
-    // Clave asignada por administración: se cierran las sesiones abiertas y se pide cambiarla al entrar.
+    // Clave asignada por administración: se cierran las sesiones abiertas, se invalidan los enlaces de
+    // recuperación anteriores y se pide cambiarla al entrar.
     set('password_hash', await bcrypt.hash(String(b.password), 10));
-    sets.push('sesion_version = sesion_version + 1');
+    sets.push('sesion_version = sesion_version + 1', 'password_cambiado_en = now()');
     if (id !== req.usuario.id) sets.push('debe_cambiar_clave = true');
   }
   if (b.activo === false) sets.push('sesion_version = sesion_version + 1');

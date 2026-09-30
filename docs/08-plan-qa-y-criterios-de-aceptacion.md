@@ -32,7 +32,18 @@ Cada ejecución deja un reporte JUnit en `qa/reportes/` (evidencia para el clien
 
 ## 3. Matriz de casos de prueba automatizados
 
-Resultado de la última ejecución local: **52/52 aprobados** (QA) y **16/16** (unitarias).
+Resultado de la última ejecución local (26-09-2026): **78/78 aprobados** (QA), **40/40** (unitarias), flujo completo por interfaz, carga, 4G y accesibilidad en verde.
+
+| Comando | Qué prueba |
+|---|---|
+| `npm test` | Reglas de negocio, limitador, configuración de producción, SQL de Supabase (40 pruebas) |
+| `npm run qa:local` / `qa:railway` | 78 casos CP contra la API real |
+| `npm run e2e` | Cliente, administración y repartidor **a la vez en tres teléfonos**: crear → pagar → asignar → retirar → entregar con foto y GPS → la pantalla del cliente se actualiza sola → seguimiento público. Deja capturas en `qa/reportes/e2e/` |
+| `npm run carga` | 40 clientes y 15 repartidores simultáneos (`--clientes 100 --repartidores 30` para más). Verifica 0 errores, folios únicos y que todo termine entregado |
+| `npm run rendimiento` | Cada pantalla en < 2 s con 4G simulado y teléfono lento |
+| `npm run accesibilidad` | WCAG 2.1 AA con axe-core en 11 pantallas |
+
+Todo se ejecuta solo en cada cambio con GitHub Actions (`.github/workflows/pruebas.yml`).
 
 | Caso | Descripción | Requerimiento |
 |---|---|---|
@@ -52,6 +63,7 @@ Resultado de la última ejecución local: **52/52 aprobados** (QA) y **16/16** (
 | CP-17 | 20 kg y 60×60×60 exactos aceptados (límite) | RF-42 |
 | CP-18 | Comuna fuera de cobertura rechazada | RF-18 |
 | CP-19 | Solo admin cotiza sobredimensionados | RF-42 |
+| CP-67 | Couriers y franjas editables en Ajustes y aplicados al cotizar | RF-41, RF-47 |
 | CP-20 | Validación marca todos los campos faltantes | RF-11 |
 | CP-21 | Crear y confirmar: folio `ENV-AAAA-NNNNNN` | RF-19 |
 | CP-22 | Ticket PDF 80 mm y A4 | RF-20, RF-21 |
@@ -88,6 +100,31 @@ Resultado de la última ejecución local: **52/52 aprobados** (QA) y **16/16** (
 | CP-64 | Libreta: varias direcciones por destinatario | RF-09 |
 | CP-65 | No se usa la libreta de otro cliente | RF-09, RF-04 |
 | CP-66 | Búsqueda por folio y exportación CSV | RF-28, RF-37 |
+| CP-68 | Tarifa propia de una comuna se aplica al cotizar | RF-17 |
+| CP-69 | Filtros por estado, comuna, repartidor y fecha | RF-29 |
+| CP-70 | Reporte con desglose por día, comuna y repartidor | RF-34, RF-35 |
+| CP-71 | QR abre página, Google Maps o Waze según Ajustes | RF-25, RF-26 |
+| CP-72 | Datos de la empresa editables y publicados | RF-39, RF-51 |
+| CP-73 | Auditoría registrada y consultable solo por admin | RF-40, RF-54 |
+| CP-74 | Usuario desactivado no puede operar | RF-05 |
+| CP-75 | PWA: manifiesto y service worker | RF-38 |
+| CP-76 | Ticket con QR en < 3 s, QR generado en el servidor | RNF-04, RNF-11 |
+| CP-77 | Web y API en la misma app, sin servidores ni fuentes externas | RNF-17 |
+| CP-78 | Límite de solicitudes por IP (API y seguimiento público) | RNF-16 |
+| CP-79 | Demo abierta: perfiles sin clave | RF-53 |
+| CP-80 | 5 "intento fallido" simultáneos sobre un envío: se registra uno | RNF-22 |
+| CP-81 | Dos administradores asignan a la vez: gana uno | RNF-22 |
+| CP-82 | Confirmaciones y pagos simultáneos: un folio y un cobro | RNF-22 |
+| CP-83 | 8 clientes × 5 envíos simultáneos: folios únicos | RNF-22, RNF-09 |
+| CP-84 | Ticket: una etiqueta por bulto y QR a Google Maps con la dirección | RF-20, RF-24, RF-63 |
+| CP-85 | Inicio de sesión y sesión de 30 días | RF-01, RF-03 |
+| CP-86 | Cambiar contraseña cierra las otras sesiones | RF-02, RF-65 |
+| CP-87 | Enlace de recuperación de un solo uso | RF-02 |
+| CP-88 | Registro de clientes cerrado por defecto y habilitable | RF-56 |
+| CP-89 | No se desactiva un repartidor con envíos en curso | RF-05 |
+| CP-90 | Reembolso de envíos anulados/devueltos, una vez y con tope | RF-57 |
+| CP-91 | Exportar y anonimizar un destinatario sin perder envíos | RF-58 |
+| CP-92 | El repartidor ordena su ruta; no toca envíos ajenos | RF-60 |
 
 ## 4. Criterios de aceptación (UAT con el cliente)
 

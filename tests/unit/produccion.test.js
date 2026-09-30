@@ -25,7 +25,7 @@ test('producción con todas las variables arranca', () => {
 
 test('producción sin variables críticas no arranca (sin valores de respaldo)', () => {
   const faltan = validarProduccion({ NODE_ENV: 'production' });
-  for (const nombre of ['Base de datos', 'JWT_SECRET', 'ADMIN_EMAIL', 'DEMO_CLAVE']) {
+  for (const nombre of ['Base de datos', 'JWT_SECRET', 'ADMIN_EMAIL']) {
     assert.ok(faltan.some((f) => f.startsWith(nombre)), `debe exigir ${nombre}`);
   }
 });
@@ -35,8 +35,9 @@ test('producción rechaza JWT_SECRET corto y ADMIN_PASSWORD débil', () => {
   assert.equal(validarProduccion({ ...completo, ADMIN_PASSWORD: 'abc' }).length, 1);
 });
 
-test('con AUTH_MODE=jwt no se exige DEMO_CLAVE, pero sí SEED_DEMO=false', () => {
+test('DEMO_CLAVE es opcional (demo abierta); con AUTH_MODE=jwt se exige SEED_DEMO=false', () => {
   const { DEMO_CLAVE, ...sinDemo } = completo;
+  assert.deepEqual(validarProduccion(sinDemo), [], 'la demo puede quedar abierta');
   assert.deepEqual(validarProduccion({ ...sinDemo, AUTH_MODE: 'jwt', SEED_DEMO: 'false' }), []);
   assert.ok(validarProduccion({ ...sinDemo, AUTH_MODE: 'jwt' }).some((f) => f.startsWith('SEED_DEMO')), 'cuentas demo con clave pública');
 });

@@ -1,0 +1,61 @@
+# Pruebas automáticas en cada cambio: unitarias, QA de la API (con PostgreSQL), carga,
+# flujo completo por la interfaz y accesibilidad. Si algo falla, el cambio queda marcado en rojo.
+name: Pruebas
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: envios
+          POSTGRES_PASSWORD: envios
+          POSTGRES_DB: envios
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U envios" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://envios:envios@localhost:5432/envios
+      AUTH_MODE: demo
+      PORT: 3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Pruebas unitarias
+        run: npm test
+      - name: Levantar la app
+        run: |
+          node server/index.js > servidor.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:3000/api/health && exit 0; sleep 2; done
+          cat servidor.log; exit 1
+      - name: QA de la API (todos los casos CP)
+        run: npm run qa:local
+      - name: Flujo completo por la interfaz (cliente, administración y repartidor a la vez)
+        run: npm run e2e
+      - name: Accesibilidad WCAG 2.1 AA
+        run: npm run accesibilidad
+      - name: Prueba de carga (40 clientes y 15 repartidores a la vez)
+        run: |
+          kill %1 2>/dev/null || pkill -f "node server/index.js" || true
+          DB_POOL_MAX=5 LIMITE_API_POR_MINUTO=0 node server/index.js > servidor-carga.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:3000/api/health > /dev/null && break; sleep 2; done
+          npm run carga
+      - name: Registro del servidor
+        if: failure()
+        run: tail -n 200 servidor*.log
+      - name: Guardar reportes y capturas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-qa
+          path: qa/reportes/

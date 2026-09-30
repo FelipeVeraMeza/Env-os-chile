@@ -21,6 +21,10 @@
 | DEC-15 | Los **repartidores toman** los pedidos pagados que les aparecen, **de cualquier zona** (sin filtro por comuna); administración puede igual asignar o reasignar | Respuesta a P-17 (29/09/2026) |
 | DEC-16 | La **boleta/factura electrónica** por cada cobro se deja **como último recurso**: no se integra con el SII salvo que sea indispensable; el ticket es un comprobante interno | Respuesta a P-18 (29/09/2026, confirmado) |
 | DEC-18 | **La seguridad es la prioridad**: monitoreo de ataques y de extracción de datos, bitácoras inmutables y protocolo de incidentes (ver [17](17-seguridad.md)) | Pedido del cliente (29/09/2026) |
+| DEC-19 | **Link de pago**: se genera desde el detalle del envío y se paga sin iniciar sesión ni clave; vence en 7 días y **no se imprime en la etiqueta** | Pedido del cliente (30/09/2026) |
+| DEC-20 | La **etiqueta no muestra montos** (ni tarifa ni valor declarado); el valor declarado solo lo ve administración, para cobrar el seguro | Pedido del cliente (30/09/2026) |
+| DEC-21 | **Demo sin clave**: `DEMO_CLAVE` es opcional (confirma la decisión A-5 del 26/09). Para operar con datos reales se usa `AUTH_MODE=jwt` | Pedido del cliente (30/09/2026) |
+| DEC-22 | Se integran las dos versiones (26/09 y 29/09) en una sola rama | Pedido del cliente (30/09/2026) |
 | DEC-17 | Se agrega **inicio de sesión** con correo y contraseña para administrador, cliente y repartidor (`AUTH_MODE=jwt`) | Pedido del cliente (29/09/2026) |
 
 ## Pendientes que necesitamos del cliente
@@ -36,7 +40,7 @@ Ordenados por impacto. **Sin P-01 a P-05 no se puede cotizar el desarrollo.**
 | P-05 | A domicilio, ¿cada bulto extra se cobra $3.500 o hay otra regla? | Cálculo de tarifa | $3.500 por bulto extra |
 | P-06 | ¿Pagarán Google Places para direcciones exactas? | Precisión del mapa | No |
 | P-07 | "5 min máx. entrega": ¿es tiempo de espera en el domicilio? | Regla de fallido | Sí, espera en destino |
-| P-08 | ¿Qué franjas horarias ofrecen en el envío especial? | Opciones del formulario | 6 franjas de 08:00 a 23:00 |
+| P-08 | ¿Qué franjas horarias ofrecen en el envío especial? | Opciones del formulario (editables en Ajustes) | 6 franjas de 08:00 a 23:00 |
 | P-09 | ¿Qué pasa con el pago si el envío se devuelve tras 3 intentos? ¿Se reembolsa? | Reembolsos y ganancias | No se reembolsa (visita realizada) |
 | P-10 | ¿El seguro tiene un tope máximo por envío o un costo adicional (prima)? | Cálculo y ganancia | Sin tope adicional ni prima |
 | P-11 | ¿Qué plazo tiene el cliente para reclamar el seguro? | Regla del reclamo | Sin plazo definido |

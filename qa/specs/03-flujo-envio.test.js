@@ -39,7 +39,7 @@ test('CP-23 · QR PNG y página del QR con botones Google Maps y Waze (RF-23, RF
   const png = await peticion('GET', `/api/envios/${envio.id}/qr.png`, { sesion: esc.cliente, crudo: true });
   assert.equal(png.status, 200);
   assert.match(png.headers.get('content-type'), /png/);
-  const pagina = await fetch(`${API}/q/${envio.token_qr}`);
+  const pagina = await fetch(`${API}/q/${envio.token_qr}?ver=pagina`);
   const html = await pagina.text();
   assert.match(html, /google\.com\/maps\/dir/);
   assert.match(html, /waze\.com\/ul/);
@@ -130,4 +130,20 @@ test('CP-33 · Un enlace de archivo alterado o sin firma es rechazado (RNF-06)',
   const alterado = foto.url.replace(/sig=[^&]+/, 'sig=falsa');
   assert.equal((await fetch(`${API}${alterado}`)).status, 403);
   assert.equal((await fetch(`${API}/api/adjuntos/${foto.id}/archivo`)).status, 403);
+});
+
+test('CP-84 · Ticket completo: una etiqueta por bulto y QR que abre Google Maps con la dirección (RF-20, RF-24)', async () => {
+  const c = await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id, { bultos: 3 }), confirmar: true } });
+  assert.equal(c.status, 201);
+  const pdf = await peticion('GET', `/api/envios/${c.datos.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente, crudo: true });
+  const texto = Buffer.from(await pdf.arrayBuffer()).toString('latin1');
+  assert.equal(texto.match(/\/Type \/Page\b/g)?.length, 3, 'una etiqueta térmica por bulto');
+  const a4 = await peticion('GET', `/api/envios/${c.datos.id}/ticket.pdf?formato=a4`, { sesion: esc.cliente, crudo: true });
+  assert.equal(Buffer.from(await a4.arrayBuffer()).toString('latin1').match(/\/Type \/Page\b/g)?.length, 1, 'A4 en una hoja');
+  const conf = (await peticion('GET', '/api/config/publica')).datos.operacion.qr_destino;
+  const qr = await fetch(`${API}/q/${c.datos.token_qr}`, { redirect: 'manual' });
+  if (conf === 'google') {
+    assert.equal(qr.status, 302);
+    assert.match(qr.headers.get('location'), /^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=Av\.%20Providencia%201234/);
+  } else assert.equal(qr.status, conf === 'waze' ? 302 : 200);
 });

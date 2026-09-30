@@ -34,7 +34,7 @@ cobranza.get('/resumen', ruta(async (req, res) => {
          FROM envio WHERE estado_pago = 'pendiente' AND estado IN ('creado', 'asignado')`),
     // Abonos que la pasarela aún no deposita (o que administración no ha revisado en la cartola).
     uno(`SELECT count(*)::int AS pagos, COALESCE(sum(monto - comision_estimada), 0)::int AS monto_esperado,
-           count(*) FILTER (WHERE abono_estimado_en < CURRENT_DATE)::int AS atrasados
+           count(*) FILTER (WHERE abono_estimado_en < (now() AT TIME ZONE 'America/Santiago')::date)::int AS atrasados
          FROM pago WHERE estado = 'aprobado' AND abonado_en IS NULL AND proveedor NOT IN ('manual', 'simulado')`),
     // Pagos iniciados hace más de 30 minutos sin respuesta: el cliente abandonó o la pasarela no avisó.
     uno(`SELECT count(*)::int AS n FROM pago WHERE estado = 'iniciado' AND creado_en < now() - interval '30 minutes'`),

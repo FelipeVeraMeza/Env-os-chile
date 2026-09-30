@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
+import { config } from '../config.js';
 import { query, transaccion, uno } from '../db/pool.js';
 import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
@@ -8,12 +9,12 @@ import {
   validarDireccion, validarPaquete, validarTransicion, validarUbicacion, ESTADOS, LIMITES,
 } from '../lib/reglas.js';
 import {
-  cargarEnvio, detalleCompleto, exigirAcceso, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
+  cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
 } from '../lib/envios.js';
 import { guardarArchivo, subida } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
-import { costoDelCobro, registrarEventoPago } from '../lib/pagos.js';
+import { iniciarPago, registrarEventoPago } from '../lib/pagos.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
 
@@ -43,7 +44,7 @@ function datosPaquete(b) {
 // Valida paquete + destino y calcula la tarifa. Usado por /cotizar y al crear.
 async function cotizar(body, usuario, conf) {
   const paquete = datosPaquete(body);
-  const errores = { ...validarDestino(paquete) };
+  const errores = { ...validarDestino(paquete, conf.listas) };
   const erroresPaquete = validarPaquete(paquete, conf.tarifas);
   const tarifaManual = usuario.rol === 'admin' && body.tarifa_manual !== undefined && body.tarifa_manual !== '' && body.tarifa_manual !== null
     ? Number(body.tarifa_manual) : null;
@@ -161,6 +162,9 @@ function prefijar(prefijo, errores) {
 }
 
 async function confirmar(db, envioId, usuarioId) {
+  // Se bloquea la fila antes de pedir folio: dos confirmaciones simultáneas no gastan dos folios.
+  const { rows: [actual] } = await db.query('SELECT estado FROM envio WHERE id = $1 FOR UPDATE', [envioId]);
+  if (actual?.estado !== 'borrador') throw falla(409, 'El envío ya fue confirmado');
   const folio = await siguienteFolio(db, 'ENV');
   await db.query(`UPDATE envio SET folio = $1, estado = 'creado', confirmado_en = now(), actualizado_en = now() WHERE id = $2`, [folio, envioId]);
   await registrarEstado(db, { envioId, anterior: 'borrador', nuevo: 'creado', usuarioId });
@@ -205,8 +209,10 @@ envios.get('/', ruta(async (req, res) => {
   const total = await uno(
     `SELECT count(*)::int AS n FROM envio e JOIN destinatario d ON d.id = e.destinatario_id
      JOIN direccion di ON di.id = e.direccion_id JOIN comuna c ON c.id = e.comuna_id ${where}`, params);
+  // orden=ruta: el orden que definió el repartidor (RF-60); lo no ordenado va al final agrupado por comuna.
+  const orden = req.query.orden === 'ruta' ? 'e.orden_ruta NULLS LAST, c.nombre, e.creado_en' : 'e.creado_en DESC, e.id DESC';
   const { rows } = await query(
-    `${SELECT_ENVIO} ${where} ORDER BY e.creado_en DESC, e.id DESC LIMIT ${limite} OFFSET ${(pagina - 1) * limite}`, params);
+    `${SELECT_ENVIO} ${where} ORDER BY ${orden} LIMIT ${limite} OFFSET ${(pagina - 1) * limite}`, params);
   res.json({ total: total.n, pagina, limite, items: rows.map((e) => presentar(e, req.usuario)) });
 }));
 
@@ -219,7 +225,7 @@ envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, re
     ['Cliente', 'cliente_nombre'], ['Destinatario', 'destinatario_nombre'], ['Teléfono', 'destinatario_telefono'],
     ['Dirección', (e) => `${e.calle} ${e.numero}${e.depto ? ' ' + e.depto : ''}`], ['Comuna', 'comuna_nombre'],
     ['Tipo destino', 'tipo_destino'], ['Courier', 'courier_empresa'], ['Producto', 'descripcion_producto'], ['Bultos', 'bultos'],
-    ['Peso kg', 'peso_kg'], ['Valor declarado', 'valor_declarado'], ['Horario especial', (e) => (e.horario_especial ? 'Sí' : 'No')],
+    ['Peso kg', 'peso_kg'], ...(req.usuario.rol === 'admin' ? [['Valor declarado', 'valor_declarado']] : []), ['Horario especial', (e) => (e.horario_especial ? 'Sí' : 'No')],
     ['Tarifa total', 'tarifa_total'], ['Repartidor', 'repartidor_nombre'], ['Intentos', 'intentos'],
     ['Entregado', (e) => (e.entregado_en ? new Date(e.entregado_en).toLocaleString('es-CL', { timeZone: 'America/Santiago' }) : '')],
   ];
@@ -272,6 +278,24 @@ envios.post('/:id/tomar', requiereRol('repartidor'), ruta(async (req, res) => {
   res.json(presentar(await cargarEnvio(id), req.usuario));
 }));
 
+// El repartidor ordena su ruta del día (RF-60). Solo puede ordenar envíos que tiene asignados.
+envios.put('/ruta/orden', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [];
+  if (!ids.length || ids.length > 200 || ids.some((n) => !Number.isInteger(n) || n <= 0) || new Set(ids).size !== ids.length) {
+    throw falla(422, 'Lista de envíos inválida');
+  }
+  const repartidorId = req.usuario.rol === 'repartidor' ? req.usuario.id : Number(req.body.repartidor_id);
+  // En una transacción: si hay un envío ajeno en la lista no se cambia nada.
+  const n = await transaccion(async (db) => {
+    const r = await db.query(
+      `UPDATE envio e SET orden_ruta = o.pos FROM unnest($1::int[]) WITH ORDINALITY AS o(id, pos)
+       WHERE e.id = o.id AND e.repartidor_id = $2`, [ids, repartidorId]);
+    if (r.rowCount !== ids.length) throw falla(403, 'Solo puedes ordenar envíos asignados a ti');
+    return r.rowCount;
+  });
+  res.json({ ok: true, ordenados: n });
+}));
+
 async function envioAccesible(req) {
   const envio = await cargarEnvio(idNumerico(req.params.id));
   exigirAcceso(req.usuario, envio);
@@ -303,7 +327,10 @@ envios.post('/:id/asignar', requiereRol('admin'), ruta(async (req, res) => {
   if (envio.estado === 'reagendado' && !repartidorId) throw falla(422, 'Un envío reagendado debe quedar con un repartidor');
   const nuevo = envio.estado === 'reagendado' ? 'reagendado' : repartidorId ? 'asignado' : 'creado';
   await transaccion(async (db) => {
-    await db.query('UPDATE envio SET repartidor_id = $1, estado = $2, actualizado_en = now() WHERE id = $3', [repartidorId, nuevo, envio.id]);
+    exigirSinConflicto(await db.query(
+      `UPDATE envio SET repartidor_id = $1, estado = $2, actualizado_en = now()
+       WHERE id = $3 AND estado = $4 AND repartidor_id IS NOT DISTINCT FROM $5`,
+      [repartidorId, nuevo, envio.id, envio.estado, envio.repartidor_id]));
     if (nuevo !== envio.estado || repartidorId !== envio.repartidor_id) {
       await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo, usuarioId: req.usuario.id, motivo: repartidorId ? (envio.repartidor_id && envio.repartidor_id !== repartidorId ? 'Cambio de repartidor' : null) : 'Repartidor desasignado' });
     }
@@ -334,7 +361,8 @@ envios.post('/:id/estado', ruta(async (req, res) => {
     if (nuevo === 'fallido') sets.push('intentos = intentos + 1', 'llegada_en = NULL');
     if (nuevo === 'reagendado') sets.push('llegada_en = NULL');
     if (nuevo === 'creado') sets.push('repartidor_id = NULL');
-    await db.query(`UPDATE envio SET ${sets.join(', ')} WHERE id = $2`, [nuevo, envio.id]);
+    exigirSinConflicto(await db.query(`UPDATE envio SET ${sets.join(', ')} WHERE id = $2 AND estado = $3 AND intentos = $4`,
+      [nuevo, envio.id, envio.estado, envio.intentos]));
     await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo, motivo: textoMotivo, usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon });
   });
   await auditar(req, 'cambiar_estado', 'envio', envio.id, { de: envio.estado, a: nuevo, motivo: textoMotivo });
@@ -368,11 +396,11 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
        VALUES ($1, 'foto_entrega', $2, $3, $4, $5, $6, $7)`,
       [envio.id, req.file.originalname, req.file.mimetype, archivo.tamano, archivo.ruta, archivo.sha256, req.usuario.id],
     );
-    await db.query(
+    exigirSinConflicto(await db.query(
       `UPDATE envio SET estado = 'entregado', entregado_en = now(), entrega_lat = $1, entrega_lon = $2, entrega_precision_m = $3,
-         entrega_receptor = $4, actualizado_en = now() WHERE id = $5`,
-      [ubic?.lat ?? null, ubic?.lon ?? null, req.body.precision ? Number(req.body.precision) : null, req.body.receptor || null, envio.id],
-    );
+         entrega_receptor = $4, actualizado_en = now() WHERE id = $5 AND estado = $6`,
+      [ubic?.lat ?? null, ubic?.lon ?? null, req.body.precision ? Number(req.body.precision) : null, req.body.receptor || null, envio.id, envio.estado],
+    ));
     await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: req.body.receptor ? `Recibe: ${req.body.receptor}` : null });
   });
   await auditar(req, 'entregar', 'envio', envio.id, { lat: ubic?.lat, lon: ubic?.lon });
@@ -402,26 +430,29 @@ envios.post('/:id/adjuntos', requiereRol('admin', 'cliente'), subida.single('arc
 
 envios.post('/:id/pago', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
-  if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'Confirma el envío antes de pagar');
-  if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
-  if (!(envio.tarifa_total > 0)) throw falla(409, 'Este envío no tiene monto a pagar: administración debe registrarlo como pagado');
-  const conf = await leerConfig();
-  const abierto = await uno(
-    `SELECT id, proveedor, monto, estado, token FROM pago WHERE envio_id = $1 AND estado = 'iniciado' AND proveedor = $2 AND monto = $3
-     AND creado_en > now() - interval '1 day' ORDER BY id DESC LIMIT 1`, [envio.id, conf.pagos.proveedor, envio.tarifa_total]);
-  if (abierto) return res.status(201).json(abierto);
-  const token = crypto.randomBytes(18).toString('base64url');
-  const costo = costoDelCobro(envio.tarifa_total, conf.pagos.proveedor);
-  const pago = await transaccion(async (db) => {
-    const { rows: [p] } = await db.query(
-      `INSERT INTO pago (envio_id, proveedor, medio, monto, token, comision_estimada, neto_estimado, creado_por)
-       VALUES ($1, $2, 'en_linea', $3, $4, $5, $6, $7) RETURNING id, proveedor, monto, estado, token`,
-      [envio.id, conf.pagos.proveedor, envio.tarifa_total, token, costo.comision_estimada, costo.neto_estimado, req.usuario.id]);
-    await registrarEventoPago(db, { pagoId: p.id, tipo: 'inicio', estado: 'iniciado', monto: p.monto, usuarioId: req.usuario.id });
-    return p;
-  });
+  const pago = await iniciarPago(envio, req.usuario.id);
   await auditar(req, 'iniciar_pago', 'envio', envio.id, { pago_id: pago.id, monto: pago.monto });
   res.status(201).json(pago);
+}));
+
+// Link de pago (se comparte por WhatsApp o correo): quien lo abre paga sin iniciar sesión. Vence en 7 días,
+// se reutiliza mientras esté vigente y nunca aparece en la etiqueta del paquete.
+envios.post('/:id/link-pago', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
+  const envio = await envioAccesible(req);
+  if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'Confirma el envío antes de generar el link de pago');
+  if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
+  if (!(envio.tarifa_total > 0)) throw falla(409, 'Este envío no tiene monto a pagar');
+  let link = await uno(
+    `SELECT token, vence_en FROM link_pago WHERE envio_id = $1 AND revocado_en IS NULL AND pagado_en IS NULL AND vence_en > now() + interval '1 day'
+     ORDER BY id DESC LIMIT 1`, [envio.id]);
+  if (!link) {
+    link = await uno(
+      `INSERT INTO link_pago (token, envio_id, creado_por, vence_en) VALUES ($1, $2, $3, now() + interval '7 days') RETURNING token, vence_en`,
+      [crypto.randomBytes(24).toString('base64url'), envio.id, req.usuario.id]);
+    await auditar(req, 'link_pago', 'envio', envio.id);
+    await registrarEvento(req, 'link_pago_creado', { detalle: { envio: envio.id, folio: envio.folio } });
+  }
+  res.status(201).json({ url: `${config.publicBaseUrl}/#/pagar/${link.token}`, vence_en: link.vence_en, monto: envio.tarifa_total, folio: envio.folio });
 }));
 
 envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
@@ -432,6 +463,10 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
   if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'No se puede registrar pago en este estado');
   const referencia = String(req.body.referencia || '').trim() || null;
   await transaccion(async (db) => {
+    // Se bloquea la fila del envío: si otra persona lo pagó o anuló recién, 409 y no se registra nada.
+    const { rows: [vigente] } = await db.query(
+      "SELECT id FROM envio WHERE id = $1 AND estado_pago <> 'pagado' AND estado NOT IN ('borrador', 'anulado') FOR UPDATE", [envio.id]);
+    exigirSinConflicto({ rowCount: vigente ? 1 : 0 });
     // Administración declara que revisó el pago (cartola, efectivo recibido): queda verificado a su nombre.
     const { rows: [p] } = await db.query(
       `INSERT INTO pago (envio_id, proveedor, medio, monto, estado, token, referencia, transaccion_id, verificacion, verificado_en,
@@ -444,6 +479,24 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
       [medio, referencia, envio.id]);
   });
   await auditar(req, 'pago_manual', 'envio', envio.id, { medio, referencia: req.body.referencia });
+  res.json(presentar(await cargarEnvio(envio.id), req.usuario));
+}));
+
+// Reembolso del pago de un envío anulado o devuelto (RF-57). La política (total o parcial) la define el cliente (C-7).
+envios.post('/:id/reembolso', requiereRol('admin'), ruta(async (req, res) => {
+  const envio = await envioAccesible(req);
+  const monto = Number(req.body?.monto ?? envio.tarifa_total);
+  const medio = req.body?.medio;
+  if (!['anulado', 'devuelto'].includes(envio.estado)) throw falla(409, 'Solo se reembolsa un envío anulado o devuelto');
+  if (envio.estado_pago !== 'pagado') throw falla(409, envio.estado_pago === 'reembolsado' ? 'El envío ya fue reembolsado' : 'El envío no está pagado');
+  const errores = {};
+  if (!Number.isInteger(monto) || monto <= 0 || monto > envio.tarifa_total) errores.monto = `Entre $1 y $${envio.tarifa_total.toLocaleString('es-CL')}`;
+  if (!['transferencia', 'efectivo', 'pasarela', 'otro'].includes(medio)) errores.medio = 'Medio inválido';
+  exigirSinErrores(errores);
+  exigirSinConflicto(await query(
+    `UPDATE envio SET estado_pago = 'reembolsado', reembolso_monto = $1, reembolso_medio = $2, reembolso_nota = $3, reembolsado_en = now(), actualizado_en = now()
+     WHERE id = $4 AND estado_pago = 'pagado'`, [monto, medio, String(req.body?.nota || '').trim() || null, envio.id]));
+  await auditar(req, 'reembolsar', 'envio', envio.id, { monto, medio });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));
 

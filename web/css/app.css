@@ -1,3 +1,12 @@
+/* Tipografía servida por la misma app (sin Google Fonts). Licencia: fonts/OFL-plus-jakarta-sans.txt */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('../fonts/plus-jakarta-sans.woff2') format('woff2');
+}
+
 /* ==========================================================================
    Paleta de marca: AZUL 60% (fondos, estructura) · MAGENTA 30% (acciones, acentos) · BLANCO 10% (texto, detalles)
    ========================================================================== */
@@ -394,3 +403,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cuenta-resumen { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--superficie); border: 1px solid var(--borde); }
 .cuenta-resumen .avatar { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--degradado-btn); font-weight: 800; flex: none; }
 .cuenta-resumen div { min-width: 0; } .cuenta-resumen .sub { overflow-wrap: anywhere; }
+/* Orden de la ruta del repartidor: flechas a la izquierda de cada parada */
+.parada { display: flex; gap: 8px; align-items: stretch; }
+.parada > .item-envio { flex: 1; min-width: 0; }
+.flechas-ruta { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.flechas-ruta .btn-icono { width: 36px; height: 36px; font-size: .8rem; }

@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
 import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
-import { normalizarRut, normalizarTelefono, validarDestinatario, validarDireccion, COURIERS, ESTADOS, ESTADOS_RECLAMO, MOTIVOS_FALLO, MOTIVOS_RECLAMO, CONFIG_POR_DEFECTO } from '../lib/reglas.js';
+import { correoConfigurado } from '../lib/correo.js';
+import { normalizarRut, normalizarTelefono, validarDestinatario, validarDireccion, normalizarLista, ESTADOS, ESTADOS_RECLAMO, MOTIVOS_FALLO, MOTIVOS_RECLAMO, CONFIG_POR_DEFECTO } from '../lib/reglas.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
 import { config } from '../config.js';
 import { registrarEvento } from '../lib/seguridad.js';
@@ -66,8 +67,8 @@ configuracion.get('/publica', ruta(async (_req, res) => {
   const conf = await leerConfig();
   res.json({
     negocio: conf.negocio, tarifas: conf.tarifas, operacion: conf.operacion, ticket: conf.ticket,
-    pagos: { proveedor: conf.pagos.proveedor }, couriers: COURIERS, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
-    motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave),
+    pagos: { proveedor: conf.pagos.proveedor }, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
+    motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave), recuperacion_por_correo: correoConfigurado(),
   });
 }));
 
@@ -78,8 +79,12 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
   const nuevo = { ...actual };
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!(k in CONFIG_POR_DEFECTO[clave])) continue; // se ignoran claves desconocidas
-    const tipo = typeof CONFIG_POR_DEFECTO[clave][k];
-    if (tipo === 'number') {
+    const tipo = Array.isArray(CONFIG_POR_DEFECTO[clave][k]) ? 'lista' : typeof CONFIG_POR_DEFECTO[clave][k];
+    if (tipo === 'lista') {
+      const { lista, error } = normalizarLista(v);
+      if (error) throw falla(422, `${k}: ${error}`);
+      nuevo[k] = lista;
+    } else if (tipo === 'number') {
       if (!Number.isFinite(Number(v)) || Number(v) < 0) throw falla(422, `Valor inválido para ${k}`);
       nuevo[k] = Number(v);
     } else if (tipo === 'boolean') nuevo[k] = v === true || v === 'true';
@@ -140,6 +145,43 @@ async function destinatarioPropio(req, id) {
   if (!d || (req.usuario.rol === 'cliente' && d.cliente_id !== req.usuario.id)) throw falla(404, 'Destinatario no encontrado');
   return d;
 }
+
+// ---------- Derechos del titular de datos (RF-58, Ley 21.719) — solo administración ----------
+// Acceso/portabilidad: todo lo que la empresa guarda de un destinatario, en JSON.
+destinatarios.get('/:id/exportar', requiereRol('admin'), ruta(async (req, res) => {
+  const d = await destinatarioPropio(req, idNumerico(req.params.id));
+  const [direcciones, envios] = await Promise.all([
+    query('SELECT alias, calle, numero, depto, referencia, lat, lon, activa, creado_en FROM direccion WHERE destinatario_id = $1 ORDER BY id', [d.id]),
+    query(`SELECT e.folio, e.estado, e.creado_en, e.entregado_en, e.descripcion_producto, e.entrega_receptor, c.nombre AS comuna
+           FROM envio e JOIN comuna c ON c.id = e.comuna_id WHERE e.destinatario_id = $1 ORDER BY e.id`, [d.id]),
+  ]);
+  await auditar(req, 'exportar_datos', 'destinatario', d.id);
+  res.setHeader('Content-Disposition', `attachment; filename="datos-destinatario-${d.id}.json"`);
+  res.json({
+    generado_en: new Date().toISOString(),
+    titular: { nombre: d.nombre, telefono: d.telefono, correo: d.correo, rut: d.rut, notas: d.notas, registrado_en: d.creado_en, anonimizado_en: d.anonimizado_en },
+    direcciones: direcciones.rows, envios: envios.rows,
+  });
+}));
+
+// Supresión: se borran los datos personales pero se conservan los envíos (respaldo contable) sin identificar a nadie.
+destinatarios.post('/:id/anonimizar', requiereRol('admin'), ruta(async (req, res) => {
+  const d = await destinatarioPropio(req, idNumerico(req.params.id));
+  if (d.anonimizado_en) throw falla(409, 'Este destinatario ya fue anonimizado');
+  const activos = await uno(
+    "SELECT count(*)::int AS n FROM envio WHERE destinatario_id = $1 AND estado NOT IN ('entregado','devuelto','anulado')", [d.id]);
+  if (activos.n) throw falla(409, `Tiene ${activos.n} envío(s) en curso: se puede anonimizar cuando terminen`, { envios_activos: activos.n });
+  await transaccion(async (db) => {
+    await db.query(`UPDATE destinatario SET nombre = 'Titular anonimizado', telefono = '', correo = NULL, rut = NULL, notas = NULL,
+                      anonimizado_en = now(), actualizado_en = now() WHERE id = $1`, [d.id]);
+    await db.query(`UPDATE direccion SET alias = NULL, calle = 'Dirección anonimizada', numero = '-', depto = NULL, referencia = NULL,
+                      lat = NULL, lon = NULL, activa = FALSE WHERE destinatario_id = $1`, [d.id]);
+    await db.query('UPDATE envio SET entrega_receptor = NULL, entrega_lat = NULL, entrega_lon = NULL, observaciones = NULL WHERE destinatario_id = $1', [d.id]);
+    await db.query(`UPDATE envio_estado SET lat = NULL, lon = NULL WHERE envio_id IN (SELECT id FROM envio WHERE destinatario_id = $1)`, [d.id]);
+  });
+  await auditar(req, 'anonimizar', 'destinatario', d.id); // no se guardan los datos borrados en la auditoría
+  res.json({ ok: true });
+}));
 
 destinatarios.post('/', ruta(async (req, res) => {
   const b = { ...(req.body || {}) };

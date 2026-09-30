@@ -27,7 +27,7 @@ nadie lo viera. **No era una falla de datos ni de Supabase**: faltaba un paso de
 - Administración puede seguir asignando a mano. En **Tarifas → Operación** hay un interruptor
   *"Los repartidores pueden tomar envíos pagados sin asignar"* (activado por defecto). Si se apaga, el
   repartidor ve el aviso "Administración te asigna los envíos".
-- API: `GET /api/envios/disponibles` y `POST /api/envios/:id/tomar`. QA: CP-70 a CP-73.
+- API: `GET /api/envios/disponibles` y `POST /api/envios/:id/tomar`. QA: CP-110 a CP-113.
 
 ### Cómo comprobarlo en Railway después del despliegue
 
@@ -89,7 +89,7 @@ los envíos marcados como pagados a mano reciben su fila de pago `manual` (proba
 - **Comparador de proveedores** con el volumen mensual editable.
 
 API: `GET /api/cobranza/resumen`, `GET /api/cobranza/pagos`, `GET /api/cobranza/pagos/:id/eventos`,
-`POST /api/cobranza/pagos/:id/conciliar`, `GET /api/cobranza/estimar?monto=&envios_mes=`. QA: CP-74 a CP-76.
+`POST /api/cobranza/pagos/:id/conciliar`, `GET /api/cobranza/estimar?monto=&envios_mes=`. QA: CP-114 a CP-116.
 
 ## 3. Costo de cobrar según el sistema de pago
 
@@ -130,7 +130,7 @@ el ambiente de integración del proveedor. No incluye trámites de afiliación d
 
 ## 5. Requerimientos que se agregan y los que aún faltan
 
-**Agregados** (ver [02](02-requerimientos.md)): RF-52 a RF-56.
+**Agregados** (ver [02](02-requerimientos.md)): RF-66 a RF-70.
 
 **Faltan o dependen del cliente:**
 
@@ -143,3 +143,11 @@ el ambiente de integración del proveedor. No incluye trámites de afiliación d
 | 5 | Boleta/factura electrónica SII por cada cobro (si el cliente la emitirá desde la plataforma) | Cliente |
 | 6 | Inicio de sesión real (`AUTH_MODE=jwt`) antes de cobrar dinero real (D-01) | Desarrollo (Must) |
 | 7 | Correr el QA completo contra Railway (A-6) tras este despliegue | Tú |
+
+## 6. Link de pago (30/09/2026)
+
+Desde el detalle de un envío sin pagar, el cliente o administración pulsa **Link de pago**: se genera un enlace
+(`/#/pagar/<token>`) para compartir por WhatsApp. Quien lo abre paga **sin iniciar sesión ni clave**, con la misma
+verificación que un pago dentro de la app (monto exacto, id de transacción, bitácora). Muestra solo folio, monto y
+empresa; vence en 7 días, deja de servir al pagarse o anularse y **nunca aparece en la etiqueta**. Los enlaces
+inventados quedan en la bitácora de seguridad y 10 en 10 minutos desde una IP abren una alerta crítica. QA: CP-150 a CP-155.

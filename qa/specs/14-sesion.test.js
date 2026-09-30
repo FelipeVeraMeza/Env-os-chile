@@ -17,7 +17,7 @@ async function usuario(rol = 'cliente') {
 const login = (correo, password) => peticion('POST', '/api/auth/login', { json: { correo, password } });
 const clave = (u) => u.password;
 
-test('CP-91 · Login correcto entrega sesión; correo en mayúsculas también sirve', async () => {
+test('CP-131 · Login correcto entrega sesión; correo en mayúsculas también sirve', async () => {
   const u = await usuario();
   const r = await login(u.usuario.correo.toUpperCase(), clave(u));
   assert.equal(r.status, 200, JSON.stringify(r.datos));
@@ -27,7 +27,7 @@ test('CP-91 · Login correcto entrega sesión; correo en mayúsculas también si
   assert.equal(yo.datos.id, u.usuario.id);
 });
 
-test('CP-92 · Contraseña incorrecta o correo inexistente dan el mismo mensaje; faltan datos → 422', async () => {
+test('CP-132 · Contraseña incorrecta o correo inexistente dan el mismo mensaje; faltan datos → 422', async () => {
   const u = await usuario();
   const mal = await login(u.usuario.correo, 'incorrecta');
   const noExiste = await login('nadie-qa@qa.test', 'incorrecta');
@@ -37,20 +37,20 @@ test('CP-92 · Contraseña incorrecta o correo inexistente dan el mismo mensaje;
   assert.equal((await login('', '')).status, 422);
 });
 
-test('CP-93 · 5 intentos fallidos bloquean esa cuenta 15 minutos (incluso con la clave correcta)', async () => {
+test('CP-133 · 5 intentos fallidos bloquean esa cuenta 15 minutos (incluso con la clave correcta)', async () => {
   const u = await usuario();
   for (let i = 0; i < 5; i++) assert.equal((await login(u.usuario.correo, `mala-${i}`)).status, 401);
   assert.equal((await login(u.usuario.correo, clave(u))).status, 429);
 });
 
-test('CP-94 · Sin sesión la API responde 401 y las cabeceras de demo no sirven (solo jwt)', { skip: soloJwt() && 'modo demo' }, async () => {
+test('CP-134 · Sin sesión la API responde 401 y las cabeceras de demo no sirven (solo jwt)', { skip: soloJwt() && 'modo demo' }, async () => {
   assert.equal((await peticion('GET', '/api/envios')).status, 401);
   assert.equal((await peticion('GET', '/api/envios', { sesion: { headers: { 'X-Demo-Rol': 'admin' } } })).status, 401);
   assert.equal((await peticion('GET', '/api/demo/usuarios')).status, 404);
   assert.equal((await peticion('GET', '/api/envios', { sesion: { headers: { Authorization: 'Bearer token-falso' } } })).status, 401);
 });
 
-test('CP-95 · Cambiar la contraseña exige la actual y cierra las sesiones anteriores', async () => {
+test('CP-135 · Cambiar la contraseña exige la actual y cierra las sesiones anteriores', async () => {
   const u = await usuario();
   const s = (await login(u.usuario.correo, clave(u))).datos.token;
   const cab = (t) => ({ headers: { Authorization: `Bearer ${t}` } });
@@ -64,7 +64,7 @@ test('CP-95 · Cambiar la contraseña exige la actual y cierra las sesiones ante
   assert.equal((await login(u.usuario.correo, 'Nueva.Clave.QA1')).status, 200);
 });
 
-test('CP-96 · Clave asignada por administración: cierra sesiones y pide cambiarla al entrar', async () => {
+test('CP-136 · Clave asignada por administración: cierra sesiones y pide cambiarla al entrar', async () => {
   const u = await usuario('repartidor');
   const s = (await login(u.usuario.correo, clave(u))).datos.token;
   const r = await peticion('PATCH', `/api/usuarios/${u.usuario.id}`, { sesion: admin, json: { password: 'Temporal.QA.2026' } });
@@ -75,7 +75,7 @@ test('CP-96 · Clave asignada por administración: cierra sesiones y pide cambia
   assert.equal(nuevo.datos.usuario.debe_cambiar_clave, true);
 });
 
-test('CP-97 · Usuario desactivado no entra y su sesión abierta deja de servir', async () => {
+test('CP-137 · Usuario desactivado no entra y su sesión abierta deja de servir', async () => {
   const u = await usuario();
   const s = (await login(u.usuario.correo, clave(u))).datos.token;
   assert.equal((await peticion('PATCH', `/api/usuarios/${u.usuario.id}`, { sesion: admin, json: { activo: false } })).status, 200);
@@ -83,7 +83,7 @@ test('CP-97 · Usuario desactivado no entra y su sesión abierta deja de servir'
   assert.equal((await peticion('GET', '/api/auth/yo', { sesion: { headers: { Authorization: `Bearer ${s}` } } })).status, 401);
 });
 
-test('CP-98 · Crear usuario sin contraseña se rechaza cuando hay inicio de sesión (solo jwt)', { skip: soloJwt() && 'modo demo' }, async () => {
+test('CP-138 · Crear usuario sin contraseña se rechaza cuando hay inicio de sesión (solo jwt)', { skip: soloJwt() && 'modo demo' }, async () => {
   const r = await peticion('POST', '/api/usuarios', { sesion: admin, json: { nombre: 'QA sin clave', correo: `qa-sinclave-${Date.now()}@qa.test`, rol: 'cliente' } });
   assert.equal(r.status, 422);
   assert.ok(r.datos.detalles.password);

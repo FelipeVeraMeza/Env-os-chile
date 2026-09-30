@@ -23,7 +23,9 @@ export const autenticar = ruta(async (req, _res, next) => {
       throw falla(401, 'Sesión inválida o expirada', { sesion: 'expirada' });
     }
     usuario = await uno('SELECT id, nombre, correo, rol, activo, sesion_version, debe_cambiar_clave FROM usuario WHERE id = $1', [payload.sub]);
-    // Tras cambiar la contraseña, las sesiones abiertas con la clave anterior dejan de servir.
+    // Un token con "tipo" (p. ej. el enlace de recuperación de contraseña) nunca sirve como sesión.
+    if (payload.tipo) throw falla(401, 'Sesión inválida o expirada', { sesion: 'expirada' });
+    // Tras cambiar la contraseña o cerrar sesiones, las sesiones anteriores dejan de servir.
     if (usuario && (payload.v ?? 0) !== usuario.sesion_version) throw falla(401, 'Tu sesión expiró: vuelve a iniciar sesión', { sesion: 'expirada' });
   } else if (config.authMode === 'demo') {
     try { exigirClaveDemo(req); } catch (err) {

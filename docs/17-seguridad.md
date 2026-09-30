@@ -1,7 +1,7 @@
 # 17 · Seguridad: vulnerabilidades, monitoreo y qué hacer ante un hackeo
 
-> Auditoría del 29/09/2026. Todo lo descrito está probado automáticamente en `qa/specs/10-datos-maliciosos`,
-> `qa/specs/11-seguridad`, `qa/specs/09-sesion` y `tests/unit/seguridad.test.js`.
+> Auditoría del 29/09/2026. Todo lo descrito está probado automáticamente en `qa/specs/15-datos-maliciosos`,
+> `qa/specs/16-seguridad`, `qa/specs/14-sesion` y `tests/unit/seguridad.test.js`.
 
 ## 1. Auditoría realizada
 

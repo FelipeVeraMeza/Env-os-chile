@@ -22,13 +22,14 @@ ESTADO ACTUAL (ya hecho y probado)
 - Documentación de entregables en docs/00 a docs/12 (alcance v2.0, requerimientos RF/RNF, flujo, roles, priorización,
   técnico, fuera de alcance, plan QA, plan de desarrollo, despliegue, pendientes, guía Railway+Supabase).
 - Código: API Node.js 22 + Express + PostgreSQL (server/), interfaz PWA sin compilación (web/), modo demo SIN inicio de sesión
-  (AUTH_MODE=demo) protegido con DEMO_CLAVE, pasarela de pago SIMULADA.
+  (AUTH_MODE=demo) ABIERTO (sin DEMO_CLAVE, decisión del 26-09-2026), pasarela de pago SIMULADA.
+- Interfaz y API en la misma app (mismo dominio), sin servicios externos: la tipografía se sirve desde web/fonts.
 - Base de datos y archivos en Supabase: el servidor encuentra solo el Session pooler con SUPABASE_URL + SUPABASE_DB_PASSWORD;
   fotos y boletas en Supabase Storage (bucket privado "envios-privado"); RLS activado en todas las tablas.
 - supabase/base-de-datos-completa.sql crea toda la base desde el SQL Editor (regenerar con npm run sql:supabase).
 - npm run publicar -- .env.railway: crea la base, (con RAILWAY_TOKEN) sube variables y despliega, y verifica con QA.
 - Railway: railway.json arranca con "node server/index.js" y healthcheck /api/health.
-- Pruebas: npm test (29 unitarias) y npm run qa:local / qa:railway (52 casos CP-01…CP-66), todas en verde.
+- Pruebas: npm test (40 unitarias), npm run qa:local / qa:railway (78 casos CP-01…CP-92), npm run e2e / carga / rendimiento / accesibilidad; todo en GitHub Actions, todas en verde.
 - entornos.env guarda las URLs (localhost, Railway, Vercel, producción) para QA y la interfaz.
 
 REGLAS DE TRABAJO

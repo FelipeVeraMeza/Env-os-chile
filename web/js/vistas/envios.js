@@ -3,7 +3,7 @@ import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
   $, $$, abrirBlob, badge, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { itemEnvio } from './comun.js';
+import { avisoWhatsapp, itemEnvio } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
 
 // ================= Registro de envíos (búsqueda, filtros, exportación) =================
@@ -29,6 +29,7 @@ export async function registro() {
     </form>
     <div id="resultado">${esqueleto(4)}</div>`);
 
+  app.refrescar = () => cargar();
   async function cargar() {
     try {
       const r = await get(`/api/envios?${qs()}`);
@@ -85,7 +86,7 @@ export async function detalle(id) {
           <span class="sub">Intentos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
       <div class="fila">
         ${e.folio ? html`<button class="btn sec" data-ticket="80mm">Ticket 80 mm</button><button class="btn sec" data-ticket="a4">Ticket A4</button>` : ''}
-        ${e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado) ? html`<button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
+        ${e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado) ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
       </div>
     </div>
     ${!['anulado', 'devuelto'].includes(e.estado) ? html`<div class="progreso-envio">${PROGRESO.map(([, t], i) => html`<div class="${i < nivel ? 'on' : ''}">${t}</div>`)}</div>` : ''}
@@ -96,6 +97,7 @@ export async function detalle(id) {
           ${e.tipo_destino === 'punto_courier' ? html`<div class="aviso" style="margin-bottom:10px">Entrega en punto <b>${e.courier_empresa}</b>: ${e.courier_punto}${e.courier_codigo ? ` · código ${e.courier_codigo}` : ''}</div>` : ''}
           <p><b>${e.destinatario_nombre}</b> · ${e.destinatario_telefono}</p>
           <p>${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}<br><b style="font-size:1.2rem">${e.comuna_nombre}</b> <span class="muted">· ${e.region}</span></p>
+          ${e.folio && e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar al destinatario por WhatsApp</a>` : ''}
           ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}
           ${esAdmin ? html`<p class="muted">Cliente: ${e.cliente_nombre}</p>` : ''}
         </div>
@@ -112,7 +114,7 @@ export async function detalle(id) {
           ${e.estado_pago === 'pagado' ? html`<p class="sub" style="margin-top:10px">Pagado ${fechaHora(e.pagado_en)} · ${e.pago_medio === 'en_linea' ? 'en línea' : e.pago_medio} ${e.pago_referencia ? `· ${e.pago_referencia}` : ''}</p>` : ''}
         </div>
         <div class="card">
-          <div class="card-titulo"><h2>Seguro</h2>${e.valor_declarado ? html`<span class="badge e-creado">Valor declarado ${clp(e.valor_declarado)}</span>` : html`<span class="badge e-anulado">Sin seguro</span>`}</div>
+          <div class="card-titulo"><h2>Seguro</h2>${e.valor_declarado ? html`<span class="badge e-creado">${esAdmin ? `Valor declarado ${clp(e.valor_declarado)}` : 'Asegurado'}</span>` : html`<span class="badge e-anulado">Sin seguro</span>`}</div>
           ${e.reclamos.length ? html`<div class="pila">${e.reclamos.map((r) => html`<div class="fila entre"><div><b class="mono">${r.numero}</b> · ${app.conf.motivos_reclamo[r.motivo]}<div class="sub">Reclamado ${clp(r.monto_reclamado)}${r.monto_aprobado ? ` · aprobado ${clp(r.monto_aprobado)}` : ''}</div></div>${badge(r.estado, app.conf.estados_reclamo[r.estado])}</div>`)}</div>` : ''}
           ${boletas.length ? html`<p class="sub" style="margin-top:10px">Boleta(s): ${boletas.map((b) => html`<a href="${archivo(b.url)}" target="_blank" rel="noopener">${b.nombre_original || 'boleta'}</a> `)}</p>` : ''}
           ${puedeReclamar ? html`<button class="btn sec" id="reclamar" style="margin-top:12px">Reclamar seguro</button><p class="muted" style="margin-top:6px">Requiere adjuntar la boleta de compra (obligatoria).</p>` : ''}
@@ -133,6 +135,7 @@ export async function detalle(id) {
   if (e.folio) api(`/api/envios/${e.id}/qr.png`, { blob: true }).then((b) => { $('#qr').src = URL.createObjectURL(b); }).catch(() => {});
   $$('[data-ticket]').forEach((b) => { b.onclick = () => abrirBlob(api(`/api/envios/${e.id}/ticket.pdf?formato=${b.dataset.ticket}`, { blob: true })).catch(errorToast); });
   $('#pagar')?.addEventListener('click', () => pagar(e, () => detalle(id)));
+  $('#link-pago')?.addEventListener('click', () => linkPago(e));
   $('#reclamar')?.addEventListener('click', () => formReclamo(e, boletas, () => detalle(id)));
   enlazarAcciones(e, () => detalle(id));
 }
@@ -154,6 +157,10 @@ function accionesAdmin(e, repartidores) {
     if (!puede) botones.push(html`<div class="aviso alerta">Se alcanzó el máximo de intentos: corresponde devolver el envío.</div>`);
   }
   if (['creado', 'asignado'].includes(e.estado)) botones.push(html`<button class="btn peligro" data-estado="anulado">Anular envío</button>`);
+  if (['anulado', 'devuelto'].includes(e.estado) && e.estado_pago === 'pagado') botones.push(html`<button class="btn sec" id="reembolsar">Registrar reembolso</button>`);
+  if (e.estado_pago === 'reembolsado') botones.push(html`<p class="sub">Reembolsado ${clp(e.reembolso_monto)} el ${fechaHora(e.reembolsado_en)} · ${e.reembolso_medio}${e.reembolso_nota ? ` · ${e.reembolso_nota}` : ''}</p>`);
+  botones.push(html`<details><summary class="sub">Datos personales del destinatario (Ley 21.719)</summary><div class="fila" style="margin-top:8px">
+    <button class="btn sec chico" id="exportar-dest">Exportar sus datos</button><button class="btn peligro chico" id="anonimizar-dest">Anonimizar</button></div></details>`);
   if (!botones.length) return '';
   return html`<div class="card"><h2>Administración</h2><div class="pila">${botones}</div></div>`;
 }
@@ -172,6 +179,24 @@ function enlazarAcciones(e, recargar) {
       try { await post(`/api/envios/${e.id}/pago-manual`, datosForm(ev.target)); m.cerrar(); toast('Pago registrado', 'ok'); recargar(); }
       catch (err) { errorToast(err); }
     };
+  });
+  $('#reembolsar')?.addEventListener('click', () => {
+    const m = modal(html`<h2>Registrar reembolso</h2><p class="sub">Envío ${e.folio} · pagado ${clp(e.tarifa_total)}</p><form class="pila" id="f-re" novalidate>
+      <label class="campo">Monto a devolver<input name="monto" type="number" min="1" max="${e.tarifa_total}" value="${e.tarifa_total}"></label>
+      <label class="campo">Medio<select name="medio"><option value="transferencia">Transferencia</option><option value="pasarela">Pasarela de pago</option><option value="efectivo">Efectivo</option><option value="otro">Otro</option></select></label>
+      <label class="campo">Nota / N° de operación<input name="nota"></label><button class="btn">Registrar reembolso</button></form>`);
+    $('#f-re', m.el).onsubmit = async (ev) => {
+      ev.preventDefault();
+      const d = datosForm(ev.target);
+      try { await post(`/api/envios/${e.id}/reembolso`, { ...d, monto: Number(d.monto) }); m.cerrar(); toast('Reembolso registrado', 'ok'); recargar(); }
+      catch (err) { marcarErrores(ev.target, err.detalles); errorToast(err); }
+    };
+  });
+  $('#exportar-dest')?.addEventListener('click', () => abrirBlob(api(`/api/destinatarios/${e.destinatario_id}/exportar`, { blob: true })).catch(errorToast));
+  $('#anonimizar-dest')?.addEventListener('click', async () => {
+    if (!(await confirmar('¿Anonimizar al destinatario?', `Se borran para siempre el nombre, teléfono y direcciones de ${e.destinatario_nombre}. Los envíos se conservan sin datos personales.`))) return;
+    try { await post(`/api/destinatarios/${e.destinatario_id}/anonimizar`); toast('Datos del destinatario anonimizados', 'ok'); recargar(); }
+    catch (err) { errorToast(err); }
   });
   $$('[data-estado]').forEach((b) => {
     b.onclick = async () => {
@@ -206,6 +231,24 @@ function pedirMotivo(e) {
   });
 }
 
+// ================= Link de pago: se comparte y quien lo abre paga sin iniciar sesión =================
+export async function linkPago(envio) {
+  let l;
+  try { l = await post(`/api/envios/${envio.id}/link-pago`); } catch (err) { return errorToast(err); }
+  const texto = `Hola, puedes pagar el envío ${l.folio} (${clp(l.monto)}) aquí: ${l.url}`;
+  const fono = String(envio.destinatario_telefono || '').replace(/\D/g, '');
+  const m = modal(html`<h2>Link de pago</h2>
+    <p class="sub">Compártelo con quien pagará el envío <b class="mono">${l.folio}</b>. Paga <b>${clp(l.monto)}</b> sin crear cuenta ni iniciar sesión.
+      Vence el ${fechaHora(l.vence_en)} y deja de servir al pagarse. <b>No aparece en la etiqueta</b> del paquete.</p>
+    <label class="campo">Enlace<input id="url-pago" readonly value="${l.url}"></label>
+    <div class="fila" style="margin-top:12px"><button class="btn" id="copiar-pago">Copiar</button>
+      <a class="btn sec" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(texto)}">Enviar por WhatsApp</a>
+      ${fono ? html`<a class="btn sec" target="_blank" rel="noopener" href="https://wa.me/${fono}?text=${encodeURIComponent(texto)}">Al destinatario</a>` : ''}</div>`);
+  $('#copiar-pago', m.el).onclick = async () => {
+    try { await navigator.clipboard.writeText(l.url); toast('Link copiado', 'ok'); } catch { $('#url-pago', m.el).select(); }
+  };
+}
+
 // ================= Pago en línea (pasarela simulada) =================
 export async function pagar(envio, alTerminar) {
   let pago;
@@ -238,7 +281,7 @@ export async function pagar(envio, alTerminar) {
 function formReclamo(e, boletas, alTerminar) {
   const hoy = hoyISO();
   const m = modal(html`<h2>Reclamar seguro</h2>
-    <p class="sub">Envío ${e.folio} · valor declarado ${clp(e.valor_declarado)}. <b>La boleta de compra es obligatoria.</b></p>
+    <p class="sub">Envío ${e.folio}${app.usuario.rol === 'admin' ? ` · valor declarado ${clp(e.valor_declarado)}` : ' · asegurado'}. <b>La boleta de compra es obligatoria.</b></p>
     <form class="pila" id="f-rec" novalidate>
       <label class="campo">Motivo *<select name="motivo">${Object.entries(app.conf.motivos_reclamo).map(([k, v]) => html`<option value="${k}">${v}</option>`)}</select></label>
       <label class="campo">Descripción<textarea name="descripcion" placeholder="¿Qué ocurrió?"></textarea></label>
@@ -253,7 +296,7 @@ function formReclamo(e, boletas, alTerminar) {
         </div>
         <label class="campo" style="margin-top:10px">RUT del emisor<input name="boleta_emisor_rut" placeholder="76.123.456-7"></label>
       </div>
-      <label class="campo">Monto a reclamar *<input type="number" name="monto_reclamado" min="1" max="${e.valor_declarado}"><small>No puede superar el valor declarado ni el monto de la boleta.</small></label>
+      <label class="campo">Monto a reclamar *<input type="number" name="monto_reclamado" min="1"><small>No puede superar el valor declarado ni el monto de la boleta.</small></label>
       <button class="btn grande">Enviar reclamo</button>
     </form>`);
   $('#f-rec', m.el).onsubmit = async (ev) => {
@@ -279,11 +322,11 @@ export async function reclamos() {
   const lista = await get('/api/reclamos');
   montar(vista, html`
     <div class="encabezado"><div><h1>Reclamos de seguro</h1><p>Toda indemnización requiere la boleta de compra del producto.</p></div></div>
-    ${lista.length ? html`<div class="tabla-wrap"><table class="tabla-cards">
-      <thead><tr><th>N°</th><th>Envío</th>${esAdmin ? html`<th>Cliente</th>` : ''}<th>Motivo</th><th class="num">Declarado</th><th class="num">Reclamado</th><th class="num">Aprobado</th><th>Boleta</th><th>Estado</th>${esAdmin ? html`<th>Acción</th>` : ''}</tr></thead>
+    ${lista.length ? html`<div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table class="tabla-cards">
+      <thead><tr><th>N°</th><th>Envío</th>${esAdmin ? html`<th>Cliente</th>` : ''}<th>Motivo</th>${esAdmin ? html`<th class="num">Declarado</th>` : ''}<th class="num">Reclamado</th><th class="num">Aprobado</th><th>Boleta</th><th>Estado</th>${esAdmin ? html`<th>Acción</th>` : ''}</tr></thead>
       <tbody>${lista.map((r) => html`<tr>
         <td data-label="N°" class="mono"><b>${r.numero}</b></td><td data-label="Envío"><a href="#/envio/${r.envio_id}">${r.folio}</a></td>${esAdmin ? html`<td data-label="Cliente">${r.cliente_nombre}</td>` : ''}
-        <td data-label="Motivo">${app.conf.motivos_reclamo[r.motivo]}</td><td data-label="Declarado" class="num">${clp(r.valor_declarado)}</td><td data-label="Reclamado" class="num">${clp(r.monto_reclamado)}</td>
+        <td data-label="Motivo">${app.conf.motivos_reclamo[r.motivo]}</td>${esAdmin ? html`<td data-label="Declarado" class="num">${clp(r.valor_declarado)}</td>` : ''}<td data-label="Reclamado" class="num">${clp(r.monto_reclamado)}</td>
         <td data-label="Aprobado" class="num">${r.monto_aprobado ? clp(r.monto_aprobado) : '—'}</td>
         <td data-label="Boleta"><a href="${archivo(r.boleta_url)}" target="_blank" rel="noopener">N° ${r.boleta_numero} · ${clp(r.boleta_monto)}</a></td>
         <td data-label="Estado">${badge(r.estado, app.conf.estados_reclamo[r.estado])}</td>

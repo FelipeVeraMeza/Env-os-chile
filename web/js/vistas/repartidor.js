@@ -1,28 +1,39 @@
 import { app } from '../app.js';
-import { api, archivo, enviarForm, get, post } from '../api.js';
+import { api, archivo, enviarForm, get, post, put } from '../api.js';
 import {
   $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, html, montar, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { direccionTexto } from './comun.js';
+import { avisoWhatsapp, direccionTexto } from './comun.js';
 
 // ================= Ruta del día =================
 export async function ruta() {
   const vista = $('#vista');
   montar(vista, esqueleto(3));
   const [activos, hechos, disponibles] = await Promise.all([
-    get('/api/envios?estado=asignado,en_ruta,reagendado,fallido&limite=100'),
+    get('/api/envios?estado=asignado,en_ruta,reagendado,fallido&limite=100&orden=ruta'),
     get('/api/envios?estado=entregado,devuelto&cerrados=hoy&limite=1'),
     get('/api/envios/disponibles'),
   ]);
   const enRuta = activos.items.filter((e) => e.estado === 'en_ruta');
   const porRetirar = activos.items.filter((e) => e.estado !== 'en_ruta');
-  const tarjeta = (e) => html`<a class="item-envio" href="#/envio/${e.id}">
+  // Orden de la ruta (RF-60): flechas para subir o bajar cada parada; se guarda en el servidor.
+  const orden = activos.items.map((e) => e.id);
+  const mover = async (id, paso) => {
+    const i = orden.indexOf(id);
+    const j = i + paso;
+    if (j < 0 || j >= orden.length) return;
+    [orden[i], orden[j]] = [orden[j], orden[i]];
+    try { await put('/api/envios/ruta/orden', { ids: orden }); ruta(); } catch (err) { errorToast(err); }
+  };
+  const flechas = (e) => html`<div class="flechas-ruta"><button class="btn-icono" data-mover="${e.id}" data-paso="-1" aria-label="Subir parada">▲</button>
+    <span class="sub">${orden.indexOf(e.id) + 1}</span><button class="btn-icono" data-mover="${e.id}" data-paso="1" aria-label="Bajar parada">▼</button></div>`;
+  const tarjeta = (e) => html`<div class="parada">${flechas(e)}<a class="item-envio" href="#/envio/${e.id}">
     <div><div class="fila"><span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
       ${e.tipo_destino === 'punto_courier' ? html`<span class="badge e-asignado">${e.courier_empresa}</span>` : ''}</div>
       <div style="font-size:1.05rem;font-weight:700">${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}</div>
       <div class="dir">${e.comuna_nombre.toUpperCase()} · ${e.destinatario_nombre}</div></div>
     <div class="der">${badge(e.estado)}${e.estado_pago !== 'pagado' ? html`<span class="badge e-pendiente">Sin pagar</span>` : ''}${e.intentos ? html`<span class="sub">Intento ${e.intentos + 1}/${app.conf.operacion.intentos_max}</span>` : ''}</div>
-  </a>`;
+  </a></div>`;
   // Envíos pagados que nadie ha tomado: el repartidor los acepta y pasan a su ruta.
   const libre = (e) => html`<div class="item-envio">
     <div><div class="fila"><span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
@@ -40,6 +51,7 @@ export async function ruta() {
     ${disponibles.autoasignacion ? html`<div class="card"><div class="card-titulo"><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
       <div class="lista-envios">${disponibles.items.length ? disponibles.items.map(libre) : vacio('No hay envíos nuevos por tomar.')}</div></div>`
     : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
+  $$('[data-mover]').forEach((b) => { b.onclick = () => mover(Number(b.dataset.mover), Number(b.dataset.paso)); });
   $$('[data-tomar]').forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;
@@ -73,6 +85,7 @@ export async function detalleRepartidor(id) {
       <div style="font-size:1.8rem;font-weight:900;letter-spacing:.02em">${e.comuna_nombre.toUpperCase()}</div>
       ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}
       <p><b>${e.destinatario_nombre}</b> · <a href="tel:${e.destinatario_telefono.replace(/\s/g, '')}">${e.destinatario_telefono}</a></p>
+      ${e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar por WhatsApp</a>` : ''}
       <p class="sub">${e.descripcion_producto} · ${e.bultos} bulto(s) · ${e.peso_kg} kg</p>
       <div class="grid g2" style="margin-top:12px">
         <a class="btn blanco grande" href="${e.mapas.google}" target="_blank" rel="noopener">Ir con Google Maps</a>

@@ -5,9 +5,10 @@ import * as envios from './vistas/envios.js';
 import * as repartidor from './vistas/repartidor.js';
 import * as admin from './vistas/admin.js';
 import * as publico from './vistas/publico.js';
+import * as cuenta from './vistas/cuenta.js';
 
 // Estado compartido de la aplicación.
-export const app = { conf: null, usuario: null, perfiles: [] };
+export const app = { conf: null, usuario: null, perfiles: [], refrescar: null };
 
 const MENUS = {
   cliente: [
@@ -38,6 +39,11 @@ const MENUS = {
 
 const RUTAS = [
   [/^#\/seguimiento(?:\/([\w-]+))?$/, (m) => publico.seguimiento(m[1])],
+  [/^#\/pagar\/([\w-]+)$/, (m) => publico.pagoPublico(m[1])],
+  [/^#\/restablecer\/([\w.-]+)$/, (m) => cuenta.restablecer(m[1])],
+  [/^#\/recuperar$/, () => cuenta.recuperar()],
+  [/^#\/registro$/, () => cuenta.registro()],
+  [/^#\/cuenta$/, () => cuenta.miCuenta(), ['admin', 'cliente', 'repartidor']],
   [/^#\/envio\/(\d+)$/, (m) => envios.detalle(Number(m[1]))],
   [/^#\/envios$/, () => envios.registro()],
   [/^#\/inicio$/, () => cliente.inicio(), 'cliente'],
@@ -61,14 +67,25 @@ async function enrutar() {
   const hash = location.hash || '';
   const rol = app.usuario?.rol;
   document.body.classList.toggle('sin-sesion', !rol);
-  if (!rol && !hash.startsWith('#/seguimiento')) return conSesion() ? pantallaLogin() : pantallaSinPerfil();
+  // Pantallas que no requieren sesión: seguimiento público, recuperar/restablecer contraseña y registro de clientes.
+  const publica = /^#\/(seguimiento|restablecer|recuperar|registro|pagar)/.test(hash);
+  if (!rol && !publica) return conSesion() ? pantallaLogin() : pantallaSinPerfil();
   const ruta = RUTAS.find(([re, , roles]) => re.test(hash) && (!roles || [].concat(roles).includes(rol)));
   if (!ruta) return ir(INICIO[rol] || '#/seguimiento');
   pintarMenu(hash);
   $('#modal-raiz').replaceChildren(); // al navegar se cierran hojas y modales abiertos
   const vista = $('#vista');
+  app.refrescar = null;
   try {
     await ruta[1](hash.match(ruta[0]));
+    // Pantallas que se redibujan completas al refrescar (las listas con filtros definen su propio app.refrescar).
+    if (!app.refrescar && /^#\/(ruta|inicio|envio\/\d+)$/.test(hash)) {
+      app.refrescar = async () => {
+        const y = window.scrollY;
+        await ruta[1](hash.match(ruta[0]));
+        window.scrollTo(0, y);
+      };
+    }
   } catch (err) {
     montar(vista, html`<div class="card"><h2>No se pudo cargar esta pantalla</h2><p class="sub">${err.message}</p>
       <button class="btn sec" onclick="location.reload()">Reintentar</button></div>`);
@@ -80,7 +97,7 @@ async function enrutar() {
 }
 
 function pintarMenu(hash) {
-  const items = MENUS[app.usuario?.rol] || [];
+  const items = [...(MENUS[app.usuario?.rol] || []), ...(app.usuario && app.conf?.auth_mode === 'jwt' ? [['#/cuenta', 'usuarios', 'Mi cuenta', 'solo-escritorio']] : [])];
   const ocultos = items.filter(([, , , cls]) => cls === 'solo-escritorio');
   montar($('#menu'), html`<div class="titulo-menu">${app.usuario?.nombre || ''}</div>${items.map(([h, ic, txt, cls]) => html`
     <a href="${h}" class="${[hash.startsWith(h) ? 'activo' : '', cls].filter(Boolean).join(' ')}">${icono(ic)}<span>${txt}</span></a>`)}
@@ -109,7 +126,8 @@ function hojaMas() {
       <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}</a>`)}</div>` : ''}
     ${app.perfiles.length ? html`<div class="hoja-titulo" ${ocultos.length ? '' : raw('style="margin-top:0"')}>Ver la plataforma como</div>
     <div class="hoja-lista">${app.perfiles.map((p) => html`<button class="item ${p.id === app.usuario?.id ? 'activo' : ''}" data-perfil="${p.id}">
-      <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>` : ''}`);
+      <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>` : ''}
+  `);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
   m.el.querySelectorAll('[data-perfil]').forEach((b) => { b.onclick = () => { m.cerrar(); cambiarPerfil(Number(b.dataset.perfil)); }; });
 }
@@ -150,7 +168,8 @@ function pantallaLogin(mensaje) {
         <button type="button" class="btn sec chico ver-clave" aria-label="Mostrar contraseña">Mostrar</button></span></label>
       <button class="btn grande ancho" id="entrar">Entrar</button>
     </form>
-    <details><summary>¿Olvidaste tu contraseña?</summary><p style="margin-top:8px">Pídele a administración que te asigne una nueva. Al entrar con ella, la plataforma te pedirá cambiarla.</p></details>
+    <div class="fila entre" style="margin-top:16px"><a href="#/recuperar">¿Olvidaste tu contraseña?</a>
+      ${app.conf.operacion?.registro_clientes ? html`<a href="#/registro">Crear cuenta de cliente</a>` : ''}</div>
     <div class="pie"><a href="#/seguimiento">Seguir un envío con su folio →</a></div>
   </div></div>`);
   const f = $('#f-login');
@@ -317,6 +336,8 @@ async function iniciar() {
   if (!modoDesarrollo()) $('#btn-servidor').style.pointerEvents = 'none'; // solo muestra el punto de estado
   $('#chip-perfil').onclick = hojaMas;
   try {
+    // Configuración y perfiles se piden en paralelo (una ida y vuelta menos al abrir la app).
+    const perfilesP = get('/api/demo/usuarios').then((p) => ({ p }), (err) => ({ err })); // en modo jwt responde 404 y se ignora
     const conf = await get('/api/config/publica');
     let perfiles = [];
     if (conf.auth_mode === 'jwt') {
@@ -325,14 +346,12 @@ async function iniciar() {
       // Sesión guardada en este dispositivo: se valida con el servidor (puede haber expirado).
       if (hayToken()) app.usuario = await get('/api/auth/yo').catch(() => null);
     } else {
-      try {
-        perfiles = await get('/api/demo/usuarios');
-      } catch (err) {
-        if (err.detalles?.demo_clave) return pedirClaveDemo(conf);
-      }
+      const r = await perfilesP;
+      if (r.err?.detalles?.demo_clave) return pedirClaveDemo(conf);
+      perfiles = r.p || [];
     }
     app.conf = conf;
-    app.perfiles = perfiles;
+    app.perfiles = conf.auth_mode === 'jwt' ? [] : perfiles;
     $('#estado-api').className = 'punto-estado ok';
     $('#marca-nombre').textContent = conf.negocio.nombre;
     document.title = `${conf.negocio.nombre} · Envíos`;
@@ -348,5 +367,13 @@ async function iniciar() {
   enrutar();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+// Actualización automática (RNF-22): con muchas personas trabajando a la vez, lo que cambia otro usuario
+// (asignaciones, entregas, pagos) aparece solo cada 30 s, sin interrumpir a quien está escribiendo.
+setInterval(async () => {
+  if (document.hidden || !app.refrescar || $('#modal-raiz').children.length) return;
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || '')) return;
+  try { await app.refrescar(); } catch { /* un fallo de red puntual no interrumpe: se reintenta en el próximo ciclo */ }
+}, 30000);
 
 iniciar();

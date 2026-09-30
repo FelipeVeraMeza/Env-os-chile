@@ -75,7 +75,7 @@ function variantes(ruta) {
   return [reales, ...malos];
 }
 
-test('CP-99 · Ninguna ruta responde error interno ante datos malformados o maliciosos (3 perfiles)', { timeout: 300_000 }, async () => {
+test('CP-139 · Ninguna ruta responde error interno ante datos malformados o maliciosos (3 perfiles)', { timeout: 300_000 }, async () => {
   const fallas = [];
   let total = 0;
   const probar = async (metodo, url, opciones, perfil) => {

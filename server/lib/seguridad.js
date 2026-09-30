@@ -15,11 +15,14 @@ export const TIPOS = {
   sondeo_ajeno: ['aviso', 'Intento de ver datos de otro usuario o inexistentes'],
   exportacion: ['info', 'Exportación de datos (CSV)'],
   descarga_archivo: ['info', 'Descarga de foto o boleta'],
-  enlace_invalido: ['aviso', 'Enlace de archivo alterado o vencido'],
+  enlace_invalido: ['aviso', 'Enlace alterado, vencido o inexistente'],
+  link_pago_creado: ['info', 'Link de pago generado'],
   archivo_rechazado: ['aviso', 'Archivo sospechoso rechazado'],
   limite_peticiones: ['aviso', 'Exceso de peticiones'],
   pago_no_calza: ['alerta', 'Confirmación de pago que no calza'],
   cambio_clave: ['info', 'Cambio de contraseña'],
+  recuperacion_solicitada: ['info', 'Pidió recuperar su contraseña'],
+  enlace_restablecer: ['aviso', 'Administración generó un enlace para cambiar contraseña'],
   clave_asignada: ['aviso', 'Contraseña asignada por administración'],
   usuario_creado: ['info', 'Usuario creado'],
   usuario_modificado: ['aviso', 'Usuario modificado'],
@@ -73,6 +76,10 @@ async function evaluarReglas(e) {
   if (e.tipo === 'token_invalido' && e.ip) {
     const { n } = await contar("SELECT count(*)::int AS n FROM evento_seguridad WHERE tipo = 'token_invalido' AND ip = $1 AND fecha > now() - interval '10 minutes'", [e.ip]);
     if (n >= 10) reglas.push(['tokens_falsos', 'critica', `${n} sesiones inválidas desde la IP ${e.ip}: posible intento de falsificar sesiones`, `tokens:${e.ip}`, { intentos: n }]);
+  }
+  if (e.tipo === 'enlace_invalido' && e.ip) {
+    const { n } = await contar("SELECT count(*)::int AS n FROM evento_seguridad WHERE tipo = 'enlace_invalido' AND ip = $1 AND fecha > now() - interval '10 minutes'", [e.ip]);
+    if (n >= 10) reglas.push(['enlaces_adivinados', 'critica', `${n} enlaces inválidos (links de pago o archivos) desde la IP ${e.ip}: alguien intenta adivinarlos`, `enlaces:${e.ip}`, { intentos: n }]);
   }
   if (e.tipo === 'clave_demo_fallida' && e.ip) {
     const { n } = await contar("SELECT count(*)::int AS n FROM evento_seguridad WHERE tipo = 'clave_demo_fallida' AND ip = $1 AND fecha > now() - interval '15 minutes'", [e.ip]);
@@ -133,15 +140,20 @@ async function notificar(texto) {
 const ventanas = new Map();
 setInterval(() => { const ahora = Date.now(); for (const [k, v] of ventanas) if (ahora - v.desde > 60_000) ventanas.delete(k); }, 60_000).unref();
 
-export function limitarPeticiones(nombre, maximo) {
+// soloMedir: informa las cabeceras pero no bloquea (el propio equipo en desarrollo, para pruebas de carga).
+export function limitarPeticiones(nombre, maximo, { soloMedir = () => false } = {}) {
   return (req, res, next) => {
+    if (!maximo) return next();
     const clave = `${nombre}:${req.ip}`;
     const ahora = Date.now();
     let v = ventanas.get(clave);
     if (!v || ahora - v.desde > 60_000) { v = { n: 0, desde: ahora, avisado: false }; ventanas.set(clave, v); }
     v.n += 1;
-    if (v.n <= maximo) return next();
-    const espera = Math.ceil((v.desde + 60_000 - ahora) / 1000);
+    const espera = Math.max(1, Math.ceil((v.desde + 60_000 - ahora) / 1000));
+    res.set?.('RateLimit-Limit', String(maximo));
+    res.set?.('RateLimit-Remaining', String(Math.max(0, maximo - v.n)));
+    res.set?.('RateLimit-Reset', String(espera));
+    if (v.n <= maximo || soloMedir(req)) return next();
     res.set('Retry-After', String(espera));
     if (!v.avisado) { v.avisado = true; registrarEvento(req, 'limite_peticiones', { detalle: { grupo: nombre, maximo } }); }
     return res.status(429).json({ error: `Demasiadas peticiones. Espera ${espera} segundos.` });

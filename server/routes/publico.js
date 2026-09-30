@@ -34,8 +34,11 @@ paginaQr.get('/:token', ruta(async (req, res) => {
   await auditar(req, 'qr_escaneado', 'envio', e.id);
   const conf = await leerConfig();
   const mapas = enlacesMapa({ calle: e.calle, numero: e.numero, comuna: e.comuna, region: e.region, lat: e.lat, lon: e.lon });
-  if (conf.operacion.qr_destino === 'google') return res.redirect(mapas.google);
-  if (conf.operacion.qr_destino === 'waze') return res.redirect(mapas.waze);
+  // ?ver=pagina muestra siempre la página con ambos botones (útil si el teléfono no tiene Google Maps).
+  if (req.query.ver !== 'pagina') {
+    if (conf.operacion.qr_destino === 'google') return res.redirect(mapas.ver);
+    if (conf.operacion.qr_destino === 'waze') return res.redirect(mapas.waze);
+  }
 
   res.send(`<!doctype html><html lang="es-CL"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(e.folio)} · ${esc(conf.negocio.nombre)}</title>
