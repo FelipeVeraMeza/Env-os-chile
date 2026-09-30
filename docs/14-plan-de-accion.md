@@ -84,6 +84,7 @@ Cuando respondan: nombre, logo, datos del negocio, tarifas, límites e intentos 
 | [x] D-10 | Prueba de carga: 20 usuarios, 100.000 envíos | Should · hecho en local; repetir contra Railway |
 | [ ] D-11 | Revisión legal: Ley 19.628 / 21.719, textos de consentimiento | Must |
 | [ ] D-12 | Autocompletado de direcciones (Google Places), si se aprueba | Could |
+| [ ] D-13 | **Boleta electrónica en el SII** al aprobar cada pago (transferencia o pasarela), con un proveedor de DTE autorizado. El punto donde se emitiría ya está marcado en `server/lib/pagos.js → aprobarComprobante` (DEC-23) | A futuro |
 
 ## E. Calendario sugerido hasta la fecha meta
 

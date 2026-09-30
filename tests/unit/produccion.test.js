@@ -25,9 +25,16 @@ test('producción con todas las variables arranca', () => {
 
 test('producción sin variables críticas no arranca (sin valores de respaldo)', () => {
   const faltan = validarProduccion({ NODE_ENV: 'production' });
-  for (const nombre of ['Base de datos', 'JWT_SECRET', 'ADMIN_EMAIL']) {
+  for (const nombre of ['Base de datos', 'JWT_SECRET']) {
     assert.ok(faltan.some((f) => f.startsWith(nombre)), `debe exigir ${nombre}`);
   }
+});
+
+test('ADMIN_EMAIL/ADMIN_PASSWORD son opcionales (el administrador vive en la base), pero van juntos', () => {
+  const { ADMIN_EMAIL, ADMIN_PASSWORD, ...sinAdmin } = completo;
+  assert.deepEqual(validarProduccion(sinAdmin), [], 'sin variables de administrador el servidor arranca');
+  assert.match(validarProduccion({ ...sinAdmin, ADMIN_EMAIL: 'a@b.cl' })[0], /van juntos/);
+  assert.match(validarProduccion({ ...sinAdmin, ADMIN_PASSWORD: 'Una.Clave.Larga.2026' })[0], /van juntos/);
 });
 
 test('producción rechaza JWT_SECRET corto y ADMIN_PASSWORD débil', () => {

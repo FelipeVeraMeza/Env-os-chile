@@ -79,9 +79,11 @@ export const config = {
   jwtDias: Number(process.env.JWT_DIAS || 30),
   uploadDir: path.resolve(process.env.UPLOAD_DIR || './uploads'),
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 10),
+  // Solo para crear el primer administrador cuando la base no tiene usuarios. Después las cuentas viven en la base
+  // (contraseña cifrada) y estas variables se pueden borrar. En producción no hay valores de respaldo.
   admin: {
-    correo: process.env.ADMIN_EMAIL || 'admin@envios.local',
-    password: process.env.ADMIN_PASSWORD || 'Cambiar.Esta.Clave.2026',
+    correo: process.env.ADMIN_EMAIL || (entorno === 'production' ? null : 'admin@envios.local'),
+    password: process.env.ADMIN_PASSWORD || (entorno === 'production' ? null : 'Cambiar.Esta.Clave.2026'),
   },
   sembrarDemo: process.env.SEED_DEMO !== 'false',
   // Solicitudes por minuto y por IP (RNF-16). 0 desactiva el límite (no recomendado).
@@ -122,9 +124,10 @@ export function validarProduccion(env) {
   if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
     faltan.push('JWT_SECRET: cadena aleatoria de 32 caracteres o más (firma sesiones y enlaces de fotos/boletas). Genera una con: npm run secreto');
   }
-  if (!env.ADMIN_EMAIL || !env.ADMIN_PASSWORD) {
-    faltan.push('ADMIN_EMAIL y ADMIN_PASSWORD: administrador inicial');
-  } else if (env.ADMIN_PASSWORD.length < 12) {
+  // Opcionales: solo crean el primer administrador si la base está vacía (si faltan en ese caso, lo avisa sembrar()).
+  if (Boolean(env.ADMIN_EMAIL) !== Boolean(env.ADMIN_PASSWORD)) {
+    faltan.push('ADMIN_EMAIL y ADMIN_PASSWORD van juntos (o bórralos los dos si el administrador ya existe en la base)');
+  } else if (env.ADMIN_PASSWORD && env.ADMIN_PASSWORD.length < 12) {
     faltan.push('ADMIN_PASSWORD: debe tener 12 caracteres o más');
   }
   if (env.AUTH_MODE === 'jwt' && env.SEED_DEMO !== 'false') {

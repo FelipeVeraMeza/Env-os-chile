@@ -20,6 +20,8 @@ test('CP-80 · Mismo envío, 5 "intento fallido" simultáneos: se registra uno s
 
 test('CP-81 · Dos administradores asignan el mismo envío a repartidores distintos: gana uno', async () => {
   const c = await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id), confirmar: true } });
+  const pago = await peticion('POST', `/api/envios/${c.datos.id}/pago`, { sesion: esc.cliente });
+  await peticion('POST', `/api/pagos/${pago.datos.token}/confirmar`, { sesion: esc.cliente, json: { resultado: 'aprobado' } });
   const [a, b] = await Promise.all([esc.repartidor, esc.repartidorB].map((r) => peticion('POST', `/api/envios/${c.datos.id}/asignar`,
     { sesion: esc.admin, json: { repartidor_id: r.usuario.id } })));
   assert.deepEqual(estados([a, b]), [200, 409]);

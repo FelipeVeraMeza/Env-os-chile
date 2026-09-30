@@ -125,6 +125,7 @@ Faltan para operar con clientes reales. La mayoría depende de respuestas del cl
 | RF-68 | **Bitácora de cada pago** (inicio, notificación, verificación, rechazo, conciliación) | I | ✅ | CP-114 |
 | RF-69 | **Cobranza**: cobrado, por cobrar, comisiones de la pasarela y abonos por llegar; conciliación con la cartola (la comisión real es costo "pasarela") | A | ✅ | CP-116 |
 | RF-70 | **Comparador** del costo de cobrar con cada proveedor de pago y proyección mensual | M | ✅ | CP-116 |
+| RF-71 | **Pago por transferencia con comprobante**: el cliente sube la imagen (o PDF) de la transferencia y el pago queda **en revisión**; administración la ve y **aprueba** o **rechaza con motivo** (el cliente sube otra). **El pago manda**: sin pago aprobado el cliente no recibe el ticket, no se asigna repartidor y no se retira. Avisa si el mismo comprobante o N° de operación ya se usó en otro envío | I | ✅ | CP-160 a CP-170 |
 
 ## Requerimientos no funcionales
 

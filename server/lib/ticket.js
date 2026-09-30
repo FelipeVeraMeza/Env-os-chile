@@ -68,6 +68,14 @@ function dibujarEtiqueta(doc, { envio, conf, qr, bulto, termico, ancho, margen }
   doc.fontSize(7.5 * t).font('Helvetica-Bold').text(LEYENDA_QR[conf.operacion.qr_destino] || LEYENDA_QR.google, { align: 'center', width: util });
   linea();
 
+  // Remitente: quién envía (el cliente dueño del envío).
+  seccion('Remitente');
+  doc.font('Helvetica-Bold').fontSize(10 * t).text(envio.cliente_nombre, { width: util });
+  doc.font('Helvetica').fontSize(9 * t);
+  const contactoRemitente = [envio.cliente_telefono && `Tel. ${envio.cliente_telefono}`, envio.cliente_rut && `RUT ${envio.cliente_rut}`].filter(Boolean).join(' · ');
+  if (contactoRemitente) doc.text(contactoRemitente, { width: util });
+  linea();
+
   // Destinatario y dirección
   seccion('Destinatario');
   doc.font('Helvetica-Bold').fontSize(11 * t).text(envio.destinatario_nombre, { width: util });
@@ -85,13 +93,8 @@ function dibujarEtiqueta(doc, { envio, conf, qr, bulto, termico, ancho, margen }
   doc.font('Helvetica').fontSize(8.5 * t).text(`Región ${envio.region}${envio.region === 'Metropolitana' ? ' de Santiago' : ''}`, { width: util });
   linea();
 
-  // Remitente
-  seccion('Remitente');
-  doc.text(`${envio.cliente_nombre}${envio.cliente_telefono ? ` · Tel. ${envio.cliente_telefono}` : ''}`, { width: util });
-
-  // Contenido
-  seccion('Contenido');
-  doc.text(envio.descripcion_producto, { width: util });
+  // Paquete (sin describir el producto: pedido del cliente 30-09)
+  seccion('Paquete');
   par('Bultos', `${envio.bultos} · ${Number(envio.peso_kg).toLocaleString('es-CL')} kg · ${envio.largo_cm}×${envio.ancho_cm}×${envio.alto_cm} cm`);
   // Sin montos en la etiqueta: el valor declarado solo lo ve administración (para el seguro) y un valor impreso
   // en el paquete invita al robo. Tampoco se imprime el link de pago.

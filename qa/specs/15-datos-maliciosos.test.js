@@ -45,7 +45,7 @@ const RUTAS = [
   ['GET', '/api/envios/:envio'], ['GET', '/api/envios/:envio/qr.png'], ['GET', '/api/envios/:envio/ticket.pdf'],
   ['POST', '/api/envios/:envio/confirmar'], ['POST', '/api/envios/:envio/asignar'], ['POST', '/api/envios/:envio/estado'], ['POST', '/api/envios/:envio/llegada'],
   ['POST', '/api/envios/:envio/pago'], ['POST', '/api/envios/:envio/pago-manual'], ['POST', '/api/envios/:envio/tomar'],
-  ['POST', '/api/envios/:envio/entregar', 'form'], ['POST', '/api/envios/:envio/adjuntos', 'form'], ['POST', '/api/reclamos/envio/:envio', 'form'],
+  ['POST', '/api/envios/:envio/entregar', 'form'], ['POST', '/api/envios/:envio/adjuntos', 'form'], ['POST', '/api/envios/:envio/comprobante', 'form'], ['POST', '/api/reclamos/envio/:envio', 'form'],
   ['GET', '/api/pagos/:token'], ['POST', '/api/pagos/:token/confirmar'],
   ['GET', '/api/reclamos'], ['GET', '/api/reclamos/:envio'], ['POST', '/api/reclamos/:envio/revision'], ['POST', '/api/reclamos/:envio/resolver'], ['POST', '/api/reclamos/:envio/pagar'],
   ['GET', '/api/destinatarios'], ['POST', '/api/destinatarios'], ['PATCH', '/api/destinatarios/:destinatario'],
@@ -55,6 +55,7 @@ const RUTAS = [
   ['GET', '/api/config/publica'], ['PUT', '/api/config/no-existe'],
   ['GET', '/api/costos'], ['POST', '/api/costos'], ['GET', '/api/reportes/ganancias'],
   ['GET', '/api/cobranza/resumen'], ['GET', '/api/cobranza/pagos'], ['GET', '/api/cobranza/estimar'], ['GET', '/api/cobranza/pagos/:envio/eventos'], ['POST', '/api/cobranza/pagos/:envio/conciliar'],
+  ['GET', '/api/cobranza/comprobantes'], ['POST', '/api/cobranza/comprobantes/:envio/aprobar'], ['POST', '/api/cobranza/comprobantes/:envio/rechazar'],
   ['GET', '/api/seguridad/resumen'], ['GET', '/api/seguridad/extraccion'], ['GET', '/api/seguridad/eventos'], ['GET', '/api/seguridad/alertas'],
   ['POST', '/api/seguridad/alertas/:envio/revisar'], ['POST', '/api/seguridad/cerrar-todas-las-sesiones'],
   ['GET', '/api/seguimiento/:folio'], ['GET', '/q/:token'], ['GET', '/api/adjuntos/:envio/archivo'], ['GET', '/api/auth/yo'], ['POST', '/api/auth/cambiar-clave'],
@@ -65,7 +66,7 @@ const LOGIN_MALFORMADOS = [[], 'texto', null, 42, {}, { correo: '' }, { password
 
 // Rutas cuyo :id apuntaría a registros que no son de QA (reclamos, zonas, comunas, pagos, alertas): solo con ids imposibles,
 // para que el barrido nunca modifique datos reales aunque se ejecute contra producción.
-const SOLO_IDS_MALOS = /\/api\/(reclamos\/:envio\/|zonas\/:|comunas\/:|cobranza\/pagos\/:envio\/conciliar|seguridad\/alertas\/:)/;
+const SOLO_IDS_MALOS = /\/api\/(reclamos\/:envio\/|zonas\/:|comunas\/:|cobranza\/pagos\/:envio\/conciliar|cobranza\/comprobantes\/:|seguridad\/alertas\/:)/;
 
 function variantes(ruta) {
   if (SOLO_IDS_MALOS.test(ruta)) return IDS_MALOS.map((m) => ruta.replace(/:\w+/g, encodeURIComponent(m)));

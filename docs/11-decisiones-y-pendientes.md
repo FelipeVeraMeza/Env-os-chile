@@ -25,6 +25,8 @@
 | DEC-20 | La **etiqueta no muestra montos** (ni tarifa ni valor declarado); el valor declarado solo lo ve administración, para cobrar el seguro | Pedido del cliente (30/09/2026) |
 | DEC-21 | **Demo sin clave**: `DEMO_CLAVE` es opcional (confirma la decisión A-5 del 26/09). Para operar con datos reales se usa `AUTH_MODE=jwt` | Pedido del cliente (30/09/2026) |
 | DEC-22 | Se integran las dos versiones (26/09 y 29/09) en una sola rama | Pedido del cliente (30/09/2026) |
+| DEC-23 | **Pago por transferencia con comprobante** revisado por administración (aprueba o rechaza con motivo). **El pago manda en todo**: sin pago aprobado no hay ticket para el cliente, ni asignación de repartidor, ni retiro. La boleta electrónica del SII al aprobar el pago queda **para más adelante** (D-13) | Pedido del cliente (30/09/2026) |
+| DEC-24 | Los **clientes crean su cuenta** desde la pantalla de ingreso (registro abierto por defecto). La plataforma se **reinicia** antes de operar (`npm run reiniciar`): se borran usuarios y datos de prueba y se crea el administrador definitivo | Pedido del cliente (30/09/2026) |
 | DEC-17 | Se agrega **inicio de sesión** con correo y contraseña para administrador, cliente y repartidor (`AUTH_MODE=jwt`) | Pedido del cliente (29/09/2026) |
 
 ## Pendientes que necesitamos del cliente

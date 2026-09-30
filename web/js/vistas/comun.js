@@ -1,5 +1,5 @@
 import { get } from '../api.js';
-import { html } from '../ui.js';
+import { badgePago, html } from '../ui.js';
 
 let cacheComunas = null;
 export async function comunasCobertura() {
@@ -44,7 +44,7 @@ export function itemEnvio(e, { montos = true } = {}) {
     <div class="der">
       <span class="badge e-${e.estado}">${ESTADO_TXT[e.estado]}</span>
       ${montos && e.tarifa_total !== undefined ? html`<span class="monto">${'$' + Number(e.tarifa_total).toLocaleString('es-CL')}</span>` : ''}
-      ${e.estado_pago && e.estado_pago !== 'pagado' && !['borrador', 'anulado'].includes(e.estado) ? html`<span class="badge e-pendiente">Pago pendiente</span>` : ''}
+      ${['pendiente', 'en_revision'].includes(e.estado_pago) && !['borrador', 'anulado'].includes(e.estado) ? badgePago(e.estado_pago) : ''}
     </div>
   </a>`;
 }

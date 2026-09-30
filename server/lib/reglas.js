@@ -51,22 +51,26 @@ export const CONFIG_POR_DEFECTO = {
     logo_url: '',
   },
   tarifas: {
-    base: 3500, // Tarifa dentro de Santiago
-    bulto_adicional_domicilio: 3500, // [SUPUESTO] cada bulto extra a domicilio se cobra como uno nuevo
-    bulto_adicional_punto: 0, // Puntos Blue/Starken/otros: sin límite de paquetes por la misma tarifa
-    recargo_horario_especial: 1000,
-    peso_max_kg: 20,
+    // Pedido del cliente 30-09: la tarifa no depende de la cantidad de bultos.
+    base: 3500, // Paquete estándar dentro de Santiago: hasta 10 kg y 40×40×40 cm por bulto
+    peso_estandar_kg: 10,
+    dim_estandar_cm: 40,
+    recargo_sobredimension: 2000, // Sobre el estándar y hasta el máximo: $3.500 + $2.000 = $5.500
+    peso_max_kg: 20, // Sobre 20 kg o 60×60×60 cm no se recibe el paquete
     dim_max_cm: 60,
+    recargo_horario_especial: 1000,
   },
   operacion: {
     intentos_max: 3,
     espera_max_min: 5,
     gps_obligatorio: true,
-    registro_clientes: false, // RF-56: los clientes pueden crear su cuenta solos (pregunta C-9)
+    registro_clientes: true, // RF-56: los clientes crean su cuenta solos (pedido del cliente 30-09; se puede cerrar en Tarifas y reglas)
     qr_destino: 'google', // google (abre el mapa con la dirección, pedido del cliente 26-09) | pagina | waze
     // Los repartidores ven los envíos pagados sin asignar y pueden tomarlos ellos mismos (DEC-15).
     // Si es false, solo administración asigna (el repartidor no ve nada hasta que lo asignen).
     autoasignacion: true,
+    // Envío a puntos de otras compañías (Blue Express, Starken…): en pausa por pedido del cliente (30-09).
+    punto_courier: false,
   },
   ticket: {
     pie: 'Conserve este ticket. Consultas y reclamos indicando el folio.',
@@ -78,7 +82,36 @@ export const CONFIG_POR_DEFECTO = {
   pagos: {
     proveedor: 'simulado', // simulado | webpay | mercadopago | flow (etapa de desarrollo)
   },
+  // Cuenta a la que el cliente transfiere antes de subir el comprobante (se muestra al pagar).
+  transferencia: {
+    banco: '',
+    tipo_cuenta: '',
+    numero_cuenta: '',
+    titular: '',
+    rut: '',
+    correo: '',
+  },
 };
+
+// ---------- Pago por transferencia con comprobante ----------
+
+export const MIME_COMPROBANTE = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+
+// Se puede subir un comprobante solo si el envío está confirmado, tiene monto y su pago está pendiente.
+export function validarSubidaComprobante(envio) {
+  if (['borrador', 'anulado'].includes(envio.estado)) throw new ErrorNegocio(409, 'Confirma el envío antes de pagar');
+  if (envio.estado_pago === 'en_revision') throw new ErrorNegocio(409, 'Ya enviaste un comprobante: está en revisión');
+  if (envio.estado_pago !== 'pendiente') throw new ErrorNegocio(409, 'El envío ya está pagado');
+  if (!(envio.tarifa_total > 0)) throw new ErrorNegocio(409, 'Este envío no tiene monto a pagar');
+}
+
+// Rechazar un comprobante exige decirle al cliente por qué (lo ve al subir uno nuevo).
+export function validarMotivoRechazo(motivo) {
+  const texto = String(motivo ?? '').trim();
+  if (!texto) throw new ErrorNegocio(422, 'Indica el motivo del rechazo', { motivo: 'Obligatorio: el cliente lo verá' });
+  if (texto.length > 300) throw new ErrorNegocio(422, 'El motivo puede tener hasta 300 caracteres', { motivo: 'Máximo 300 caracteres' });
+  return texto;
+}
 
 export class ErrorNegocio extends Error {
   constructor(status, mensaje, detalles) {
@@ -129,8 +162,7 @@ function entero(v) {
 // Límites absolutos (también para cotización especial): evitan valores que no caben en la base.
 export const LIMITES = { bultos: 100, peso_kg: 1000, dim_cm: 500, valor_declarado: 50_000_000, monto: 100_000_000 };
 
-// Valida el paquete contra los límites de la tarifa estándar (20 kg, 60×60×60 cm por bulto).
-// Los mensajes "Excede…/Máximo…" son los que el administrador puede saltar con tarifa manual.
+// Valida el paquete contra el máximo que se recibe (20 kg y 60×60×60 cm por bulto). Sobre eso no se toma el despacho.
 export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
   const errores = {};
   if (!p.descripcion_producto || !String(p.descripcion_producto).trim()) {
@@ -143,14 +175,14 @@ export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
   const peso = entero(p.peso_kg);
   if (peso === null || Number.isNaN(peso) || peso <= 0) errores.peso_kg = 'Indica el peso por bulto (kg)';
   else if (peso > LIMITES.peso_kg) errores.peso_kg = `Fuera de rango: hasta ${LIMITES.peso_kg} kg`;
-  else if (peso > tarifas.peso_max_kg) errores.peso_kg = `Excede el máximo de ${tarifas.peso_max_kg} kg por bulto`;
+  else if (peso > tarifas.peso_max_kg) errores.peso_kg = `No se reciben bultos de más de ${tarifas.peso_max_kg} kg`;
 
   for (const dim of ['largo_cm', 'ancho_cm', 'alto_cm']) {
     const v = entero(p[dim]);
     if (v === null || Number.isNaN(v) || v <= 0) errores[dim] = 'Obligatorio';
     else if (!Number.isInteger(v)) errores[dim] = 'Usa centímetros enteros';
     else if (v > LIMITES.dim_cm) errores[dim] = `Fuera de rango: hasta ${LIMITES.dim_cm} cm`;
-    else if (v > tarifas.dim_max_cm) errores[dim] = `Máximo ${tarifas.dim_max_cm} cm`;
+    else if (v > tarifas.dim_max_cm) errores[dim] = `No se reciben bultos de más de ${tarifas.dim_max_cm} cm por lado`;
   }
   const valor = entero(p.valor_declarado ?? 0);
   if (Number.isNaN(valor) || valor < 0 || (valor !== null && !Number.isInteger(valor))) errores.valor_declarado = 'Valor declarado inválido (pesos enteros)';
@@ -188,11 +220,12 @@ export function normalizarLista(valor, { max = 20, largo = 60 } = {}) {
   return { lista: limpia };
 }
 
-export function validarDestino(e, listas = CONFIG_POR_DEFECTO.listas) {
+export function validarDestino(e, listas = CONFIG_POR_DEFECTO.listas, puntoCourier = CONFIG_POR_DEFECTO.operacion.punto_courier) {
   const errores = {};
   const tipo = e.tipo_destino || 'domicilio';
   if (!['domicilio', 'punto_courier'].includes(tipo)) errores.tipo_destino = 'Tipo de destino inválido';
-  if (tipo === 'punto_courier') {
+  if (tipo === 'punto_courier' && !puntoCourier) errores.tipo_destino = 'El envío a puntos de otras compañías está en pausa: elige entrega a domicilio';
+  else if (tipo === 'punto_courier') {
     if (!listas.couriers.includes(e.courier_empresa)) errores.courier_empresa = `Selecciona la empresa (${listas.couriers.slice(0, 2).join(', ')}, …)`;
     if (!String(e.courier_punto || '').trim()) errores.courier_punto = 'Indica el punto o sucursal';
   }
@@ -206,17 +239,23 @@ export function validarDestino(e, listas = CONFIG_POR_DEFECTO.listas) {
 
 // ---------- Tarifa ----------
 
+// Sobredimensionado: algún bulto pasa de 10 kg o de 40 cm por lado (sin superar el máximo que se recibe).
+export function esSobredimensionado({ peso_kg, largo_cm, ancho_cm, alto_cm }, tarifas = CONFIG_POR_DEFECTO.tarifas) {
+  return Number(peso_kg) > tarifas.peso_estandar_kg || [largo_cm, ancho_cm, alto_cm].some((d) => Number(d) > tarifas.dim_estandar_cm);
+}
+
 // Calcula la tarifa del envío. tarifaComuna: tarifa propia de la comuna o su zona (o null → base).
-export function calcularTarifa({ tipo_destino = 'domicilio', bultos = 1, horario_especial = false }, tarifas = CONFIG_POR_DEFECTO.tarifas, tarifaComuna = null) {
+// La cantidad de bultos no cambia el precio: estándar $3.500, sobredimensionado +$2.000, horario especial +$1.000.
+export function calcularTarifa(paquete, tarifas = CONFIG_POR_DEFECTO.tarifas, tarifaComuna = null) {
   const base = tarifaComuna ?? tarifas.base;
-  const extraPorBulto = tipo_destino === 'punto_courier' ? tarifas.bulto_adicional_punto : tarifas.bulto_adicional_domicilio;
-  const recargo_bultos = Math.max(0, Number(bultos) - 1) * extraPorBulto;
-  const recargo_horario = horario_especial ? tarifas.recargo_horario_especial : 0;
+  const recargo_sobredimension = esSobredimensionado(paquete, tarifas) ? tarifas.recargo_sobredimension : 0;
+  const recargo_horario = paquete.horario_especial ? tarifas.recargo_horario_especial : 0;
   return {
     tarifa_base: base,
-    recargo_bultos,
+    recargo_bultos: 0,
+    recargo_sobredimension,
     recargo_horario,
-    tarifa_total: base + recargo_bultos + recargo_horario,
+    tarifa_total: base + recargo_sobredimension + recargo_horario,
   };
 }
 

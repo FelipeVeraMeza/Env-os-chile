@@ -5,7 +5,7 @@
 --  CÓMO USARLO: Supabase → SQL Editor → New query → pegar TODO este archivo → Run.
 --  Se puede ejecutar más de una vez: si la base ya existe, no hace nada.
 --
---  Crea: 9 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
+--  Crea: 12 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
 --  dentro de Santiago), tarifas ($3.500 base, +$1.000 horario especial, 20 kg / 60 cm),
 --  reglas de operación (3 intentos, 5 min de espera) y el bucket privado de fotos y boletas.
 --  Los usuarios los crea la app en su primer arranque (ADMIN_EMAIL / ADMIN_PASSWORD en Railway).
@@ -594,6 +594,87 @@ END
 $migracion$;
 
 -- ---------------------------------------------------------------------------
+-- Migración 009_comprobante_transferencia.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '009_comprobante_transferencia.sql') THEN
+    -- Pago por transferencia con comprobante: el cliente sube la imagen de la transferencia, el pago queda
+    -- "en revisión" y administración lo aprueba o lo rechaza (con motivo). Si se rechaza, el cliente sube
+    -- un comprobante nuevo. El pago manda en todo: sin pago aprobado no hay ticket, ni asignación, ni retiro.
+    -- Pendiente a futuro: emitir la boleta electrónica en el SII al aprobar el pago (docs/14, D-13).
+
+    -- El envío muestra que su pago está en revisión mientras administración mira el comprobante.
+    ALTER TABLE envio DROP CONSTRAINT IF EXISTS envio_estado_pago_check;
+    ALTER TABLE envio ADD CONSTRAINT envio_estado_pago_check
+      CHECK (estado_pago IN ('pendiente', 'en_revision', 'pagado', 'reembolsado'));
+
+    -- El pago por transferencia pasa por "en_revision" antes de quedar aprobado o rechazado.
+    ALTER TABLE pago DROP CONSTRAINT IF EXISTS pago_estado_check;
+    ALTER TABLE pago ADD CONSTRAINT pago_estado_check
+      CHECK (estado IN ('iniciado', 'en_revision', 'aprobado', 'rechazado', 'anulado'));
+
+    -- La imagen del comprobante es un adjunto más del envío (bucket privado, enlace firmado).
+    ALTER TABLE adjunto DROP CONSTRAINT IF EXISTS adjunto_tipo_check;
+    ALTER TABLE adjunto ADD CONSTRAINT adjunto_tipo_check
+      CHECK (tipo IN ('foto_paquete', 'foto_entrega', 'boleta', 'comprobante_pago'));
+
+    ALTER TABLE pago
+      ADD COLUMN comprobante_adjunto_id INTEGER REFERENCES adjunto(id),
+      ADD COLUMN revisado_por           INTEGER REFERENCES usuario(id),
+      ADD COLUMN revisado_en            TIMESTAMPTZ,
+      ADD COLUMN motivo_rechazo         TEXT;
+
+    -- Un pago en revisión siempre tiene su comprobante, y un rechazo siempre dice por qué.
+    ALTER TABLE pago ADD CONSTRAINT pago_revision_con_comprobante
+      CHECK (estado <> 'en_revision' OR comprobante_adjunto_id IS NOT NULL);
+    ALTER TABLE pago ADD CONSTRAINT pago_rechazo_con_motivo
+      CHECK (comprobante_adjunto_id IS NULL OR estado <> 'rechazado' OR motivo_rechazo IS NOT NULL);
+    -- Un solo comprobante en revisión por envío a la vez.
+    CREATE UNIQUE INDEX pago_en_revision_unico ON pago (envio_id) WHERE estado = 'en_revision';
+    CREATE INDEX pago_en_revision_idx ON pago (creado_en) WHERE estado = 'en_revision';
+
+    -- Regla dura: un envío solo queda en manos de un repartidor si está pagado. NOT VALID para no
+    -- impedir el arranque si hubiera un registro antiguo asignado sin pago.
+    ALTER TABLE envio ADD CONSTRAINT envio_asignado_pagado
+      CHECK (estado NOT IN ('asignado', 'en_ruta', 'reagendado') OR estado_pago IN ('pagado', 'reembolsado')) NOT VALID;
+    INSERT INTO schema_migracion (nombre) VALUES ('009_comprobante_transferencia.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
+-- Migración 010_registro_clientes.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '010_registro_clientes.sql') THEN
+    -- Los clientes crean su cuenta desde la pantalla de ingreso ("Crear cuenta de cliente"), pedido del cliente 30-09-2026.
+    -- Se activa una sola vez; administración puede volver a cerrarlo en Tarifas y reglas.
+    UPDATE config SET valor = jsonb_set(valor, '{registro_clientes}', 'true'::jsonb) WHERE clave = 'operacion';
+    INSERT INTO schema_migracion (nombre) VALUES ('010_registro_clientes.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
+-- Migración 011_tarifa_sobredimension.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '011_tarifa_sobredimension.sql') THEN
+    -- Tarifas nuevas (pedido del cliente 30-09-2026): la cantidad de bultos no cambia el precio.
+    -- Estándar hasta 10 kg y 40×40×40 cm: $3.500 · sobredimensionado hasta 20 kg y 60×60×60 cm: +$2.000 · sobre eso no se recibe.
+    ALTER TABLE envio ADD COLUMN recargo_sobredimension INTEGER NOT NULL DEFAULT 0 CHECK (recargo_sobredimension >= 0);
+
+    -- Se quita el cobro por bulto adicional guardado en Ajustes (los valores nuevos se toman por defecto).
+    UPDATE config SET valor = valor - 'bulto_adicional_domicilio' - 'bulto_adicional_punto' WHERE clave = 'tarifas';
+    INSERT INTO schema_migracion (nombre) VALUES ('011_tarifa_sobredimension.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
 -- Zona "Santiago" y 346 comunas (solo si la tabla está vacía)
 -- ---------------------------------------------------------------------------
 INSERT INTO zona (nombre, tarifa, color, orden) VALUES ('Santiago', 3500, '#1d4ed8', 1)
@@ -961,11 +1042,12 @@ $comunas$;
 -- ---------------------------------------------------------------------------
 INSERT INTO config (clave, valor) VALUES
   ('negocio', '{"nombre":"Tu Empresa de Envíos","rut":"","telefono":"","correo":"","logo_url":""}'::jsonb),
-  ('tarifas', '{"base":3500,"bulto_adicional_domicilio":3500,"bulto_adicional_punto":0,"recargo_horario_especial":1000,"peso_max_kg":20,"dim_max_cm":60}'::jsonb),
-  ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":true,"registro_clientes":false,"qr_destino":"google","autoasignacion":true}'::jsonb),
+  ('tarifas', '{"base":3500,"peso_estandar_kg":10,"dim_estandar_cm":40,"recargo_sobredimension":2000,"peso_max_kg":20,"dim_max_cm":60,"recargo_horario_especial":1000}'::jsonb),
+  ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":true,"registro_clientes":true,"qr_destino":"google","autoasignacion":true,"punto_courier":false}'::jsonb),
   ('ticket', '{"pie":"Conserve este ticket. Consultas y reclamos indicando el folio."}'::jsonb),
   ('listas', '{"couriers":["Blue Express","Starken","Chilexpress","Correos de Chile","Otra"],"franjas":["08:00 – 10:00","10:00 – 13:00","13:00 – 16:00","16:00 – 19:00","19:00 – 21:00","21:00 – 23:00"]}'::jsonb),
-  ('pagos', '{"proveedor":"simulado"}'::jsonb)
+  ('pagos', '{"proveedor":"simulado"}'::jsonb),
+  ('transferencia', '{"banco":"","tipo_cuenta":"","numero_cuenta":"","titular":"","rut":"","correo":""}'::jsonb)
 ON CONFLICT (clave) DO NOTHING;
 
 -- ---------------------------------------------------------------------------

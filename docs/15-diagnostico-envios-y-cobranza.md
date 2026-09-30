@@ -63,6 +63,22 @@ Administración ve la cartola ──► CONCILIACIÓN: monto abonado + fecha ─
 El simulador de la demo ya pasa por estas mismas reglas, así que al conectar la pasarela real solo
 cambia **quién informa** (webhook o consulta a la API), no la lógica.
 
+### Pago por transferencia con comprobante (migración `009_comprobante_transferencia.sql`)
+
+```
+Cliente transfiere y sube la imagen ──► pago "en_revision" · envío "en_revision" (sin ticket, sin asignar, sin retiro)
+                                              │
+Administración (Cobranza → Revisar) ──► APRUEBA ──► pago "aprobado" (verificación manual) ──► envío "pagado" ──► ticket, asignación, retiro
+                                        RECHAZA con motivo ──► pago "rechazado" ──► envío "pendiente" ──► el cliente ve el motivo y sube otro
+```
+
+- La cuenta a la que se transfiere se configura en **Ajustes → Cuenta para transferencias** y se muestra al cliente al pagar.
+- Un envío tiene **un solo comprobante en revisión** a la vez (índice único), y mientras está en revisión no se puede pagar en línea, generar link de pago ni registrar pago manual (evita cobrar dos veces).
+- Al revisar, se avisa si el **mismo archivo** (hash) o el **mismo N° de operación** ya se usó en otro envío.
+- El repartidor nunca ve el comprobante. Aprobar y rechazar quedan en la bitácora del pago y en la auditoría.
+- **El pago manda**: la base de datos no deja un envío asignado, en ruta o reagendado sin pago (`envio_asignado_pagado`).
+- **Pendiente a futuro (D-13)**: emitir la boleta electrónica en el SII al aprobar el pago.
+
 ### Modelo de datos (migración `003_cobranza.sql`)
 
 | Tabla / columna | Para qué |

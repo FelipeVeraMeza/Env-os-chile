@@ -6,7 +6,7 @@ import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, ruta } from 
 import { leerConfig } from '../lib/configuracion.js';
 import {
   calcularTarifa, normalizarRut, normalizarTelefono, rolPuedeTransicionar, validarDestinatario, validarDestino,
-  validarDireccion, validarPaquete, validarTransicion, validarUbicacion, ESTADOS, LIMITES,
+  validarDireccion, validarPaquete, validarSubidaComprobante, validarTransicion, validarUbicacion, ESTADOS, LIMITES, MIME_COMPROBANTE,
 } from '../lib/reglas.js';
 import {
   cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
@@ -14,7 +14,7 @@ import {
 import { guardarArchivo, subida } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
-import { iniciarPago, registrarEventoPago } from '../lib/pagos.js';
+import { COMPROBANTE_EN_REVISION, iniciarPago, registrarComprobante, registrarEventoPago } from '../lib/pagos.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
 
@@ -44,16 +44,10 @@ function datosPaquete(b) {
 // Valida paquete + destino y calcula la tarifa. Usado por /cotizar y al crear.
 async function cotizar(body, usuario, conf) {
   const paquete = datosPaquete(body);
-  const errores = { ...validarDestino(paquete, conf.listas) };
-  const erroresPaquete = validarPaquete(paquete, conf.tarifas);
+  // Sobre 20 kg o 60×60×60 cm por bulto no se toma el despacho (ni con tarifa manual).
+  const errores = { ...validarDestino(paquete, conf.listas, conf.operacion.punto_courier), ...validarPaquete(paquete, conf.tarifas) };
   const tarifaManual = usuario.rol === 'admin' && body.tarifa_manual !== undefined && body.tarifa_manual !== '' && body.tarifa_manual !== null
     ? Number(body.tarifa_manual) : null;
-
-  // Fuera de 20 kg / 60×60×60 cm no aplica la tarifa estándar: solo el admin puede cotizarlo con tarifa manual.
-  for (const [campo, mensaje] of Object.entries(erroresPaquete)) {
-    if (tarifaManual !== null && /^(Excede|Máximo)/.test(mensaje)) continue;
-    errores[campo] = /^(Excede|Máximo)/.test(mensaje) ? `${mensaje}: requiere cotización especial` : mensaje;
-  }
 
   let comuna = null;
   const comunaId = body.direccion?.comuna_id || body.comuna_id;
@@ -66,7 +60,7 @@ async function cotizar(body, usuario, conf) {
   const tarifa = calcularTarifa(paquete, conf.tarifas, comuna?.tarifa ?? null);
   if (tarifaManual !== null) {
     if (!Number.isInteger(tarifaManual) || tarifaManual < 0 || tarifaManual > LIMITES.monto) errores.tarifa_manual = 'Tarifa manual inválida';
-    else Object.assign(tarifa, { tarifa_base: tarifaManual, recargo_bultos: 0, recargo_horario: 0, tarifa_total: tarifaManual });
+    else Object.assign(tarifa, { tarifa_base: tarifaManual, recargo_bultos: 0, recargo_sobredimension: 0, recargo_horario: 0, tarifa_total: tarifaManual });
   }
   return { paquete, tarifa, errores, comuna };
 }
@@ -140,13 +134,13 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
     const { rows: [e] } = await db.query(
       `INSERT INTO envio (token_qr, cliente_id, destinatario_id, direccion_id, comuna_id, tipo_destino, courier_empresa, courier_punto,
          courier_codigo, descripcion_producto, bultos, peso_kg, largo_cm, ancho_cm, alto_cm, valor_declarado, horario_especial,
-         franja_horaria, tarifa_base, recargo_bultos, recargo_horario, tarifa_total, observaciones, creado_por)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING id`,
+         franja_horaria, tarifa_base, recargo_bultos, recargo_horario, tarifa_total, observaciones, creado_por, recargo_sobredimension)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING id`,
       [crypto.randomBytes(18).toString('base64url'), clienteId, destinatarioId, direccionId, Number(comunaId), paquete.tipo_destino,
         paquete.courier_empresa, paquete.courier_punto, paquete.courier_codigo, paquete.descripcion_producto, paquete.bultos,
         paquete.peso_kg, paquete.largo_cm, paquete.ancho_cm, paquete.alto_cm, paquete.valor_declarado, paquete.horario_especial,
         paquete.horario_especial ? paquete.franja_horaria : null, tarifa.tarifa_base, tarifa.recargo_bultos, tarifa.recargo_horario,
-        tarifa.tarifa_total, paquete.observaciones, req.usuario.id],
+        tarifa.tarifa_total, paquete.observaciones, req.usuario.id, tarifa.recargo_sobredimension],
     );
     await registrarEstado(db, { envioId: e.id, anterior: null, nuevo: 'borrador', usuarioId: req.usuario.id });
     if (b.confirmar) await confirmar(db, e.id, req.usuario.id);
@@ -320,6 +314,12 @@ envios.post('/:id/asignar', requiereRol('admin'), ruta(async (req, res) => {
   const repartidorId = req.body.repartidor_id ? Number(req.body.repartidor_id) : null;
   if (!['creado', 'asignado', 'reagendado'].includes(envio.estado)) throw falla(409, `No se puede asignar un envío en estado "${ESTADOS[envio.estado]}"`);
   if (repartidorId) {
+    // El pago manda: un envío sin pago aprobado no se entrega a ningún repartidor.
+    if (envio.estado_pago !== 'pagado') {
+      throw falla(409, envio.estado_pago === 'en_revision'
+        ? 'El comprobante de pago está en revisión: apruébalo antes de asignar un repartidor'
+        : 'El envío aún no está pagado: se asigna cuando el pago esté aprobado');
+    }
     const rep = await uno("SELECT id FROM usuario WHERE id = $1 AND rol = 'repartidor' AND activo", [repartidorId]);
     if (!rep) throw falla(422, 'Repartidor no válido');
   }
@@ -441,6 +441,7 @@ envios.post('/:id/link-pago', requiereRol('admin', 'cliente'), ruta(async (req, 
   const envio = await envioAccesible(req);
   if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'Confirma el envío antes de generar el link de pago');
   if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
+  if (envio.estado_pago === 'en_revision') throw falla(409, COMPROBANTE_EN_REVISION);
   if (!(envio.tarifa_total > 0)) throw falla(409, 'Este envío no tiene monto a pagar');
   let link = await uno(
     `SELECT token, vence_en FROM link_pago WHERE envio_id = $1 AND revocado_en IS NULL AND pagado_en IS NULL AND vence_en > now() + interval '1 day'
@@ -460,12 +461,13 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
   const medio = req.body.medio;
   if (!['transferencia', 'efectivo', 'otro'].includes(medio)) throw falla(422, 'Medio de pago inválido');
   if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
+  if (envio.estado_pago === 'en_revision') throw falla(409, 'Hay un comprobante de transferencia en revisión: apruébalo o recházalo en Cobranza');
   if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'No se puede registrar pago en este estado');
   const referencia = String(req.body.referencia || '').trim() || null;
   await transaccion(async (db) => {
     // Se bloquea la fila del envío: si otra persona lo pagó o anuló recién, 409 y no se registra nada.
     const { rows: [vigente] } = await db.query(
-      "SELECT id FROM envio WHERE id = $1 AND estado_pago <> 'pagado' AND estado NOT IN ('borrador', 'anulado') FOR UPDATE", [envio.id]);
+      "SELECT id FROM envio WHERE id = $1 AND estado_pago = 'pendiente' AND estado NOT IN ('borrador', 'anulado') FOR UPDATE", [envio.id]);
     exigirSinConflicto({ rowCount: vigente ? 1 : 0 });
     // Administración declara que revisó el pago (cartola, efectivo recibido): queda verificado a su nombre.
     const { rows: [p] } = await db.query(
@@ -480,6 +482,21 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
   });
   await auditar(req, 'pago_manual', 'envio', envio.id, { medio, referencia: req.body.referencia });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
+}));
+
+// Pago por transferencia: el cliente sube la imagen (o PDF) del comprobante y el pago queda "en revisión"
+// hasta que administración lo apruebe o lo rechace (ver /api/cobranza/comprobantes).
+envios.post('/:id/comprobante', requiereRol('admin', 'cliente'), subida.single('archivo'), ruta(async (req, res) => {
+  const envio = await envioAccesible(req);
+  validarSubidaComprobante(envio);
+  if (!req.file) throw falla(422, 'Adjunta la imagen del comprobante de la transferencia', { archivo: 'Obligatorio' });
+  if (!MIME_COMPROBANTE.includes(req.file.mimetype)) throw falla(422, 'El comprobante debe ser una imagen (JPG, PNG, WebP) o un PDF', { archivo: 'Formato inválido' });
+  const referencia = String(req.body.referencia || '').trim().slice(0, 60) || null;
+  const buffer = req.file.mimetype === 'image/jpeg' ? quitarExif(req.file.buffer) : req.file.buffer;
+  const guardado = await guardarArchivo(buffer, req.file.mimetype);
+  const pago = await registrarComprobante(envio, { ...guardado, nombre: req.file.originalname, mime: req.file.mimetype }, { referencia, usuarioId: req.usuario.id });
+  await auditar(req, 'comprobante_pago', 'envio', envio.id, { pago_id: pago.id, referencia });
+  res.status(201).json(pago);
 }));
 
 // Reembolso del pago de un envío anulado o devuelto (RF-57). La política (total o parcial) la define el cliente (C-7).
@@ -511,6 +528,12 @@ envios.get('/:id/qr.png', ruta(async (req, res) => {
 envios.get('/:id/ticket.pdf', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
   if (!envio.folio) throw falla(409, 'Confirma el envío para emitir el ticket');
+  // El pago manda: el cliente recibe su ticket cuando el pago está aprobado (administración lo ve siempre).
+  if (req.usuario.rol === 'cliente' && !['pagado', 'reembolsado'].includes(envio.estado_pago)) {
+    throw falla(409, envio.estado_pago === 'en_revision'
+      ? 'Tu comprobante está en revisión: el ticket se entrega cuando administración apruebe el pago'
+      : 'El ticket se entrega cuando el pago esté aprobado');
+  }
   const pdf = await generarTicketPdf(envio, await leerConfig(), req.query.formato === 'a4' ? 'a4' : '80mm');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="ticket-${envio.folio}.pdf"`);

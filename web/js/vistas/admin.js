@@ -1,7 +1,8 @@
 import { app } from '../app.js';
 import { get, patch, post, put } from '../api.js';
-import { $, $$, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
+import { $, $$, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 import { limpiarCacheComunas } from './comun.js';
+import { revisarComprobante } from './envios.js';
 
 // ================= Panel de ganancias =================
 export async function panel(rango = {}) {
@@ -10,10 +11,11 @@ export async function panel(rango = {}) {
   const desde = rango.desde || `${hoy.slice(0, 8)}01`;
   const hasta = rango.hasta || hoy;
   montar(vista, esqueleto(4));
-  const [g, pendientes, reclamosAbiertos] = await Promise.all([
+  const [g, pendientes, reclamosAbiertos, comprobantes] = await Promise.all([
     get(`/api/reportes/ganancias?desde=${desde}&hasta=${hasta}`),
     get('/api/envios?estado=creado&repartidor_id=sin&limite=5'),
     get('/api/reclamos?estado=solicitado'),
+    get('/api/cobranza/comprobantes').catch(() => []),
   ]);
   const estados = Object.fromEntries(g.por_estado.map((r) => [r.estado, r.n]));
 
@@ -24,6 +26,7 @@ export async function panel(rango = {}) {
         <label class="campo">Hasta<input type="date" name="hasta" value="${hasta}" max="${hoy}"></label>
         <div class="fila" style="align-self:flex-end"><button type="button" class="btn sec chico" data-r="hoy">Hoy</button><button type="button" class="btn sec chico" data-r="mes">Mes</button></div>
       </form></div>
+    ${comprobantes.length ? html`<a class="aviso magenta" href="#/cobranza" style="display:block;margin-bottom:16px;color:inherit;text-decoration:none"><b>${comprobantes.length} comprobante(s) de transferencia por revisar.</b> Esos envíos no se pueden asignar ni retirar hasta que apruebes el pago → Ir a Cobranza</a>` : ''}
     <div class="grid g4">
       <div class="kpi destacado"><div class="etiqueta">Ganancia neta</div><div class="valor">${clp(g.neto)}</div><div class="nota">${fecha(g.desde)} – ${fecha(g.hasta)}</div></div>
       <div class="kpi"><div class="etiqueta">Ingresos (entregados)</div><div class="valor">${clp(g.ingreso)}</div><div class="nota">${g.entregados} envíos · prom. ${clp(g.promedio_por_envio)}</div></div>
@@ -38,7 +41,7 @@ export async function panel(rango = {}) {
     </div>
     <div class="grid g3" style="margin-top:16px;align-items:start">
       <div class="card" style="margin:0"><div class="card-titulo"><h2>Sin asignar</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
-        ${pendientes.items.length ? html`<div class="pila">${pendientes.items.map((e) => html`<a href="#/envio/${e.id}" class="fila entre" style="color:inherit;text-decoration:none"><span class="mono"><b>${e.folio}</b></span><span class="sub">${e.comuna_nombre}</span>${e.estado_pago === 'pagado' ? html`<span class="badge e-pagado">Pagado</span>` : html`<span class="badge e-pendiente">Por pagar</span>`}</a>`)}</div>` : html`<p class="sub">Todo asignado ✔</p>`}</div>
+        ${pendientes.items.length ? html`<div class="pila">${pendientes.items.map((e) => html`<a href="#/envio/${e.id}" class="fila entre" style="color:inherit;text-decoration:none"><span class="mono"><b>${e.folio}</b></span><span class="sub">${e.comuna_nombre}</span>${badgePago(e.estado_pago)}</a>`)}</div>` : html`<p class="sub">Todo asignado ✔</p>`}</div>
       <div class="card" style="margin:0"><h2>Repartidores</h2>
         ${g.por_repartidor.length ? html`<div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table><thead><tr><th>Repartidor</th><th class="num">Entregas</th><th class="num">Fallidos</th></tr></thead>
           <tbody>${g.por_repartidor.map((r) => html`<tr><td>${r.repartidor}</td><td class="num">${r.entregados}</td><td class="num">${r.intentos_fallidos}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Sin actividad en el período.</p>`}</div>
@@ -115,13 +118,15 @@ export async function tarifas() {
       <form class="card" id="f-tarifas" style="margin:0">
         <h2>Tarifas</h2>
         <div class="grid g2">
-          <label class="campo">Tarifa base Santiago<input type="number" name="base" value="${t.base}"></label>
+          <label class="campo">Tarifa paquete estándar<input type="number" name="base" value="${t.base}"><small>Santiago, sin importar la cantidad de bultos</small></label>
+          <label class="campo">Recargo sobredimensionado<input type="number" name="recargo_sobredimension" value="${t.recargo_sobredimension}"><small>Se suma a la tarifa estándar</small></label>
+          <label class="campo">Estándar: peso hasta (kg)<input type="number" step="0.1" name="peso_estandar_kg" value="${t.peso_estandar_kg}"></label>
+          <label class="campo">Estándar: lado hasta (cm)<input type="number" name="dim_estandar_cm" value="${t.dim_estandar_cm}"></label>
+          <label class="campo">Máximo que se recibe (kg)<input type="number" step="0.1" name="peso_max_kg" value="${t.peso_max_kg}"><small>Sobre esto no se toma el despacho</small></label>
+          <label class="campo">Lado máximo que se recibe (cm)<input type="number" name="dim_max_cm" value="${t.dim_max_cm}"></label>
           <label class="campo">Recargo horario especial<input type="number" name="recargo_horario_especial" value="${t.recargo_horario_especial}"></label>
-          <label class="campo">Bulto adicional a domicilio<input type="number" name="bulto_adicional_domicilio" value="${t.bulto_adicional_domicilio}"></label>
-          <label class="campo">Bulto adicional a punto courier<input type="number" name="bulto_adicional_punto" value="${t.bulto_adicional_punto}"><small>0 = sin límite de paquetes</small></label>
-          <label class="campo">Peso máximo por bulto (kg)<input type="number" name="peso_max_kg" value="${t.peso_max_kg}"></label>
-          <label class="campo">Lado máximo (cm)<input type="number" name="dim_max_cm" value="${t.dim_max_cm}"></label>
         </div>
+        <p class="muted" style="margin-top:10px">Hoy: estándar ${clp(t.base)} · sobredimensionado ${clp(t.base + t.recargo_sobredimension)} · sobre ${t.peso_max_kg} kg o ${t.dim_max_cm} cm no se recibe.</p>
         <button class="btn" style="margin-top:14px">Guardar tarifas</button>
       </form>
       <form class="card" id="f-operacion" style="margin:0">
@@ -135,6 +140,8 @@ export async function tarifas() {
         <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="autoasignacion" ${op.autoasignacion ? html`checked` : ''}> Los repartidores pueden tomar envíos pagados sin asignar</label>
         <p class="muted">Si lo desactivas, el repartidor solo ve lo que administración le asigna.</p>
         <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="registro_clientes" ${op.registro_clientes ? html`checked` : ''}> Los clientes pueden crear su cuenta solos</label>
+        <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="punto_courier" ${op.punto_courier ? html`checked` : ''}> Envío a puntos de otras compañías (Blue Express, Starken…)</label>
+        <p class="muted">Desactivado = en pausa: los clientes solo pueden elegir entrega a domicilio.</p>
         <p class="muted">La foto de entrega es siempre obligatoria.</p>
         <button class="btn" style="margin-top:6px">Guardar reglas</button>
       </form>
@@ -289,6 +296,7 @@ const ACCIONES = {
   crear: 'Creó', editar: 'Editó', confirmar: 'Confirmó', asignar: 'Asignó repartidor', cambiar_estado: 'Cambió estado', entregar: 'Entregó',
   llegada: 'Marcó llegada', adjuntar: 'Adjuntó archivo', iniciar_pago: 'Inició pago', pago_manual: 'Registró pago manual',
   revisar: 'Revisó reclamo', pagar: 'Pagó reclamo', pago_aprobado: 'Pago aprobado', pago_rechazado: 'Pago rechazado', login: 'Inició sesión', qr_escaneado: 'QR escaneado',
+  comprobante_pago: 'Subió comprobante de transferencia', aprobar_comprobante: 'Aprobó comprobante', rechazar_comprobante: 'Rechazó comprobante',
 };
 export async function ajustes() {
   const vista = $('#vista');
@@ -316,6 +324,17 @@ export async function ajustes() {
             <label class="campo">Franjas del horario especial<textarea name="franjas" rows="6">${app.conf.franjas.join('\n')}</textarea></label>
           </div>
           <button class="btn" style="margin-top:12px">Guardar opciones</button></form>
+        <form class="card" id="f-transferencia" style="margin:0 0 16px"><h2>Cuenta para transferencias</h2>
+          <p class="sub">Se muestra al cliente cuando paga por transferencia y sube el comprobante.</p>
+          <div class="grid g2">
+            <label class="campo">Banco<input name="banco" maxlength="80" value="${app.conf.transferencia?.banco || ''}"></label>
+            <label class="campo">Tipo de cuenta<input name="tipo_cuenta" maxlength="80" value="${app.conf.transferencia?.tipo_cuenta || ''}" placeholder="Cuenta corriente, vista…"></label>
+            <label class="campo">N° de cuenta<input name="numero_cuenta" maxlength="80" value="${app.conf.transferencia?.numero_cuenta || ''}"></label>
+            <label class="campo">Titular<input name="titular" maxlength="80" value="${app.conf.transferencia?.titular || ''}"></label>
+            <label class="campo">RUT del titular<input name="rut" maxlength="80" value="${app.conf.transferencia?.rut || ''}"></label>
+            <label class="campo">Correo<input name="correo" maxlength="80" value="${app.conf.transferencia?.correo || ''}"></label>
+          </div>
+          <button class="btn" style="margin-top:12px">Guardar cuenta</button></form>
         <div class="card" style="margin:0"><div class="card-titulo"><h2>Costos del mes</h2><button class="btn sec chico" id="nuevo-costo">+ Registrar costo</button></div>
           ${costos.length ? html`<div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Nota</th><th class="num">Monto</th></tr></thead>
             <tbody>${costos.map((c) => html`<tr><td>${fecha(c.fecha)}</td><td>${c.tipo}</td><td class="sub">${c.nota || ''}</td><td class="num">${clp(c.monto)}</td></tr>`)}</tbody></table></div>` : html`<p class="sub">Sin costos registrados este mes.</p>`}
@@ -338,6 +357,7 @@ export async function ajustes() {
   };
   $('#f-negocio').onsubmit = guardar('negocio');
   $('#f-ticket').onsubmit = guardar('ticket');
+  $('#f-transferencia').onsubmit = guardar('transferencia');
   $('#f-listas').onsubmit = async (e) => {
     e.preventDefault();
     try {
@@ -371,10 +391,11 @@ export async function cobranza(rango = {}) {
   const desde = rango.desde || `${hoy.slice(0, 8)}01`;
   const hasta = rango.hasta || hoy;
   montar(vista, esqueleto(4));
-  const [r, pagos, est] = await Promise.all([
+  const [r, pagos, est, comprobantes] = await Promise.all([
     get(`/api/cobranza/resumen?desde=${desde}&hasta=${hasta}`),
     get('/api/cobranza/pagos'),
     get(`/api/cobranza/estimar${rango.envios_mes ? `?envios_mes=${rango.envios_mes}` : ''}`),
+    get('/api/cobranza/comprobantes'),
   ]);
   const pendienteAbono = (p) => p.estado === 'aprobado' && !p.abonado_en && !['manual', 'simulado'].includes(p.proveedor);
   montar(vista, html`
@@ -389,6 +410,16 @@ export async function cobranza(rango = {}) {
       <div class="kpi"><div class="etiqueta">Por cobrar</div><div class="valor">${clp(r.por_cobrar.monto)}</div><div class="nota">${r.por_cobrar.envios} envíos sin pagar${r.por_cobrar.envios ? ` · el más antiguo hace ${r.por_cobrar.dias_mas_antiguo} día(s)` : ''}</div></div>
       <div class="kpi"><div class="etiqueta">Abonos por llegar</div><div class="valor">${clp(r.por_conciliar.monto_esperado)}</div><div class="nota">${r.por_conciliar.pagos} pagos${r.por_conciliar.atrasados ? ` · ${r.por_conciliar.atrasados} atrasado(s)` : ''}</div></div>
     </div>
+    <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Comprobantes de transferencia por revisar</h2><span class="sub">${comprobantes.length ? `${comprobantes.length} · ${clp(r.en_revision.monto)}` : ''}</span></div>
+      ${comprobantes.length ? html`<p class="sub" style="margin-bottom:10px">El envío no se asigna ni se retira hasta que apruebes su pago. Compara cada comprobante con la cartola del banco.</p>
+        <div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table class="tabla-cards"><thead><tr><th>Enviado</th><th>Folio</th><th>Cliente</th><th class="num">Monto</th><th>N° operación</th><th>Acción</th></tr></thead>
+        <tbody>${comprobantes.map((c) => html`<tr>
+          <td data-label="Enviado">${fechaHora(c.creado_en)}</td><td data-label="Folio" class="mono"><a href="#/envio/${c.envio_id}">${c.folio}</a></td>
+          <td data-label="Cliente">${c.cliente_nombre}</td><td data-label="Monto" class="num">${clp(c.monto)}</td>
+          <td data-label="N° operación">${c.referencia || html`<span class="muted">—</span>`}${c.usado_en.length ? html`<div><span class="badge e-fallido">Ya usado en ${c.usado_en.join(', ')}</span></div>` : ''}</td>
+          <td data-label="Acción"><button class="btn chico" data-revisar-comprobante="${c.id}">Revisar</button></td>
+        </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay comprobantes pendientes ✔</p>`}
+    </div>
     ${r.sin_respuesta ? html`<div class="aviso alerta" style="margin-top:16px">${r.sin_respuesta} pago(s) iniciados hace más de 30 minutos sin respuesta de la pasarela: el cliente abandonó el pago o el aviso no llegó.</div>` : ''}
     ${r.proveedor_actual === 'simulado' ? html`<div class="aviso magenta" style="margin-top:16px">Los pagos en línea están en <b>modo simulado</b>: no se mueve dinero real. Elige un proveedor con el comparador de abajo para conectarlo en la etapa de desarrollo.</div>` : ''}
     <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Pagos</h2><span class="sub">Últimos 200</span></div>
@@ -396,7 +427,7 @@ export async function cobranza(rango = {}) {
         <tbody>${pagos.map((p) => html`<tr>
           <td>${fecha(p.creado_en)}</td><td class="mono"><a href="#/envio/${p.envio_id}">${p.folio || '—'}</a></td><td>${p.cliente_nombre}</td>
           <td>${p.proveedor === 'manual' ? p.medio : p.proveedor}</td>
-          <td><span class="badge ${p.estado === 'aprobado' ? 'e-pagado' : p.estado === 'iniciado' ? 'e-pendiente' : 'e-anulado'}">${p.estado}</span></td>
+          <td><span class="badge ${p.estado === 'aprobado' ? 'e-pagado' : p.estado === 'iniciado' ? 'e-pendiente' : p.estado === 'en_revision' ? 'e-en_revision' : 'e-anulado'}">${p.estado === 'en_revision' ? 'en revisión' : p.estado}</span></td>
           <td class="sub">${p.verificacion ? html`${VERIFICACION[p.verificacion]}${p.verificado_por_nombre ? ` · ${p.verificado_por_nombre}` : ''}<div class="muted">${p.transaccion_id || p.referencia || ''}</div>` : '—'}</td>
           <td class="num">${clp(p.monto)}</td><td class="num">${clp(p.comision_real ?? p.comision_estimada)}${p.comision_real === null && p.comision_estimada ? html`<div class="muted">estimada</div>` : ''}</td>
           <td>${p.abonado_en ? html`<span class="sub">${fecha(p.abonado_en)} · ${clp(p.monto_abonado)}</span>` : pendienteAbono(p) ? html`<button class="btn sec chico" data-conciliar="${p.id}">Conciliar</button><div class="muted">esperado ${fecha(p.abono_estimado_en)}</div>` : html`<span class="muted">—</span>`}</td>
@@ -413,6 +444,9 @@ export async function cobranza(rango = {}) {
   $('#rango-c').addEventListener('change', (e) => cobranza(datosForm(e.currentTarget)));
   $('#f-est').addEventListener('change', (e) => cobranza({ desde, hasta, envios_mes: e.target.value }));
   $('#f-est').onsubmit = (e) => { e.preventDefault(); cobranza({ desde, hasta, envios_mes: e.target.envios_mes.value }); };
+  $$('[data-revisar-comprobante]').forEach((b) => {
+    b.onclick = () => revisarComprobante(comprobantes.find((c) => String(c.id) === b.dataset.revisarComprobante), () => cobranza({ desde, hasta }));
+  });
   $$('[data-conciliar]').forEach((b) => {
     const p = pagos.find((x) => String(x.id) === b.dataset.conciliar);
     b.onclick = () => {

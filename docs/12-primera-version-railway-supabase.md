@@ -65,7 +65,7 @@ Debe terminar en **"✔ Todo listo para desplegar"**. Si algo falla, el mensaje 
    | `DATABASE_URL` | URI del Session pooler (Paso 1) |
    | `SUPABASE_URL` / `SUPABASE_SECRET_KEY` | Paso 1 |
    | `JWT_SECRET` | Resultado de `npm run secreto` (64 caracteres) |
-   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Tu correo y una clave segura |
+   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Tu correo y una clave segura, **solo para el primer arranque** (crean el administrador en la base; después bórralas) |
    | `DEMO_CLAVE` | **Opcional.** Déjala sin definir: la demo queda abierta (decisión del 26-09-2026). Si la defines, la página pide esa clave |
    | `AUTH_MODE` | `demo` (primera versión, sin inicio de sesión) |
 

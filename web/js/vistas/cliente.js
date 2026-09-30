@@ -4,7 +4,7 @@ import {
   $, $$, abrirBlob, badgePago, clp, comprimirFoto, datosForm, errorToast, esqueleto, html, icono, marcarErrores, modal, montar, toast, vacio,
 } from '../ui.js';
 import { comunasCobertura, direccionTexto, itemEnvio, opcionesComunas } from './comun.js';
-import { pagar } from './envios.js';
+import { pagar, subirComprobante } from './envios.js';
 
 // ================= Inicio del cliente =================
 export async function inicio() {
@@ -13,12 +13,13 @@ export async function inicio() {
   const { items, total } = await get('/api/envios?limite=100');
   const enCurso = items.filter((e) => ['creado', 'asignado', 'en_ruta', 'fallido', 'reagendado'].includes(e.estado));
   const porPagar = items.filter((e) => e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado));
+  const enRevision = items.filter((e) => e.estado_pago === 'en_revision' && e.estado !== 'anulado');
   const entregados = items.filter((e) => e.estado === 'entregado');
   const nombre = app.usuario.nombre.split(' ')[0];
   montar(vista, html`
     <section class="hero">
       <h1>Hola, ${nombre} 👋</h1>
-      <p>Crea tu envío en menos de un minuto. Dentro de Santiago desde <b>${clp(app.conf.tarifas.base)}</b> hasta ${app.conf.tarifas.peso_max_kg} kg y ${app.conf.tarifas.dim_max_cm}×${app.conf.tarifas.dim_max_cm}×${app.conf.tarifas.dim_max_cm} cm. También llevamos tus paquetes a puntos Blue Express, Starken y otros, sin límite de bultos.</p>
+      <p>Crea tu envío en menos de un minuto. Dentro de Santiago <b>${clp(app.conf.tarifas.base)}</b> hasta ${app.conf.tarifas.peso_estandar_kg} kg y ${app.conf.tarifas.dim_estandar_cm}×${app.conf.tarifas.dim_estandar_cm}×${app.conf.tarifas.dim_estandar_cm} cm, sin importar la cantidad de bultos.${app.conf.operacion.punto_courier ? ' También llevamos tus paquetes a puntos Blue Express, Starken y otros.' : ''}</p>
       <div class="fila" style="margin-top:16px">
         <a class="btn blanco grande" href="#/nuevo">${icono('nuevo')} Nuevo envío</a>
         <a class="btn sec grande" href="#/seguimiento">Seguir un folio</a>
@@ -31,6 +32,7 @@ export async function inicio() {
       <div class="kpi destacado"><div class="etiqueta">Total</div><div class="valor">${total}</div><div class="nota">envíos registrados</div></div>
     </div>
     ${porPagar.length ? html`<div class="aviso magenta" style="margin-bottom:16px"><b>Tienes ${porPagar.length} envío(s) pendientes de pago.</b> El repartidor solo puede retirar envíos pagados.</div>` : ''}
+    ${enRevision.length ? html`<div class="aviso" style="margin-bottom:16px"><b>${enRevision.length} comprobante(s) de transferencia en revisión.</b> Te entregamos el ticket cuando administración apruebe el pago.</div>` : ''}
     <div class="card">
       <div class="card-titulo"><h2>Envíos recientes</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
       <div class="lista-envios">${items.length ? items.slice(0, 6).map((e) => itemEnvio(e)) : vacio('Aún no tienes envíos.', html`<a class="btn" href="#/nuevo">Crear mi primer envío</a>`)}</div>
@@ -90,13 +92,15 @@ export async function nuevo() {
   function pasoDestino() {
     const dirs = w.modoDest === 'libreta' && w.destinatario ? w.destinatario.direcciones : [];
     const nueva = !dirs.length || w.direccionId === 'nueva';
+    // Envío a puntos de otras compañías: en pausa mientras administración no lo active.
+    if (!app.conf.operacion.punto_courier) w.tipo_destino = 'domicilio';
     return html`
-      <div class="segmentos" style="margin-bottom:16px">
+      ${app.conf.operacion.punto_courier ? html`<div class="segmentos" style="margin-bottom:16px">
         <button type="button" data-tipo="domicilio" class="${w.tipo_destino === 'domicilio' ? 'activo' : ''}">A domicilio</button>
         <button type="button" data-tipo="punto_courier" class="${w.tipo_destino === 'punto_courier' ? 'activo' : ''}">Punto Blue / Starken / otro</button>
-      </div>
+      </div>` : ''}
       ${w.tipo_destino === 'punto_courier' ? html`
-        <div class="aviso" style="margin-bottom:14px">Llevamos tus paquetes al punto de la empresa que elijas, <b>sin límite de bultos</b>, por ${clp(app.conf.tarifas.base)}.</div>
+        <div class="aviso" style="margin-bottom:14px">Llevamos tus paquetes al punto de la empresa que elijas, <b>sin importar la cantidad de bultos</b>, desde ${clp(app.conf.tarifas.base)}.</div>
         <div class="grid g3" style="margin-bottom:16px">
           <label class="campo">Empresa *<select name="courier_empresa">${app.conf.couriers.map((c) => html`<option ${w.courier.courier_empresa === c ? html`selected` : ''}>${c}</option>`)}</select></label>
           <label class="campo">Punto / sucursal *<input name="courier_punto" value="${w.courier.courier_punto || ''}" placeholder="Ej. Sucursal Providencia"></label>
@@ -126,7 +130,7 @@ export async function nuevo() {
       <div class="grid g2">
         <label class="campo" style="grid-column:1/-1">Descripción del producto *<input name="descripcion_producto" value="${p.descripcion_producto || ''}" placeholder="Ej. Zapatillas talla 42"></label>
         <label class="campo">Bultos *<input name="bultos" type="number" step="1" inputmode="numeric" min="1" max="100" value="${p.bultos || 1}">
-          <small>${w.tipo_destino === 'punto_courier' ? 'Punto courier: sin límite de paquetes' : `Cada bulto adicional a domicilio: ${clp(t.bulto_adicional_domicilio)}`}</small></label>
+          <small>La cantidad de bultos no cambia el precio</small></label>
         <label class="campo">Peso por bulto (kg) *<input name="peso_kg" type="number" inputmode="decimal" step="0.1" min="0" max="${t.peso_max_kg}" value="${p.peso_kg || ''}"><small>Máximo ${t.peso_max_kg} kg</small></label>
       </div>
       <div class="grid g3" style="margin-top:14px">
@@ -134,7 +138,8 @@ export async function nuevo() {
         <label class="campo">Ancho (cm) *<input name="ancho_cm" type="number" step="1" inputmode="numeric" min="1" max="${t.dim_max_cm}" value="${p.ancho_cm || ''}"></label>
         <label class="campo">Alto (cm) *<input name="alto_cm" type="number" step="1" inputmode="numeric" min="1" max="${t.dim_max_cm}" value="${p.alto_cm || ''}"></label>
       </div>
-      <p class="muted" style="margin:6px 0 16px">Tarifa estándar hasta ${t.peso_max_kg} kg y ${t.dim_max_cm}×${t.dim_max_cm}×${t.dim_max_cm} cm por bulto.</p>
+      <p class="muted" style="margin:6px 0 16px">Estándar hasta ${t.peso_estandar_kg} kg y ${t.dim_estandar_cm}×${t.dim_estandar_cm}×${t.dim_estandar_cm} cm por bulto: ${clp(t.base)}.
+        Sobredimensionado hasta ${t.peso_max_kg} kg y ${t.dim_max_cm}×${t.dim_max_cm}×${t.dim_max_cm} cm: +${clp(t.recargo_sobredimension)}. Sobre eso no se recibe el paquete.</p>
       <div class="card" style="box-shadow:none;background:rgba(224,33,138,.08);border-color:rgba(224,33,138,.35)">
         <h3>Seguro del envío</h3>
         <div class="grid g2">
@@ -173,10 +178,11 @@ export async function nuevo() {
         <div class="desglose">
           <div><span>Tarifa base</span><span>${clp(c.tarifa_base)}</span></div>
           ${c.recargo_bultos ? html`<div><span>Bultos adicionales</span><span>${clp(c.recargo_bultos)}</span></div>` : ''}
+          ${c.recargo_sobredimension ? html`<div><span>Sobredimensionado</span><span>${clp(c.recargo_sobredimension)}</span></div>` : ''}
           ${c.recargo_horario ? html`<div><span>Horario especial</span><span>${clp(c.recargo_horario)}</span></div>` : ''}
           <div class="total"><span>Total</span><span>${clp(c.tarifa_total)}</span></div>
         </div>
-        <p class="muted" style="margin-top:10px">El pago se realiza en línea antes del retiro.</p>
+        <p class="muted" style="margin-top:10px">El pago (en línea o por transferencia) se realiza antes del retiro.</p>
       </div></div>`;
   }
 
@@ -335,17 +341,19 @@ export async function nuevo() {
           <p class="sub" style="margin-top:10px">Al escanearlo se abre la ruta en Google Maps o Waze.</p></div>
         <div class="card pila">
           <div class="fila entre"><h2 style="margin:0">Total ${clp(envio.tarifa_total)}</h2>${badgePago(envio.estado_pago)}</div>
-          <div class="aviso magenta">Paga ahora para que el repartidor pueda retirar tu envío.</div>
+          <div class="aviso magenta">Paga ahora: con el pago aprobado recibes el ticket y el repartidor puede retirar tu envío.</div>
           <button class="btn grande ancho" id="pagar">Pagar ${clp(envio.tarifa_total)}</button>
-          <div class="grid g2"><button class="btn sec" id="t80">Ticket 80 mm</button><button class="btn sec" id="ta4">Ticket A4</button></div>
+          <button class="btn sec ancho" id="transferir">Pagar con transferencia (subir comprobante)</button>
+          ${esAdmin ? html`<div class="grid g2"><button class="btn sec" id="t80">Ticket 80 mm</button><button class="btn sec" id="ta4">Ticket A4</button></div>` : ''}
           <a class="btn sec" href="${wa}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
           <div class="fila"><a class="btn azul" href="#/envio/${envio.id}">Ver detalle</a><a class="btn sec" href="#/nuevo" id="otro">Crear otro envío</a></div>
         </div>
       </div>`);
     api(`/api/envios/${envio.id}/qr.png`, { blob: true }).then((b) => { $('#qr').src = URL.createObjectURL(b); }).catch(() => {});
     $('#pagar').onclick = () => pagar(envio, () => ir(`#/envio/${envio.id}`));
-    $('#t80').onclick = () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { blob: true })).catch(errorToast);
-    $('#ta4').onclick = () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=a4`, { blob: true })).catch(errorToast);
+    $('#transferir').onclick = () => subirComprobante(envio, () => ir(`#/envio/${envio.id}`));
+    $('#t80')?.addEventListener('click', () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { blob: true })).catch(errorToast));
+    $('#ta4')?.addEventListener('click', () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=a4`, { blob: true })).catch(errorToast));
     $('#otro').onclick = (e) => { e.preventDefault(); nuevo(); };
   }
 

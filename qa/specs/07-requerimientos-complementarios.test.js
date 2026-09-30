@@ -106,7 +106,7 @@ test('CP-75 · Instalable como app: manifiesto y service worker (RF-38)', async 
 test('CP-76 · Ticket con QR en menos de 3 s y QR generado en el servidor (RNF-04, RNF-11)', async () => {
   const c = await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id), confirmar: true } });
   const t0 = performance.now();
-  const r = await peticion('GET', `/api/envios/${c.datos.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente, crudo: true });
+  const r = await peticion('GET', `/api/envios/${c.datos.id}/ticket.pdf?formato=80mm`, { sesion: esc.admin, crudo: true });
   await r.arrayBuffer();
   const ms = performance.now() - t0;
   assert.equal(r.status, 200);

@@ -27,7 +27,8 @@ export const ESTADOS = {
   fallido: 'Fallido', reagendado: 'Reagendado', devuelto: 'Devuelto', anulado: 'Anulado',
 };
 export const badge = (estado, texto) => html`<span class="badge e-${estado}">${texto || ESTADOS[estado] || estado}</span>`;
-export const badgePago = (e) => badge(e === 'pagado' ? 'pagado' : 'pendiente', e === 'pagado' ? 'Pagado' : e === 'reembolsado' ? 'Reembolsado' : 'Pago pendiente');
+export const PAGO_TXT = { pendiente: 'Pago pendiente', en_revision: 'Pago en revisión', pagado: 'Pagado', reembolsado: 'Reembolsado' };
+export const badgePago = (e) => badge(e === 'pagado' ? 'pagado' : e === 'en_revision' ? 'en_revision' : 'pendiente', PAGO_TXT[e] || PAGO_TXT.pendiente);
 
 export function toast(mensaje, tipo = '') {
   const t = document.createElement('div');

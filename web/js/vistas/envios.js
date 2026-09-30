@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
-  $, $$, abrirBlob, badge, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio, ESTADOS,
+  $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, itemEnvio } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
@@ -72,7 +72,10 @@ export async function detalle(id) {
   const e = await get(`/api/envios/${id}`);
   const esAdmin = app.usuario.rol === 'admin';
   const nivel = nivelProgreso(e);
-  const fotos = e.adjuntos.filter((a) => a.tipo !== 'boleta');
+  const fotos = e.adjuntos.filter((a) => ['foto_paquete', 'foto_entrega'].includes(a.tipo));
+  // El pago manda: el cliente recibe el ticket cuando su pago está aprobado.
+  const conTicket = e.folio && (esAdmin || ['pagado', 'reembolsado'].includes(e.estado_pago));
+  const porPagar = e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado);
   const boletas = e.adjuntos.filter((a) => a.tipo === 'boleta');
   const reclamoActivo = e.reclamos.find((r) => r.estado !== 'rechazado');
   const puedeReclamar = e.valor_declarado > 0 && !['borrador', 'anulado'].includes(e.estado) && !reclamoActivo;
@@ -85,8 +88,8 @@ export async function detalle(id) {
         <div class="fila">${badge(e.estado)} ${badgePago(e.estado_pago)} ${e.horario_especial ? html`<span class="badge e-en_ruta">Horario ${e.franja_horaria}</span>` : ''}
           <span class="sub">Intentos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
       <div class="fila">
-        ${e.folio ? html`<button class="btn sec" data-ticket="80mm">Ticket 80 mm</button><button class="btn sec" data-ticket="a4">Ticket A4</button>` : ''}
-        ${e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado) ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
+        ${conTicket ? html`<button class="btn sec" data-ticket="80mm">Ticket 80 mm</button><button class="btn sec" data-ticket="a4">Ticket A4</button>` : ''}
+        ${porPagar ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn sec" id="transferir">Pagar con transferencia</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
       </div>
     </div>
     ${!['anulado', 'devuelto'].includes(e.estado) ? html`<div class="progreso-envio">${PROGRESO.map(([, t], i) => html`<div class="${i < nivel ? 'on' : ''}">${t}</div>`)}</div>` : ''}
@@ -108,10 +111,12 @@ export async function detalle(id) {
           <div class="desglose">
             <div><span>Tarifa base</span><span>${clp(e.tarifa_base)}</span></div>
             ${e.recargo_bultos ? html`<div><span>Bultos adicionales</span><span>${clp(e.recargo_bultos)}</span></div>` : ''}
+            ${e.recargo_sobredimension ? html`<div><span>Sobredimensionado</span><span>${clp(e.recargo_sobredimension)}</span></div>` : ''}
             ${e.recargo_horario ? html`<div><span>Horario especial</span><span>${clp(e.recargo_horario)}</span></div>` : ''}
             <div class="total"><span>Total</span><span>${clp(e.tarifa_total)}</span></div>
           </div>
           ${e.estado_pago === 'pagado' ? html`<p class="sub" style="margin-top:10px">Pagado ${fechaHora(e.pagado_en)} · ${e.pago_medio === 'en_linea' ? 'en línea' : e.pago_medio} ${e.pago_referencia ? `· ${e.pago_referencia}` : ''}</p>` : ''}
+          ${!esAdmin && e.folio && !conTicket && e.estado !== 'anulado' ? html`<p class="muted" style="margin-top:10px">El ticket estará disponible cuando se apruebe el pago.</p>` : ''}
         </div>
         <div class="card">
           <div class="card-titulo"><h2>Seguro</h2>${e.valor_declarado ? html`<span class="badge e-creado">${esAdmin ? `Valor declarado ${clp(e.valor_declarado)}` : 'Asegurado'}</span>` : html`<span class="badge e-anulado">Sin seguro</span>`}</div>
@@ -122,6 +127,7 @@ export async function detalle(id) {
         </div>
       </div>
       <div>
+        ${tarjetaTransferencia(e, esAdmin)}
         ${esAdmin ? accionesAdmin(e, repartidores) : accionesCliente(e)}
         ${e.folio ? html`<div class="card" style="text-align:center"><div class="qr-caja"><img id="qr" alt="QR del envío"></div><p class="sub" style="margin-top:8px">Escanéalo para abrir la ruta</p></div>` : ''}
         ${e.estado === 'entregado' ? html`<div class="card"><h2>Constancia de entrega</h2>
@@ -135,6 +141,8 @@ export async function detalle(id) {
   if (e.folio) api(`/api/envios/${e.id}/qr.png`, { blob: true }).then((b) => { $('#qr').src = URL.createObjectURL(b); }).catch(() => {});
   $$('[data-ticket]').forEach((b) => { b.onclick = () => abrirBlob(api(`/api/envios/${e.id}/ticket.pdf?formato=${b.dataset.ticket}`, { blob: true })).catch(errorToast); });
   $('#pagar')?.addEventListener('click', () => pagar(e, () => detalle(id)));
+  $('#transferir')?.addEventListener('click', () => subirComprobante(e, () => detalle(id)));
+  $('#revisar-comprobante')?.addEventListener('click', () => revisarComprobante(comprobanteDe(e), () => detalle(id)));
   $('#link-pago')?.addEventListener('click', () => linkPago(e));
   $('#reclamar')?.addEventListener('click', () => formReclamo(e, boletas, () => detalle(id)));
   enlazarAcciones(e, () => detalle(id));
@@ -147,7 +155,9 @@ function accionesCliente(e) {
 
 function accionesAdmin(e, repartidores) {
   const botones = [];
-  if (['creado', 'asignado', 'reagendado'].includes(e.estado)) {
+  if (['creado', 'asignado', 'reagendado'].includes(e.estado) && e.estado_pago !== 'pagado') {
+    botones.push(html`<p class="sub">Se asigna repartidor cuando el pago esté aprobado.</p>`);
+  } else if (['creado', 'asignado', 'reagendado'].includes(e.estado)) {
     botones.push(html`<label class="campo">Repartidor asignado<select id="asignar">${e.estado === 'reagendado' ? '' : html`<option value="">Sin asignar</option>`}${repartidores.map((r) => html`<option value="${r.id}" ${r.id === e.repartidor_id ? html`selected` : ''}>${r.nombre}</option>`)}</select></label>`);
   } else if (e.repartidor_nombre) botones.push(html`<p class="sub">Repartidor: <b>${e.repartidor_nombre}</b></p>`);
   if (e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado)) botones.push(html`<button class="btn sec" id="pago-manual">Registrar pago manual</button>`);
@@ -246,6 +256,99 @@ export async function linkPago(envio) {
       ${fono ? html`<a class="btn sec" target="_blank" rel="noopener" href="https://wa.me/${fono}?text=${encodeURIComponent(texto)}">Al destinatario</a>` : ''}</div>`);
   $('#copiar-pago', m.el).onclick = async () => {
     try { await navigator.clipboard.writeText(l.url); toast('Link copiado', 'ok'); } catch { $('#url-pago', m.el).select(); }
+  };
+}
+
+// ================= Pago por transferencia: el cliente sube el comprobante y administración lo revisa =================
+// El último comprobante del envío (los pagos vienen del más nuevo al más antiguo).
+function comprobanteDe(e) {
+  const p = e.pagos.find((x) => x.comprobante);
+  return p && { ...p, folio: e.folio, cliente_nombre: e.cliente_nombre, comprobante_url: p.comprobante.url, mime: p.comprobante.mime, usado_en: [] };
+}
+
+function tarjetaTransferencia(e, esAdmin) {
+  const c = comprobanteDe(e);
+  if (e.estado_pago === 'en_revision' && c) {
+    return html`<div class="card"><div class="card-titulo"><h2>Pago por transferencia</h2>${badgePago('en_revision')}</div>
+      ${esAdmin
+        ? html`<p class="sub">El cliente subió el comprobante el ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}. Revísalo contra la cartola antes de aprobar.</p>
+          <button class="btn" id="revisar-comprobante" style="margin-top:10px">Revisar comprobante</button>`
+        : html`<div class="aviso">Recibimos tu comprobante el ${fechaHora(c.creado_en)}. <b>Administración lo está revisando</b>: cuando lo apruebe podrás descargar el ticket y el repartidor podrá retirar tu envío.</div>
+          <a class="sub" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Ver el comprobante enviado</a>`}
+    </div>`;
+  }
+  if (e.estado_pago === 'pendiente' && c?.estado === 'rechazado' && !['borrador', 'anulado'].includes(e.estado)) {
+    return html`<div class="card"><h2>Pago por transferencia</h2>
+      <div class="aviso alerta"><b>${esAdmin ? 'El comprobante fue rechazado' : 'Tu comprobante fue rechazado'}</b>: ${c.motivo_rechazo}</div>
+      ${esAdmin ? '' : html`<p class="sub" style="margin-top:10px">Revisa el motivo y sube un comprobante nuevo con el botón <b>Pagar con transferencia</b>.</p>`}</div>`;
+  }
+  return '';
+}
+
+export function subirComprobante(envio, alTerminar) {
+  const t = app.conf.transferencia || {};
+  const m = modal(html`<h2>Pagar con transferencia</h2>
+    <p class="sub">Envío <b class="mono">${envio.folio}</b>. Transfiere el monto exacto y sube la imagen del comprobante: administración lo revisa y, al aprobarlo, recibes el ticket y el repartidor puede retirar tu envío.</p>
+    <div class="monto-grande" style="margin:10px 0">${clp(envio.tarifa_total)}</div>
+    ${t.banco && t.numero_cuenta ? html`<div class="desglose" style="margin-bottom:12px">
+        <div><span>Banco</span><b>${t.banco}</b></div>
+        ${t.tipo_cuenta ? html`<div><span>Tipo de cuenta</span><b>${t.tipo_cuenta}</b></div>` : ''}
+        <div><span>N° de cuenta</span><b class="mono">${t.numero_cuenta}</b></div>
+        ${t.titular ? html`<div><span>Titular</span><b>${t.titular}</b></div>` : ''}
+        ${t.rut ? html`<div><span>RUT</span><b>${t.rut}</b></div>` : ''}
+        ${t.correo ? html`<div><span>Correo</span><b>${t.correo}</b></div>` : ''}
+      </div><p class="muted">Escribe el folio <b class="mono">${envio.folio}</b> en el comentario de la transferencia.</p>`
+      : html`<div class="aviso">Pide a la empresa los datos de la cuenta para transferir.</div>`}
+    <form class="pila" id="f-comprobante" novalidate style="margin-top:12px">
+      <label class="campo">Comprobante de la transferencia * <small>(imagen o PDF)</small><input type="file" name="archivo" accept="image/*,application/pdf"></label>
+      <label class="campo">N° de operación <small>(opcional)</small><input name="referencia" maxlength="60" placeholder="Aparece en el comprobante"></label>
+      <button class="btn grande">Enviar comprobante</button>
+    </form>`);
+  $('#f-comprobante', m.el).onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    const file = f.archivo.files[0];
+    if (!file) return marcarErrores(f, { archivo: 'Adjunta la imagen del comprobante' });
+    const btn = $('button', f);
+    btn.disabled = true;
+    try {
+      const fd = new FormData();
+      // Las fotos se achican (y pierden sus metadatos) sin dejar ilegible el texto del comprobante.
+      fd.append('archivo', file.type.startsWith('image/') ? await comprimirFoto(file, 2000, 0.85) : file);
+      if (f.referencia.value.trim()) fd.append('referencia', f.referencia.value.trim());
+      await enviarForm(`/api/envios/${envio.id}/comprobante`, fd);
+      m.cerrar();
+      toast('Comprobante enviado: queda pendiente de revisión', 'ok');
+      alTerminar?.();
+    } catch (err) { marcarErrores(f, err.detalles); errorToast(err); btn.disabled = false; }
+  };
+}
+
+// Administración mira el comprobante y lo aprueba (el envío queda pagado) o lo rechaza con motivo.
+export function revisarComprobante(c, alTerminar) {
+  const m = modal(html`<h2>Comprobante de ${c.folio}</h2>
+    <p class="sub">${c.cliente_nombre} · debe transferir <b>${clp(c.monto)}</b> · enviado ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}</p>
+    ${c.usado_en?.length ? html`<div class="aviso alerta" style="margin:10px 0"><b>Atención:</b> este mismo comprobante o N° de operación ya se usó en ${c.usado_en.join(', ')}.</div>` : ''}
+    <div style="margin:12px 0;text-align:center">${c.mime === 'application/pdf'
+      ? html`<a class="btn sec" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Descargar comprobante (PDF)</a>`
+      : html`<a href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener" title="Abrir en tamaño completo"><img src="${archivo(c.comprobante_url)}" alt="Comprobante de transferencia de ${c.folio}" style="max-width:100%;max-height:42vh;border-radius:12px"></a>`}</div>
+    <form class="pila" id="f-revision" novalidate>
+      <label class="campo">N° de operación <small>(según la cartola)</small><input name="referencia" maxlength="60" value="${c.referencia || ''}"></label>
+      <label class="campo">Motivo del rechazo <small>(obligatorio si rechazas: el cliente lo verá)</small><input name="motivo" maxlength="300" placeholder="Ej. el monto no coincide, imagen ilegible"></label>
+      <div class="fila"><button class="btn" name="decision" value="aprobar">Aprobar pago</button><button class="btn peligro" name="decision" value="rechazar">Rechazar</button></div>
+    </form>`);
+  $('#f-revision', m.el).onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    const aprobar = ev.submitter?.value === 'aprobar';
+    if (!aprobar && !f.motivo.value.trim()) return marcarErrores(f, { motivo: 'Indica el motivo: el cliente lo verá' });
+    try {
+      if (aprobar) await post(`/api/cobranza/comprobantes/${c.id}/aprobar`, { referencia: f.referencia.value });
+      else await post(`/api/cobranza/comprobantes/${c.id}/rechazar`, { motivo: f.motivo.value });
+      m.cerrar();
+      toast(aprobar ? `Pago de ${c.folio} aprobado: ya se puede asignar y retirar` : 'Comprobante rechazado: el cliente verá el motivo', 'ok');
+      alTerminar?.();
+    } catch (err) { marcarErrores(f, err.detalles); errorToast(err); }
   };
 }
 

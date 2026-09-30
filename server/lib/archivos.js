@@ -119,6 +119,26 @@ export async function leerArchivo(ruta) {
   }
 }
 
+// Borra archivos (fotos, boletas, comprobantes) del disco o del bucket. Devuelve cuántos se borraron.
+// Se usa al reiniciar la plataforma: no deben quedar datos personales sueltos en el almacenamiento.
+export async function borrarArchivos(rutas) {
+  const enSupabase = rutas.filter((r) => r.startsWith(PREFIJO_SUPABASE)).map((r) => r.slice(PREFIJO_SUPABASE.length));
+  let borrados = 0;
+  for (let i = 0; i < enSupabase.length; i += 500) {
+    const res = await fetch(urlStorage(`/object/${config.almacenamiento.bucket}`), {
+      method: 'DELETE',
+      headers: cabecerasSupabase({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ prefixes: enSupabase.slice(i, i + 500) }),
+    });
+    if (!res.ok) throw await errorSupabase(res, 'borrar archivos');
+    borrados += (await res.json()).length;
+  }
+  for (const r of rutas.filter((x) => !x.startsWith(PREFIJO_SUPABASE))) {
+    try { await fs.unlink(rutaLocal(r)); borrados++; } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  }
+  return borrados;
+}
+
 function rutaLocal(relativa) {
   const abs = path.resolve(config.uploadDir, relativa);
   if (!abs.startsWith(config.uploadDir + path.sep)) throw new Error('Ruta fuera del directorio de archivos');

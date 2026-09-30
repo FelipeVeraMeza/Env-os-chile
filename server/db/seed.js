@@ -34,6 +34,11 @@ export async function sembrar() {
 
     const { rows: [{ n: nUsuarios }] } = await db.query('SELECT count(*)::int AS n FROM usuario');
     if (nUsuarios === 0) {
+      if (!config.admin.correo || !config.admin.password) {
+        throw Object.assign(new Error('la base no tiene usuarios y no hay un administrador para crear'), {
+          ayuda: 'Define ADMIN_EMAIL y ADMIN_PASSWORD en Railway solo para este primer arranque (luego puedes borrarlas), o crea el administrador con: npm run reiniciar -- --correo … --clave … --confirmar',
+        });
+      }
       const hash = await bcrypt.hash(config.admin.password, 10);
       await db.query(
         `INSERT INTO usuario (nombre, correo, password_hash, rol) VALUES ('Administración', $1, $2, 'admin')`,

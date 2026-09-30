@@ -15,7 +15,9 @@
 2. Railway redespliega solo. Al arrancar, la base aplica la migración `005_sesiones.sql` y **las cuentas demo
    (`cliente@demo.cl`, `repartidor@demo.cl`, etc.) quedan sin acceso**, porque su contraseña `Demo.2026` es pública en
    el repositorio. Sus envíos se conservan.
-3. Entra con `ADMIN_EMAIL` / `ADMIN_PASSWORD` (el administrador creado en el primer arranque).
+3. Entra con el administrador que ya existe en la base. Las cuentas y sus contraseñas (cifradas) viven **en la base de
+   datos**: `ADMIN_EMAIL` / `ADMIN_PASSWORD` solo se usan si la base está vacía (primer arranque) y después se borran
+   de Railway. Si la base está vacía y no están, el servidor no arranca y explica qué hacer.
 4. **Usuarios → Nuevo usuario** para cada persona real. La plataforma propone una contraseña temporal: entrégasela por
    un medio seguro; al entrar por primera vez se le pide crear la suya.
 5. Usuarios que ya existían sin contraseña aparecen con la marca **Sin contraseña**: usa **Contraseña** para asignarles una.
@@ -31,6 +33,27 @@
 | Administración asigna contraseña o desactiva a alguien | Sus sesiones abiertas se cierran de inmediato |
 | Sesión | Dura 30 días en el dispositivo (`JWT_DIAS`); al vencer vuelve a la pantalla de ingreso con aviso |
 | Seguimiento por folio | Público, sin sesión (enlace en la pantalla de ingreso) |
+
+## Clientes: crear cuenta
+
+La pantalla de ingreso muestra **Crear cuenta de cliente** (activado desde el 30/09/2026, migración `010`). El cliente
+indica nombre o empresa, correo, teléfono móvil y una contraseña segura, y entra de inmediato. Siempre queda con perfil
+**cliente** (aunque alguien intente registrarse como administrador). Se puede cerrar en **Tarifas y reglas**.
+
+## Reiniciar la plataforma (empezar de cero)
+
+Borra **todos** los usuarios, envíos, destinatarios, pagos, reclamos, costos, fotos/boletas/comprobantes y bitácoras,
+y crea el administrador que indiques. Conserva comunas, zonas, tarifas, datos de la empresa y cuenta para
+transferencias. Los folios vuelven a `ENV-AAAA-000001`. **No se puede deshacer.**
+
+1. Crea un archivo `.env` en la carpeta del proyecto con los mismos datos de Railway → Variables:
+   `SUPABASE_URL`, `SUPABASE_DB_PASSWORD` (o `DATABASE_URL`) y `SUPABASE_SECRET_KEY` (para borrar los archivos).
+2. Revisa qué se borraría (no borra nada):
+   ```bash
+   npm run reiniciar -- --correo admin@empresa.cl --clave "LaClave"
+   ```
+3. Si la base y los números son los correctos, ejecuta lo mismo agregando `--confirmar`.
+4. Entra con ese correo y contraseña. La contraseña queda cifrada (bcrypt) en la base y no se guarda en el repositorio.
 
 ## Probarlo en local
 

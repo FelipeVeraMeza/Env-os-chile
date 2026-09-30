@@ -9,7 +9,7 @@ export const SELECT_ENVIO = `
     d.nombre AS destinatario_nombre, d.telefono AS destinatario_telefono, d.correo AS destinatario_correo,
     di.calle, di.numero, di.depto, di.referencia, di.lat, di.lon, di.alias AS direccion_alias,
     c.nombre AS comuna_nombre, c.region, c.provincia,
-    cli.nombre AS cliente_nombre, cli.telefono AS cliente_telefono, rep.nombre AS repartidor_nombre
+    cli.nombre AS cliente_nombre, cli.telefono AS cliente_telefono, cli.rut AS cliente_rut, rep.nombre AS repartidor_nombre
   FROM envio e
   JOIN destinatario d ON d.id = e.destinatario_id
   JOIN direccion di ON di.id = e.direccion_id
@@ -52,15 +52,23 @@ export async function detalleCompleto(envio, usuario) {
            WHERE h.envio_id = $1 ORDER BY h.fecha, h.id`, [envio.id]),
     query('SELECT id, tipo, nombre_original, mime, tamano, subido_en FROM adjunto WHERE envio_id = $1 ORDER BY id', [envio.id]),
     usuario.rol === 'repartidor' ? { rows: [] } : query('SELECT * FROM reclamo_seguro WHERE envio_id = $1 ORDER BY id DESC', [envio.id]),
-    usuario.rol === 'repartidor' ? { rows: [] } : query('SELECT id, proveedor, monto, estado, referencia, creado_en FROM pago WHERE envio_id = $1 ORDER BY id DESC', [envio.id]),
+    usuario.rol === 'repartidor' ? { rows: [] } : query(
+      `SELECT id, proveedor, medio, monto, estado, referencia, creado_en, comprobante_adjunto_id, motivo_rechazo, revisado_en
+       FROM pago WHERE envio_id = $1 ORDER BY id DESC`, [envio.id]),
   ]);
-  const visibles = usuario.rol === 'repartidor' ? adjuntos.rows.filter((a) => a.tipo !== 'boleta') : adjuntos.rows;
+  // El repartidor no ve montos: ni la boleta de compra ni el comprobante de pago.
+  const visibles = usuario.rol === 'repartidor' ? adjuntos.rows.filter((a) => !['boleta', 'comprobante_pago'].includes(a.tipo)) : adjuntos.rows;
+  const urls = new Map(visibles.map((a) => [a.id, firmarEnlace(a.id, usuario.id)]));
+  const comprobantes = adjuntos.rows.filter((a) => a.tipo === 'comprobante_pago');
   return {
     ...presentar(envio, usuario),
     historial: historial.rows,
-    adjuntos: visibles.map((a) => ({ ...a, url: firmarEnlace(a.id, usuario.id) })),
+    adjuntos: visibles.map((a) => ({ ...a, url: urls.get(a.id) })),
     reclamos: reclamos.rows,
-    pagos: pagos.rows,
+    pagos: pagos.rows.map((p) => {
+      const c = p.comprobante_adjunto_id && comprobantes.find((a) => a.id === p.comprobante_adjunto_id);
+      return c ? { ...p, comprobante: { mime: c.mime, nombre: c.nombre_original, url: urls.get(c.id) } } : p;
+    }),
   };
 }
 

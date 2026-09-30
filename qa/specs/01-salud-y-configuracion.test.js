@@ -32,12 +32,15 @@ test('CP-04 · Cobertura inicial dentro de Santiago con tarifa $3.500', async ()
   assert.ok(!nombres.includes('Valparaíso'));
 });
 
-test('CP-05 · Reglas comerciales publicadas: $3.500, +$1.000 horario, 20 kg, 60 cm, 3 intentos, 5 min', async () => {
+test('CP-05 · Reglas comerciales publicadas: $3.500 hasta 10 kg y 40 cm, +$2.000 hasta 20 kg y 60 cm, +$1.000 horario, 3 intentos, 5 min', async () => {
   const r = await peticion('GET', '/api/config/publica');
   assert.equal(r.status, 200);
   const { tarifas, operacion, couriers } = r.datos;
   assert.equal(tarifas.base, 3500);
   assert.equal(tarifas.recargo_horario_especial, 1000);
+  assert.equal(tarifas.peso_estandar_kg, 10);
+  assert.equal(tarifas.dim_estandar_cm, 40);
+  assert.equal(tarifas.recargo_sobredimension, 2000);
   assert.equal(tarifas.peso_max_kg, 20);
   assert.equal(tarifas.dim_max_cm, 60);
   assert.equal(operacion.intentos_max, 3);

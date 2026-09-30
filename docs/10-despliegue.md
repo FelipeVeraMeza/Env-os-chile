@@ -50,7 +50,7 @@ npm run qa:local                # suite QA contra localhost
    | `PUBLIC_BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` (o el dominio .cl) |
    | `CORS_ORIGINS` | URL de Vercel y dominio, separados por coma |
    | `AUTH_MODE` | `demo` para la presentación; **`jwt` con datos reales** |
-   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | administrador inicial |
+   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | solo para el primer arranque con la base vacía; después se borran (las cuentas viven en la base) |
    | `UPLOAD_DIR` | `/data/uploads` |
    | `TZ` | `America/Santiago` |
 

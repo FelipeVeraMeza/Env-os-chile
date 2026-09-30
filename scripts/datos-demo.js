@@ -78,7 +78,7 @@ async function entregar(e, rep) {
 let n = 0;
 for (let i = 0; i < 7; i++) { const e = await crear(clienteA, i); await pagarYAsignar(e, clienteA, i % 2 ? repA : repB); await entregar(e, i % 2 ? repA : repB); n++; }
 for (let i = 0; i < 3; i++) { const e = await crear(clienteA, i + 2, i === 0 ? { horario_especial: true, franja_horaria: '19:00 – 21:00' } : {}); await pagarYAsignar(e, clienteA, repA); await llamar('POST', `/api/envios/${e.id}/estado`, { usuario: repA, json: { estado: 'en_ruta' } }); n++; }
-for (let i = 0; i < 2; i++) { const e = await crear(clienteB, i + 4, { tipo_destino: 'punto_courier', courier_empresa: i ? 'Starken' : 'Blue Express', courier_punto: i ? 'Starken Providencia' : 'Blue Express Ñuñoa', bultos: 4 + i }); await pagarYAsignar(e, clienteB, repB); n++; }
+for (let i = 0; i < 2; i++) { const e = await crear(clienteB, i + 4, { bultos: 4 + i }); await pagarYAsignar(e, clienteB, repB); n++; }
 for (let i = 0; i < 2; i++) { await crear(clienteA, i + 5); n++; }
 { const e = await crear(clienteB, 1); await pagarYAsignar(e, clienteB, null); n++; }
 {

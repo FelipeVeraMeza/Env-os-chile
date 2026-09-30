@@ -24,6 +24,7 @@
     "secreto": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "sql:supabase": "node scripts/generar-sql-supabase.js",
     "publicar": "node scripts/publicar.js",
+    "reiniciar": "node scripts/reiniciar-datos.js",
     "manual": "node scripts/manual/generar-manual.mjs",
     "carga": "node scripts/prueba-carga.js",
     "e2e": "node qa/e2e/flujo-completo.js",

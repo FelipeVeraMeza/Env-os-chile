@@ -258,6 +258,7 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, a:focus-visible, 
 .e-aprobado { background: rgba(111, 139, 255, .18); color: var(--azul-200); border-color: rgba(111, 139, 255, .4); }
 .e-pagado { background: rgba(52, 211, 153, .16); color: #a7f3d0; border-color: rgba(52, 211, 153, .45); }
 .e-pendiente { background: rgba(251, 191, 36, .14); color: #fde68a; border-color: rgba(251, 191, 36, .45); }
+.e-en_revision { background: rgba(56, 189, 248, .15); color: #bae6fd; border-color: rgba(56, 189, 248, .45); }
 
 .kpi { padding: 18px; border-radius: var(--radio); background: var(--superficie); border: 1px solid var(--borde); }
 .kpi .etiqueta { color: var(--texto-3); font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
@@ -359,6 +360,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .pasarela { background: var(--blanco); color: #1b1f3b; border-radius: 18px; padding: 20px; }
 .pasarela input { background: #f3f5ff; color: #1b1f3b; border-color: #d6dcf5; }
 .pasarela .monto { font-size: 2rem; font-weight: 800; color: var(--azul-900); }
+.monto-grande { font-size: 2rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .cargando { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .3); border-top-color: var(--blanco); animation: girar .8s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
 .esqueleto { height: 72px; border-radius: 16px; background: linear-gradient(90deg, var(--superficie), var(--superficie-2), var(--superficie)); background-size: 200% 100%; animation: brillo 1.2s infinite; }

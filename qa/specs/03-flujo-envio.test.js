@@ -25,9 +25,11 @@ test('CP-21 · El cliente crea y confirma un envío: folio único ENV-AAAA-NNNNN
   assert.equal(envio.destinatario_telefono, '+56 9 8765 4321');
 });
 
-test('CP-22 · Ticket PDF térmico 80 mm y A4 (RF-20, RF-21)', async () => {
+test('CP-22 · Ticket PDF térmico 80 mm y A4 (RF-20, RF-21); el cliente lo recibe solo con el pago aprobado', async () => {
+  const cliente = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente });
+  assert.equal(cliente.status, 409, 'sin pago aprobado el cliente no recibe el ticket');
   for (const formato of ['80mm', 'a4']) {
-    const r = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=${formato}`, { sesion: esc.cliente, crudo: true });
+    const r = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=${formato}`, { sesion: esc.admin, crudo: true });
     assert.equal(r.status, 200);
     assert.match(r.headers.get('content-type'), /pdf/);
     const buf = Buffer.from(await r.arrayBuffer());
@@ -60,12 +62,12 @@ test('CP-25 · El repartidor no ve envíos que no tiene asignados', async () => 
   assert.equal(r.status, 404);
 });
 
-test('CP-26 · Sin pago no se puede retirar: "servicio pagado para poder retirar"', async () => {
+test('CP-26 · Sin pago no se asigna ni se retira: "servicio pagado para poder retirar"', async () => {
   const a = await peticion('POST', `/api/envios/${envio.id}/asignar`, { sesion: esc.admin, json: { repartidor_id: esc.repartidor.usuario.id } });
-  assert.equal(a.status, 200);
+  assert.equal(a.status, 409);
+  assert.match(a.datos.error, /pagado/);
   const r = await peticion('POST', `/api/envios/${envio.id}/estado`, { sesion: esc.repartidor, json: { estado: 'en_ruta' } });
-  assert.equal(r.status, 409);
-  assert.match(r.datos.error, /pagado/);
+  assert.equal(r.status, 404, 'el repartidor no tiene el envío');
 });
 
 test('CP-27 · Pago en línea (proveedor simulado) marca el envío como pagado', async () => {
@@ -78,6 +80,10 @@ test('CP-27 · Pago en línea (proveedor simulado) marca el envío como pagado',
   assert.equal(d.datos.estado_pago, 'pagado');
   const dos = await peticion('POST', `/api/pagos/${p.datos.token}/confirmar`, { sesion: esc.cliente, json: { resultado: 'aprobado' } });
   assert.equal(dos.status, 409, 'un pago no se procesa dos veces');
+  const t = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente, crudo: true });
+  assert.equal(t.status, 200, 'con el pago aprobado el cliente recibe su ticket');
+  const a = await peticion('POST', `/api/envios/${envio.id}/asignar`, { sesion: esc.admin, json: { repartidor_id: esc.repartidor.usuario.id } });
+  assert.equal(a.status, 200, JSON.stringify(a.datos));
 });
 
 test('CP-28 · Con pago, el repartidor retira y el envío queda en ruta; no ve montos', async () => {
@@ -135,10 +141,10 @@ test('CP-33 · Un enlace de archivo alterado o sin firma es rechazado (RNF-06)',
 test('CP-84 · Ticket completo: una etiqueta por bulto y QR que abre Google Maps con la dirección (RF-20, RF-24)', async () => {
   const c = await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id, { bultos: 3 }), confirmar: true } });
   assert.equal(c.status, 201);
-  const pdf = await peticion('GET', `/api/envios/${c.datos.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente, crudo: true });
+  const pdf = await peticion('GET', `/api/envios/${c.datos.id}/ticket.pdf?formato=80mm`, { sesion: esc.admin, crudo: true });
   const texto = Buffer.from(await pdf.arrayBuffer()).toString('latin1');
   assert.equal(texto.match(/\/Type \/Page\b/g)?.length, 3, 'una etiqueta térmica por bulto');
-  const a4 = await peticion('GET', `/api/envios/${c.datos.id}/ticket.pdf?formato=a4`, { sesion: esc.cliente, crudo: true });
+  const a4 = await peticion('GET', `/api/envios/${c.datos.id}/ticket.pdf?formato=a4`, { sesion: esc.admin, crudo: true });
   assert.equal(Buffer.from(await a4.arrayBuffer()).toString('latin1').match(/\/Type \/Page\b/g)?.length, 1, 'A4 en una hoja');
   const conf = (await peticion('GET', '/api/config/publica')).datos.operacion.qr_destino;
   const qr = await fetch(`${API}/q/${c.datos.token_qr}`, { redirect: 'manual' });

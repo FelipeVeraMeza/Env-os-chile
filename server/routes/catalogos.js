@@ -67,7 +67,7 @@ configuracion.get('/publica', ruta(async (_req, res) => {
   const conf = await leerConfig();
   res.json({
     negocio: conf.negocio, tarifas: conf.tarifas, operacion: conf.operacion, ticket: conf.ticket,
-    pagos: { proveedor: conf.pagos.proveedor }, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
+    pagos: { proveedor: conf.pagos.proveedor }, transferencia: conf.transferencia, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
     motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave), recuperacion_por_correo: correoConfigurado(),
   });
 }));
@@ -97,12 +97,20 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
     for (const k of ['intentos_max', 'espera_max_min']) if (!Number.isInteger(nuevo[k]) || nuevo[k] < 1 || nuevo[k] > 60) errores[k] = 'Debe ser un número entero entre 1 y 60';
   }
   if (clave === 'tarifas') {
-    for (const k of ['base', 'bulto_adicional_domicilio', 'bulto_adicional_punto', 'recargo_horario_especial']) if (!Number.isInteger(nuevo[k]) || nuevo[k] > 10_000_000) errores[k] = 'Pesos enteros';
+    for (const k of ['base', 'recargo_sobredimension', 'recargo_horario_especial']) if (!Number.isInteger(nuevo[k]) || nuevo[k] > 10_000_000) errores[k] = 'Pesos enteros';
     if (!(nuevo.peso_max_kg > 0) || nuevo.peso_max_kg > 1000) errores.peso_max_kg = 'Entre 1 y 1000 kg';
     if (!Number.isInteger(nuevo.dim_max_cm) || nuevo.dim_max_cm < 1 || nuevo.dim_max_cm > 500) errores.dim_max_cm = 'Entre 1 y 500 cm';
+    if (!(nuevo.peso_estandar_kg > 0) || nuevo.peso_estandar_kg > nuevo.peso_max_kg) errores.peso_estandar_kg = 'Mayor que 0 y no más que el peso máximo';
+    if (!Number.isInteger(nuevo.dim_estandar_cm) || nuevo.dim_estandar_cm < 1 || nuevo.dim_estandar_cm > nuevo.dim_max_cm) errores.dim_estandar_cm = 'Entero, no más que el lado máximo';
   }
   // Solo el simulador está conectado: elegir otra pasarela hoy dejaría a los clientes sin poder pagar.
   if (clave === 'pagos' && nuevo.proveedor !== 'simulado') errores.proveedor = 'Esa pasarela aún no está integrada (etapa de desarrollo)';
+  if (clave === 'transferencia') {
+    for (const [k, v] of Object.entries(nuevo)) {
+      nuevo[k] = String(v).trim();
+      if (nuevo[k].length > 80) errores[k] = 'Máximo 80 caracteres';
+    }
+  }
   exigirSinErrores(errores, 'Revisa los valores');
   await query('INSERT INTO config (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor', [clave, JSON.stringify(nuevo)]);
   await auditar(req, 'editar', 'config', clave, nuevo);

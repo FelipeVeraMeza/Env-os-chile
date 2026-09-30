@@ -3,7 +3,9 @@ import { query, transaccion, uno } from '../db/pool.js';
 import { auditar, falla, idNumerico, ruta } from '../lib/http.js';
 import { compararProveedores, PROVEEDORES_PAGO, validarConciliacion } from '../lib/cobranza.js';
 import { leerConfig } from '../lib/configuracion.js';
-import { registrarEventoPago } from '../lib/pagos.js';
+import { firmarEnlace } from '../lib/archivos.js';
+import { aprobarComprobante, rechazarComprobante, registrarEventoPago } from '../lib/pagos.js';
+import { validarMotivoRechazo } from '../lib/reglas.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
 
 // Cobranza (solo administración): qué se cobró, qué falta cobrar, cuánto se lleva la pasarela,
@@ -21,7 +23,7 @@ const TZ = "AT TIME ZONE 'America/Santiago'";
 cobranza.get('/resumen', ruta(async (req, res) => {
   const { desde, hasta } = rango(req.query);
   const p = [desde, hasta];
-  const [cobrado, porProveedor, porCobrar, porConciliar, iniciados] = await Promise.all([
+  const [cobrado, porProveedor, porCobrar, porConciliar, iniciados, enRevision] = await Promise.all([
     uno(`SELECT count(*)::int AS pagos, COALESCE(sum(monto), 0)::int AS bruto, COALESCE(sum(comision_estimada), 0)::int AS comision_estimada,
            COALESCE(sum(COALESCE(comision_real, comision_estimada)), 0)::int AS comision, COALESCE(sum(monto - COALESCE(comision_real, comision_estimada)), 0)::int AS neto
          FROM pago WHERE estado = 'aprobado' AND (verificado_en ${TZ})::date BETWEEN $1 AND $2`, p),
@@ -31,19 +33,56 @@ cobranza.get('/resumen', ruta(async (req, res) => {
     // Cuentas por cobrar: envíos confirmados que siguen sin pago (bloquean el retiro).
     uno(`SELECT count(*)::int AS envios, COALESCE(sum(tarifa_total), 0)::int AS monto,
            COALESCE(max(EXTRACT(EPOCH FROM now() - confirmado_en) / 86400), 0)::int AS dias_mas_antiguo
-         FROM envio WHERE estado_pago = 'pendiente' AND estado IN ('creado', 'asignado')`),
+         FROM envio WHERE estado_pago IN ('pendiente', 'en_revision') AND estado IN ('creado', 'asignado')`),
     // Abonos que la pasarela aún no deposita (o que administración no ha revisado en la cartola).
     uno(`SELECT count(*)::int AS pagos, COALESCE(sum(monto - comision_estimada), 0)::int AS monto_esperado,
            count(*) FILTER (WHERE abono_estimado_en < (now() AT TIME ZONE 'America/Santiago')::date)::int AS atrasados
          FROM pago WHERE estado = 'aprobado' AND abonado_en IS NULL AND proveedor NOT IN ('manual', 'simulado')`),
     // Pagos iniciados hace más de 30 minutos sin respuesta: el cliente abandonó o la pasarela no avisó.
     uno(`SELECT count(*)::int AS n FROM pago WHERE estado = 'iniciado' AND creado_en < now() - interval '30 minutes'`),
+    // Comprobantes de transferencia que esperan la revisión de administración (bloquean el retiro).
+    uno(`SELECT count(*)::int AS n, COALESCE(sum(monto), 0)::int AS monto FROM pago WHERE estado = 'en_revision'`),
   ]);
   const conf = await leerConfig();
   res.json({
     desde, hasta, proveedor_actual: conf.pagos.proveedor,
-    cobrado, por_proveedor: porProveedor.rows, por_cobrar: porCobrar, por_conciliar: porConciliar, sin_respuesta: iniciados.n,
+    cobrado, por_proveedor: porProveedor.rows, por_cobrar: porCobrar, por_conciliar: porConciliar, sin_respuesta: iniciados.n, en_revision: enRevision,
   });
+}));
+
+// ---------- Comprobantes de transferencia (el cliente sube la imagen, administración revisa) ----------
+// Por defecto los que esperan revisión (más antiguos primero); ?estado=todos incluye los ya revisados.
+// Se avisa si el mismo archivo o el mismo N° de operación ya se usó en otro envío (comprobante reutilizado).
+cobranza.get('/comprobantes', ruta(async (req, res) => {
+  const todos = req.query.estado === 'todos';
+  const { rows } = await query(
+    `SELECT pg.id, pg.envio_id, pg.monto, pg.estado, pg.referencia, pg.motivo_rechazo, pg.creado_en, pg.revisado_en,
+       e.folio, e.estado AS envio_estado, e.tarifa_total, u.nombre AS cliente_nombre, s.nombre AS subido_por_nombre, r.nombre AS revisado_por_nombre,
+       a.id AS adjunto_id, a.mime, a.nombre_original,
+       (SELECT array_agg(DISTINCT e2.folio) FROM pago p2 JOIN adjunto a2 ON a2.id = p2.comprobante_adjunto_id JOIN envio e2 ON e2.id = p2.envio_id
+         WHERE p2.envio_id <> pg.envio_id AND p2.estado IN ('en_revision', 'aprobado')
+           AND (a2.sha256 = a.sha256 OR (pg.referencia IS NOT NULL AND p2.referencia = pg.referencia))) AS usado_en
+     FROM pago pg JOIN adjunto a ON a.id = pg.comprobante_adjunto_id JOIN envio e ON e.id = pg.envio_id
+     JOIN usuario u ON u.id = e.cliente_id LEFT JOIN usuario s ON s.id = pg.creado_por LEFT JOIN usuario r ON r.id = pg.revisado_por
+     ${todos ? '' : "WHERE pg.estado = 'en_revision'"}
+     ORDER BY ${todos ? 'pg.creado_en DESC' : 'pg.creado_en'}, pg.id LIMIT 200`);
+  res.json(rows.map(({ adjunto_id: adjuntoId, ...c }) => ({ ...c, usado_en: c.usado_en || [], comprobante_url: firmarEnlace(adjuntoId, req.usuario.id) })));
+}));
+
+cobranza.post('/comprobantes/:id/aprobar', ruta(async (req, res) => {
+  const id = idNumerico(req.params.id);
+  const referencia = String(req.body?.referencia || '').trim().slice(0, 60) || null;
+  const envioId = await aprobarComprobante(id, { referencia, usuarioId: req.usuario.id });
+  await auditar(req, 'aprobar_comprobante', 'envio', envioId, { pago_id: id, referencia });
+  res.json({ estado: 'aprobado', envio_id: envioId });
+}));
+
+cobranza.post('/comprobantes/:id/rechazar', ruta(async (req, res) => {
+  const id = idNumerico(req.params.id);
+  const motivo = validarMotivoRechazo(req.body?.motivo);
+  const envioId = await rechazarComprobante(id, { motivo, usuarioId: req.usuario.id });
+  await auditar(req, 'rechazar_comprobante', 'envio', envioId, { pago_id: id, motivo });
+  res.json({ estado: 'rechazado', envio_id: envioId });
 }));
 
 cobranza.get('/pagos', ruta(async (req, res) => {
