@@ -81,6 +81,9 @@ export const CONFIG_POR_DEFECTO = {
   },
   pagos: {
     proveedor: 'simulado', // simulado | webpay | mercadopago | flow (etapa de desarrollo)
+    // Pedido del cliente 30-09: se paga por transferencia con comprobante que administración aprueba.
+    // El pago en línea (y su link de pago) queda apagado; con el proveedor simulado no mueve dinero real.
+    en_linea: false,
   },
   // Cuenta a la que el cliente transfiere antes de subir el comprobante (se muestra al pagar).
   transferencia: {

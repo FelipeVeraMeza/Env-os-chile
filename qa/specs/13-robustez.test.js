@@ -1,7 +1,7 @@
 // Errores encontrados en la revisión del 29/09/2026: cada caso fijaba un 500 o un dato inconsistente.
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { datosEnvio, envioEnRuta, escenario, formulario, peticion } from '../cliente.js';
+import { conPagoEnLinea, datosEnvio, envioEnRuta, escenario, formulario, peticion } from '../cliente.js';
 
 let esc;
 before(async () => { esc = await escenario(); });
@@ -41,7 +41,7 @@ test('CP-123 · Ajustes que romperían la operación se rechazan', async () => {
   assert.ok(conf.operacion.intentos_max >= 1);
 });
 
-test('CP-124 · Un pago abierto antes de anular el envío ya no lo marca como pagado', async () => {
+test('CP-124 · Un pago abierto antes de anular el envío ya no lo marca como pagado', async (t) => conPagoEnLinea(t, esc, async () => {
   const e = await crear();
   const p = await peticion('POST', `/api/envios/${e.id}/pago`, { sesion: esc.cliente });
   assert.equal(p.status, 201);
@@ -52,14 +52,14 @@ test('CP-124 · Un pago abierto antes de anular el envío ya no lo marca como pa
   const d = await peticion('GET', `/api/envios/${e.id}`, { sesion: esc.cliente });
   assert.equal(d.datos.estado_pago, 'pendiente');
   assert.equal(d.datos.estado, 'anulado');
-});
+}));
 
-test('CP-125 · Pulsar "Pagar" dos veces reutiliza el mismo pago abierto', async () => {
+test('CP-125 · Pulsar "Pagar" dos veces reutiliza el mismo pago abierto', async (t) => conPagoEnLinea(t, esc, async () => {
   const e = await crear();
   const a = await peticion('POST', `/api/envios/${e.id}/pago`, { sesion: esc.cliente });
   const b = await peticion('POST', `/api/envios/${e.id}/pago`, { sesion: esc.cliente });
   assert.equal(a.datos.token, b.datos.token);
-});
+}));
 
 test('CP-126 · Un envío reagendado se puede pasar a otro repartidor y conserva sus intentos', async () => {
   const e = await envioEnRuta(esc);

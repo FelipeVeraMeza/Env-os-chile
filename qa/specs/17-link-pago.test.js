@@ -1,18 +1,27 @@
 // Link de pago: se paga sin sesión, solo muestra folio/monto/empresa, sirve para un solo envío y se registra en seguridad.
-import { before, test } from 'node:test';
+import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { API, datosEnvio, escenario, peticion } from '../cliente.js';
 
 let esc;
 let envio;
 let link;
+let encendido = false;
+let antes;
 const token = (url) => url.split('#/pagar/')[1];
+// El link de pago es parte del pago en línea, que está apagado (se paga por transferencia).
+// Se enciende solo mientras corre este archivo; si el servidor no lo permite (producción), se omiten las pruebas.
 before(async () => {
   esc = await escenario();
+  antes = (await peticion('GET', '/api/config/publica')).datos.pagos.en_linea;
+  encendido = antes || (await peticion('PUT', '/api/config/pagos', { sesion: esc.admin, json: { en_linea: true } })).status === 200;
   envio = (await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id), confirmar: true } })).datos;
 });
 
-test('CP-150 · El cliente genera un link de pago; se reutiliza mientras está vigente', async () => {
+after(async () => { if (!antes && encendido) await peticion('PUT', '/api/config/pagos', { sesion: esc.admin, json: { en_linea: false } }); });
+
+test('CP-150 · El cliente genera un link de pago; se reutiliza mientras está vigente', async (t) => {
+  if (!encendido) return t.skip('el pago en línea no se puede encender en este servidor');
   const r = await peticion('POST', `/api/envios/${envio.id}/link-pago`, { sesion: esc.cliente });
   assert.equal(r.status, 201, JSON.stringify(r.datos));
   assert.match(r.datos.url, /#\/pagar\/[\w-]{30,}$/);
@@ -22,12 +31,14 @@ test('CP-150 · El cliente genera un link de pago; se reutiliza mientras está v
   assert.equal(otra.datos.url, link.url);
 });
 
-test('CP-151 · Solo el dueño o administración generan links (repartidor 403, otro cliente 404)', async () => {
+test('CP-151 · Solo el dueño o administración generan links (repartidor 403, otro cliente 404)', async (t) => {
+  if (!encendido) return t.skip('el pago en línea no se puede encender en este servidor');
   assert.equal((await peticion('POST', `/api/envios/${envio.id}/link-pago`, { sesion: esc.repartidor })).status, 403);
   assert.equal((await peticion('POST', `/api/envios/${envio.id}/link-pago`, { sesion: esc.clienteB })).status, 404);
 });
 
-test('CP-152 · La página del link se abre sin sesión ni clave y no muestra datos personales', async () => {
+test('CP-152 · La página del link se abre sin sesión ni clave y no muestra datos personales', async (t) => {
+  if (!encendido) return t.skip('el pago en línea no se puede encender en este servidor');
   const r = await fetch(`${API}/api/pago-publico/${token(link.url)}`);
   assert.equal(r.status, 200);
   const d = await r.json();
@@ -38,7 +49,8 @@ test('CP-152 · La página del link se abre sin sesión ni clave y no muestra da
   for (const privado of ['Destinatario QA', '8765 4321', 'Providencia', 'Zapatillas', 'QA ClienteA']) assert.ok(!texto.includes(privado), privado);
 });
 
-test('CP-153 · Pagar con el link deja el envío pagado con un pago verificado; no se paga dos veces', async () => {
+test('CP-153 · Pagar con el link deja el envío pagado con un pago verificado; no se paga dos veces', async (t) => {
+  if (!encendido) return t.skip('el pago en línea no se puede encender en este servidor');
   const base = API;
   const pagar = () => fetch(`${base}/api/pago-publico/${token(link.url)}/pagar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"resultado":"aprobado"}' });
   const r = await pagar();
@@ -54,14 +66,16 @@ test('CP-153 · Pagar con el link deja el envío pagado con un pago verificado; 
   assert.equal((await peticion('POST', `/api/envios/${envio.id}/link-pago`, { sesion: esc.cliente })).status, 409, 'un envío pagado no genera links');
 });
 
-test('CP-154 · Un link inventado responde 404 y queda en la bitácora de seguridad', async () => {
+test('CP-154 · Un link inventado responde 404 y queda en la bitácora de seguridad', async (t) => {
+  if (!encendido) return t.skip('el pago en línea no se puede encender en este servidor');
   const r = await fetch(`${API}/api/pago-publico/inventado-${'x'.repeat(30)}`);
   assert.equal(r.status, 404);
   const ev = (await peticion('GET', '/api/seguridad/eventos?tipo=enlace_invalido&limite=5', { sesion: esc.admin })).datos;
   assert.ok(ev.some((e) => e.detalle?.motivo === 'link de pago inexistente'));
 });
 
-test('CP-155 · Un link de un envío anulado no permite pagar', async () => {
+test('CP-155 · Un link de un envío anulado no permite pagar', async (t) => {
+  if (!encendido) return t.skip('el pago en línea no se puede encender en este servidor');
   const e = (await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id), confirmar: true } })).datos;
   const l = (await peticion('POST', `/api/envios/${e.id}/link-pago`, { sesion: esc.cliente })).datos;
   assert.equal((await peticion('POST', `/api/envios/${e.id}/estado`, { sesion: esc.cliente, json: { estado: 'anulado', motivo: 'QA' } })).status, 200);

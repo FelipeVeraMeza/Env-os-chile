@@ -89,7 +89,8 @@ export async function detalle(id) {
           <span class="sub">Intentos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
       <div class="fila">
         ${conTicket ? html`<button class="btn sec" data-ticket="80mm">Ticket 80 mm</button><button class="btn sec" data-ticket="a4">Ticket A4</button>` : ''}
-        ${porPagar ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn sec" id="transferir">Pagar con transferencia</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
+        ${porPagar && app.conf.pagos.en_linea ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn sec" id="transferir">Pagar con transferencia</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
+        ${porPagar && !app.conf.pagos.en_linea ? html`<button class="btn" id="transferir">Pagar ${clp(e.tarifa_total)} con transferencia</button>` : ''}
       </div>
     </div>
     ${!['anulado', 'devuelto'].includes(e.estado) ? html`<div class="progreso-envio">${PROGRESO.map(([, t], i) => html`<div class="${i < nivel ? 'on' : ''}">${t}</div>`)}</div>` : ''}

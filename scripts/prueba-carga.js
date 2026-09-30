@@ -43,9 +43,9 @@ const creados = (await Promise.all(clientes.map(async (cli, i) => {
   for (let n = 0; n < N_ENVIOS; n++) {
     const c = await medir('crear envío', () => peticion('POST', '/api/envios', { sesion: cli, json: { ...datosEnvio(comuna.id), confirmar: true } }));
     if (c.status !== 201) continue;
-    const p = await medir('iniciar pago', () => peticion('POST', `/api/envios/${c.datos.id}/pago`, { sesion: cli }));
+    const p = await medir('subir comprobante', () => peticion('POST', `/api/envios/${c.datos.id}/comprobante`, { sesion: cli, form: formulario({}, { archivo: [jpegPrueba(), 'comprobante.jpg'] }) }));
     if (p.status !== 201) continue;
-    await medir('confirmar pago', () => peticion('POST', `/api/pagos/${p.datos.token}/confirmar`, { sesion: cli, json: { resultado: 'aprobado' } }));
+    await medir('aprobar comprobante', () => peticion('POST', `/api/cobranza/comprobantes/${p.datos.id}/aprobar`, { sesion: admin, json: {} }));
     const rep = repartidores[(i * N_ENVIOS + n) % repartidores.length];
     const a = await medir('asignar', () => peticion('POST', `/api/envios/${c.datos.id}/asignar`, { sesion: admin, json: { repartidor_id: rep.usuario.id } }));
     if (a.status === 200) asignados++;

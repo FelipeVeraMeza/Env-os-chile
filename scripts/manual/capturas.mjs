@@ -6,6 +6,8 @@ const MOVIL = { width: 390, height: 844 };
 const MOVIL_ALTO = { width: 390, height: 1250 }; // pantallas largas del celular (la barra inferior queda abajo)
 const ESCRITORIO = { width: 1280, height: 860 };
 const ESCRITORIO_ALTO = { width: 1280, height: 1350 };
+// JPEG de 1×1 que hace de comprobante de transferencia en los envíos pagados de las capturas.
+const JPEG_MINIMO = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
 
 export async function tomarCapturas({ url, credenciales, ejecutable, log = console.log }) {
   const salud = await (await fetch(`${url}/api/health`)).json();
@@ -44,8 +46,13 @@ export async function tomarCapturas({ url, credenciales, ejecutable, log = conso
       direccion: { calle: 'Av. Grecia', numero: '2150', comuna_id: comunas.find((c) => c.nombre === 'Ñuñoa').id, referencia: 'Casa con reja blanca' },
       descripcion_producto: 'Cafetera', peso_kg: 3, largo_cm: 35, ancho_cm: 30, alto_cm: 25, valor_declarado: 49990,
     });
-    const p = await api('cliente', `/api/envios/${e.id}/pago`, {});
-    await api('cliente', `/api/pagos/${p.token}/confirmar`, { resultado: 'aprobado' });
+    // Pago por transferencia: el cliente sube el comprobante y administración lo aprueba.
+    const fd = new FormData();
+    fd.append('archivo', new Blob([Buffer.from(JPEG_MINIMO, 'base64')], { type: 'image/jpeg' }), 'comprobante.jpg');
+    const r = await fetch(`${url}/api/envios/${e.id}/comprobante`, { method: 'POST', headers: cab('cliente'), body: fd });
+    const p = await r.json();
+    if (!r.ok) throw new Error(`comprobante: ${p.error}`);
+    await api('admin', `/api/cobranza/comprobantes/${p.id}/aprobar`, {});
     return e;
   };
   const libreParaTomar = await nuevoPagado();

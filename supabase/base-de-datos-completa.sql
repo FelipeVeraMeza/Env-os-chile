@@ -1046,7 +1046,7 @@ INSERT INTO config (clave, valor) VALUES
   ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":true,"registro_clientes":true,"qr_destino":"google","autoasignacion":true,"punto_courier":false}'::jsonb),
   ('ticket', '{"pie":"Conserve este ticket. Consultas y reclamos indicando el folio."}'::jsonb),
   ('listas', '{"couriers":["Blue Express","Starken","Chilexpress","Correos de Chile","Otra"],"franjas":["08:00 – 10:00","10:00 – 13:00","13:00 – 16:00","16:00 – 19:00","19:00 – 21:00","21:00 – 23:00"]}'::jsonb),
-  ('pagos', '{"proveedor":"simulado"}'::jsonb),
+  ('pagos', '{"proveedor":"simulado","en_linea":false}'::jsonb),
   ('transferencia', '{"banco":"","tipo_cuenta":"","numero_cuenta":"","titular":"","rut":"","correo":""}'::jsonb)
 ON CONFLICT (clave) DO NOTHING;
 

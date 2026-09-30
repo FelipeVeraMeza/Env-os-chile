@@ -41,6 +41,7 @@ export async function pagoPublico(token) {
     }
     const estado = l.pagado ? html`<div class="aviso ok">Este envío ya está <b>pagado</b>. ¡Gracias!</div>`
       : l.anulado ? html`<div class="aviso alerta">El envío fue anulado: no hay nada que pagar.</div>`
+      : l.en_linea === false ? html`<div class="aviso">El pago se hace por <b>transferencia</b>: quien creó el envío transfiere y sube el comprobante desde su cuenta.</div>`
       : !l.vigente ? html`<div class="aviso alerta">Este link venció. Pide uno nuevo a quien te lo envió.</div>` : '';
     montar(vista, html`<div class="login-caja"><div class="card login">
       <p class="sub">${l.negocio}</p><h1>Pagar envío</h1>

@@ -61,8 +61,11 @@ async function crear(cliente, i, extra = {}) {
   } });
 }
 async function pagarYAsignar(e, cliente, rep) {
-  const p = await llamar('POST', `/api/envios/${e.id}/pago`, { usuario: cliente });
-  await llamar('POST', `/api/pagos/${p.token}/confirmar`, { usuario: cliente, json: { resultado: 'aprobado' } });
+  // Pago por transferencia: el cliente sube el comprobante y administración lo aprueba.
+  const fd = new FormData();
+  fd.append('archivo', new Blob([jpeg], { type: 'image/jpeg' }), 'comprobante.jpg');
+  const p = await llamar('POST', `/api/envios/${e.id}/comprobante`, { usuario: cliente, form: fd });
+  await llamar('POST', `/api/cobranza/comprobantes/${p.id}/aprobar`, { usuario: admin, json: {} });
   if (rep) await llamar('POST', `/api/envios/${e.id}/asignar`, { usuario: admin, json: { repartidor_id: rep } });
 }
 async function entregar(e, rep) {

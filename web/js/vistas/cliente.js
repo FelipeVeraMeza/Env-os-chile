@@ -182,7 +182,7 @@ export async function nuevo() {
           ${c.recargo_horario ? html`<div><span>Horario especial</span><span>${clp(c.recargo_horario)}</span></div>` : ''}
           <div class="total"><span>Total</span><span>${clp(c.tarifa_total)}</span></div>
         </div>
-        <p class="muted" style="margin-top:10px">El pago (en línea o por transferencia) se realiza antes del retiro.</p>
+        <p class="muted" style="margin-top:10px">${app.conf.pagos.en_linea ? 'El pago (en línea o por transferencia) se realiza antes del retiro.' : 'Se paga por transferencia antes del retiro: subes el comprobante y administración lo aprueba.'}</p>
       </div></div>`;
   }
 
@@ -342,15 +342,15 @@ export async function nuevo() {
         <div class="card pila">
           <div class="fila entre"><h2 style="margin:0">Total ${clp(envio.tarifa_total)}</h2>${badgePago(envio.estado_pago)}</div>
           <div class="aviso magenta">Paga ahora: con el pago aprobado recibes el ticket y el repartidor puede retirar tu envío.</div>
-          <button class="btn grande ancho" id="pagar">Pagar ${clp(envio.tarifa_total)}</button>
-          <button class="btn sec ancho" id="transferir">Pagar con transferencia (subir comprobante)</button>
+          ${app.conf.pagos.en_linea ? html`<button class="btn grande ancho" id="pagar">Pagar ${clp(envio.tarifa_total)}</button>` : ''}
+          <button class="btn ${app.conf.pagos.en_linea ? 'sec' : 'grande'} ancho" id="transferir">Pagar ${clp(envio.tarifa_total)} con transferencia (subir comprobante)</button>
           ${esAdmin ? html`<div class="grid g2"><button class="btn sec" id="t80">Ticket 80 mm</button><button class="btn sec" id="ta4">Ticket A4</button></div>` : ''}
           <a class="btn sec" href="${wa}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
           <div class="fila"><a class="btn azul" href="#/envio/${envio.id}">Ver detalle</a><a class="btn sec" href="#/nuevo" id="otro">Crear otro envío</a></div>
         </div>
       </div>`);
     api(`/api/envios/${envio.id}/qr.png`, { blob: true }).then((b) => { $('#qr').src = URL.createObjectURL(b); }).catch(() => {});
-    $('#pagar').onclick = () => pagar(envio, () => ir(`#/envio/${envio.id}`));
+    $('#pagar')?.addEventListener('click', () => pagar(envio, () => ir(`#/envio/${envio.id}`)));
     $('#transferir').onclick = () => subirComprobante(envio, () => ir(`#/envio/${envio.id}`));
     $('#t80')?.addEventListener('click', () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { blob: true })).catch(errorToast));
     $('#ta4')?.addEventListener('click', () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=a4`, { blob: true })).catch(errorToast));

@@ -421,7 +421,8 @@ export async function cobranza(rango = {}) {
         </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay comprobantes pendientes ✔</p>`}
     </div>
     ${r.sin_respuesta ? html`<div class="aviso alerta" style="margin-top:16px">${r.sin_respuesta} pago(s) iniciados hace más de 30 minutos sin respuesta de la pasarela: el cliente abandonó el pago o el aviso no llegó.</div>` : ''}
-    ${r.proveedor_actual === 'simulado' ? html`<div class="aviso magenta" style="margin-top:16px">Los pagos en línea están en <b>modo simulado</b>: no se mueve dinero real. Elige un proveedor con el comparador de abajo para conectarlo en la etapa de desarrollo.</div>` : ''}
+    ${!app.conf.pagos.en_linea ? html`<div class="aviso" style="margin-top:16px">Los clientes pagan <b>por transferencia</b>: suben el comprobante y tú lo apruebas o rechazas arriba. El pago en línea está apagado; el comparador de abajo sirve para elegir una pasarela real más adelante.</div>`
+      : r.proveedor_actual === 'simulado' ? html`<div class="aviso magenta" style="margin-top:16px">Los pagos en línea están en <b>modo simulado</b>: no se mueve dinero real. Elige un proveedor con el comparador de abajo para conectarlo en la etapa de desarrollo.</div>` : ''}
     <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Pagos</h2><span class="sub">Últimos 200</span></div>
       ${pagos.length ? html`<div class="tabla-wrap"><table><thead><tr><th>Fecha</th><th>Folio</th><th>Cliente</th><th>Medio</th><th>Estado</th><th>Verificación</th><th class="num">Monto</th><th class="num">Comisión</th><th>Abono</th></tr></thead>
         <tbody>${pagos.map((p) => html`<tr>

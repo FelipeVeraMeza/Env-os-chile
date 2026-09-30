@@ -30,6 +30,7 @@ export async function iniciarPago(envio, usuarioId) {
   if (envio.estado_pago === 'en_revision') throw falla(409, COMPROBANTE_EN_REVISION);
   if (!(envio.tarifa_total > 0)) throw falla(409, 'Este envío no tiene monto a pagar: administración debe registrarlo como pagado');
   const conf = await leerConfig();
+  if (!conf.pagos.en_linea) throw falla(409, PAGO_EN_LINEA_APAGADO);
   // Pulsar "Pagar" varias veces reutiliza el pago abierto en vez de acumular cobros iniciados.
   const abierto = await uno(
     `SELECT id, proveedor, monto, estado, token FROM pago WHERE envio_id = $1 AND estado = 'iniciado' AND proveedor = $2 AND monto = $3
@@ -49,6 +50,8 @@ export async function iniciarPago(envio, usuarioId) {
 // Confirma un pago simulado aplicando la misma verificación que se exigirá a la pasarela real
 // (token, monto exacto en CLP, id de transacción). `autorizar(p)` decide quién puede confirmarlo.
 export async function confirmarPago(req, tokenPago, resultado, autorizar) {
+  // Un pago abierto antes de apagar el pago en línea tampoco se puede confirmar.
+  if (!(await leerConfig()).pagos.en_linea) throw falla(409, PAGO_EN_LINEA_APAGADO);
   const envioId = await transaccion(async (db) => {
     const { rows: [p] } = await db.query(
       `SELECT p.*, e.cliente_id, e.repartidor_id, e.estado_pago, e.estado AS envio_estado, e.tarifa_total
@@ -99,6 +102,8 @@ export async function confirmarPago(req, tokenPago, resultado, autorizar) {
 // ---------- Transferencia con comprobante (revisión de administración) ----------
 // El cliente transfiere, sube la imagen y el pago queda "en revisión". Administración la mira y
 // aprueba (el envío queda pagado: ticket, asignación y retiro) o rechaza con motivo (se sube otra).
+
+export const PAGO_EN_LINEA_APAGADO = 'El pago se hace por transferencia: transfiere y sube el comprobante para que administración lo apruebe';
 
 export const COMPROBANTE_EN_REVISION = 'Hay un comprobante de transferencia en revisión: espera a que administración lo apruebe o lo rechace';
 

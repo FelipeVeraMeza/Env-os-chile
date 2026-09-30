@@ -1,6 +1,6 @@
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { API, datosEnvio, escenario, formulario, jpegPrueba, peticion } from '../cliente.js';
+import { API, datosEnvio, escenario, formulario, jpegPrueba, pagarPorTransferencia, peticion } from '../cliente.js';
 
 let esc;
 let envio;
@@ -70,16 +70,19 @@ test('CP-26 · Sin pago no se asigna ni se retira: "servicio pagado para poder r
   assert.equal(r.status, 404, 'el repartidor no tiene el envío');
 });
 
-test('CP-27 · Pago en línea (proveedor simulado) marca el envío como pagado', async () => {
-  const p = await peticion('POST', `/api/envios/${envio.id}/pago`, { sesion: esc.cliente });
-  assert.equal(p.status, 201);
-  assert.equal(p.datos.monto, 3500);
-  const c = await peticion('POST', `/api/pagos/${p.datos.token}/confirmar`, { sesion: esc.cliente, json: { resultado: 'aprobado' } });
-  assert.equal(c.status, 200);
+test('CP-27 · Se paga por transferencia (el pago en línea está apagado) y administración aprueba: queda pagado', async () => {
+  const conf = (await peticion('GET', '/api/config/publica')).datos;
+  if (!conf.pagos.en_linea) {
+    const enLinea = await peticion('POST', `/api/envios/${envio.id}/pago`, { sesion: esc.cliente });
+    assert.equal(enLinea.status, 409);
+    assert.match(enLinea.datos.error, /transferencia/);
+    assert.equal((await peticion('POST', `/api/envios/${envio.id}/link-pago`, { sesion: esc.cliente })).status, 409);
+  }
+  const p = await pagarPorTransferencia(esc, envio.id);
+  assert.equal(p.monto, 3500);
   const d = await peticion('GET', `/api/envios/${envio.id}`, { sesion: esc.cliente });
   assert.equal(d.datos.estado_pago, 'pagado');
-  const dos = await peticion('POST', `/api/pagos/${p.datos.token}/confirmar`, { sesion: esc.cliente, json: { resultado: 'aprobado' } });
-  assert.equal(dos.status, 409, 'un pago no se procesa dos veces');
+  assert.equal(d.datos.pago_medio, 'transferencia');
   const t = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente, crudo: true });
   assert.equal(t.status, 200, 'con el pago aprobado el cliente recibe su ticket');
   const a = await peticion('POST', `/api/envios/${envio.id}/asignar`, { sesion: esc.admin, json: { repartidor_id: esc.repartidor.usuario.id } });

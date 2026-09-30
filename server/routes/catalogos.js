@@ -67,7 +67,7 @@ configuracion.get('/publica', ruta(async (_req, res) => {
   const conf = await leerConfig();
   res.json({
     negocio: conf.negocio, tarifas: conf.tarifas, operacion: conf.operacion, ticket: conf.ticket,
-    pagos: { proveedor: conf.pagos.proveedor }, transferencia: conf.transferencia, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
+    pagos: { proveedor: conf.pagos.proveedor, en_linea: conf.pagos.en_linea }, transferencia: conf.transferencia, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
     motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave), recuperacion_por_correo: correoConfigurado(),
   });
 }));
@@ -105,6 +105,10 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
   }
   // Solo el simulador está conectado: elegir otra pasarela hoy dejaría a los clientes sin poder pagar.
   if (clave === 'pagos' && nuevo.proveedor !== 'simulado') errores.proveedor = 'Esa pasarela aún no está integrada (etapa de desarrollo)';
+  // La pasarela simulada no mueve dinero: en producción no se puede abrir el pago en línea con ella.
+  if (clave === 'pagos' && nuevo.en_linea && nuevo.proveedor === 'simulado' && config.entorno === 'production') {
+    errores.en_linea = 'El pago en línea simulado no cobra dinero real: en producción se paga por transferencia';
+  }
   if (clave === 'transferencia') {
     for (const [k, v] of Object.entries(nuevo)) {
       nuevo[k] = String(v).trim();

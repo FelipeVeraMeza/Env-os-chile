@@ -83,17 +83,23 @@ try {
     await foto(c, 'cliente-envio-creado');
   });
 
-  await paso('Cliente paga en línea (pasarela de prueba)', async () => {
-    await c.click('#pagar');
-    await c.click('#aprobar');
+  await paso('Cliente paga por transferencia: sube el comprobante y queda en revisión', async () => {
+    await c.click('#transferir');
+    const jpeg = Buffer.from(await jpegPrueba().arrayBuffer());
+    await c.setInputFiles('#f-comprobante input[name=archivo]', { name: 'comprobante.jpg', mimeType: 'image/jpeg', buffer: jpeg });
+    await c.click('#f-comprobante button');
     await c.waitForURL(/#\/envio\/\d+$/);
     envioId = Number(c.url().match(/envio\/(\d+)/)[1]);
-    await c.locator('.badge', { hasText: 'Pagado' }).first().waitFor();
+    await c.locator('.badge', { hasText: 'Pago en revisión' }).first().waitFor();
+    await foto(c, 'cliente-comprobante-en-revision');
   });
 
-  await paso('Administración (otro teléfono, al mismo tiempo) asigna el repartidor', async () => {
+  await paso('Administración (otro teléfono, al mismo tiempo) aprueba el pago y asigna el repartidor', async () => {
     const a = admin.pagina;
     await a.goto(`${URL_APP}/#/envio/${envioId}`, { waitUntil: 'networkidle' });
+    await a.click('#revisar-comprobante');
+    await a.click('#f-revision button[value="aprobar"]');
+    await a.locator('#asignar').waitFor();
     await a.selectOption('#asignar', String(repartidor.perfil.id));
     await a.locator('.badge', { hasText: 'Asignado' }).first().waitFor();
     await foto(a, 'admin-asignado');

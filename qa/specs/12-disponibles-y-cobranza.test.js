@@ -1,6 +1,6 @@
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { datosEnvio, escenario, peticion } from '../cliente.js';
+import { datosEnvio, escenario, pagarPorTransferencia, peticion } from '../cliente.js';
 
 let esc;
 let envio;
@@ -12,12 +12,7 @@ async function crearEnvio() {
   return r.datos;
 }
 
-async function pagar(id) {
-  const p = await peticion('POST', `/api/envios/${id}/pago`, { sesion: esc.cliente });
-  assert.equal(p.status, 201, JSON.stringify(p.datos));
-  const c = await peticion('POST', `/api/pagos/${p.datos.token}/confirmar`, { sesion: esc.cliente, json: { resultado: 'aprobado' } });
-  assert.equal(c.status, 200, JSON.stringify(c.datos));
-}
+const pagar = (id) => pagarPorTransferencia(esc, id);
 
 const disponibles = async (sesion) => (await peticion('GET', '/api/envios/disponibles', { sesion })).datos;
 
@@ -65,8 +60,9 @@ test('CP-114 · Cada pago aprobado queda verificado y con bitácora; no se cobra
   const p = pagos.find((x) => x.envio_id === envio.id && x.estado === 'aprobado');
   assert.ok(p, 'debe existir el pago aprobado');
   assert.ok(p.verificado_en);
-  assert.ok(p.verificacion);
-  assert.ok(p.transaccion_id);
+  assert.equal(p.verificacion, 'manual', 'lo verificó administración al aprobar el comprobante');
+  assert.equal(p.medio, 'transferencia');
+  assert.ok(p.verificado_por_nombre);
   const ev = (await peticion('GET', `/api/cobranza/pagos/${p.id}/eventos`, { sesion: esc.admin })).datos;
   assert.deepEqual(ev.map((x) => x.tipo), ['inicio', 'verificacion']);
   const manual = await peticion('POST', `/api/envios/${envio.id}/pago-manual`, { sesion: esc.admin, json: { medio: 'transferencia' } });

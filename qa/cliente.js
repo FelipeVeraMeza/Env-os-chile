@@ -102,14 +102,35 @@ export async function escenario() {
   return { admin, cliente, clienteB, repartidor, repartidorB, comuna };
 }
 
+// Paga un envío como en la operación real: el cliente sube el comprobante de la transferencia y administración lo aprueba.
+export async function pagarPorTransferencia(esc, envioId, sesionCliente = esc.cliente) {
+  const s = await peticion('POST', `/api/envios/${envioId}/comprobante`, { sesion: sesionCliente, form: formulario({}, { archivo: [jpegPrueba(), 'comprobante.jpg'] }) });
+  assert.equal(s.status, 201, JSON.stringify(s.datos));
+  const a = await peticion('POST', `/api/cobranza/comprobantes/${s.datos.id}/aprobar`, { sesion: esc.admin });
+  assert.equal(a.status, 200, JSON.stringify(a.datos));
+  return s.datos;
+}
+
+// El pago en línea está apagado (se paga por transferencia). Las pruebas de la pasarela lo encienden solo mientras
+// corren; donde no se puede encender (producción con la pasarela simulada) la prueba se omite.
+export async function conPagoEnLinea(t, esc, fn) {
+  const antes = (await peticion('GET', '/api/config/publica')).datos.pagos.en_linea;
+  if (!antes) {
+    const r = await peticion('PUT', '/api/config/pagos', { sesion: esc.admin, json: { en_linea: true } });
+    if (r.status !== 200) return t.skip('el pago en línea no se puede encender en este servidor');
+  }
+  try {
+    return await fn();
+  } finally {
+    if (!antes) await peticion('PUT', '/api/config/pagos', { sesion: esc.admin, json: { en_linea: false } });
+  }
+}
+
 // Lleva un envío hasta "en ruta": creado → pagado → asignado → retirado.
 export async function envioEnRuta(esc, extra = {}) {
   const c = await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id, extra), confirmar: true } });
   assert.equal(c.status, 201, JSON.stringify(c.datos));
-  const pago = await peticion('POST', `/api/envios/${c.datos.id}/pago`, { sesion: esc.cliente });
-  assert.equal(pago.status, 201, JSON.stringify(pago.datos));
-  const conf = await peticion('POST', `/api/pagos/${pago.datos.token}/confirmar`, { sesion: esc.cliente, json: { resultado: 'aprobado' } });
-  assert.equal(conf.status, 200, JSON.stringify(conf.datos));
+  await pagarPorTransferencia(esc, c.datos.id);
   const asig = await peticion('POST', `/api/envios/${c.datos.id}/asignar`, { sesion: esc.admin, json: { repartidor_id: esc.repartidor.usuario.id } });
   assert.equal(asig.status, 200, JSON.stringify(asig.datos));
   const ret = await peticion('POST', `/api/envios/${c.datos.id}/estado`, { sesion: esc.repartidor, json: { estado: 'en_ruta' } });

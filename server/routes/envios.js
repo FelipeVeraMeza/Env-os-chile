@@ -14,7 +14,7 @@ import {
 import { guardarArchivo, subida } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
-import { COMPROBANTE_EN_REVISION, iniciarPago, registrarComprobante, registrarEventoPago } from '../lib/pagos.js';
+import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, iniciarPago, registrarComprobante, registrarEventoPago } from '../lib/pagos.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
 
@@ -443,6 +443,7 @@ envios.post('/:id/link-pago', requiereRol('admin', 'cliente'), ruta(async (req, 
   if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
   if (envio.estado_pago === 'en_revision') throw falla(409, COMPROBANTE_EN_REVISION);
   if (!(envio.tarifa_total > 0)) throw falla(409, 'Este envío no tiene monto a pagar');
+  if (!(await leerConfig()).pagos.en_linea) throw falla(409, PAGO_EN_LINEA_APAGADO);
   let link = await uno(
     `SELECT token, vence_en FROM link_pago WHERE envio_id = $1 AND revocado_en IS NULL AND pagado_en IS NULL AND vence_en > now() + interval '1 day'
      ORDER BY id DESC LIMIT 1`, [envio.id]);

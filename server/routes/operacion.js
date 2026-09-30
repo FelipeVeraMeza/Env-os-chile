@@ -79,8 +79,8 @@ pagoPublico.get('/:token', ruta(async (req, res) => {
   const pagado = l.estado_pago === 'pagado';
   res.json({
     folio: l.folio, monto: l.tarifa_total, negocio: conf.negocio.nombre, pagado,
-    vigente: !pagado && !l.pagado_en && new Date(l.vence_en) > new Date() && !['anulado', 'borrador'].includes(l.estado),
-    anulado: l.estado === 'anulado', vence_en: l.vence_en, proveedor: conf.pagos.proveedor,
+    vigente: conf.pagos.en_linea && !pagado && !l.pagado_en && new Date(l.vence_en) > new Date() && !['anulado', 'borrador'].includes(l.estado),
+    anulado: l.estado === 'anulado', vence_en: l.vence_en, proveedor: conf.pagos.proveedor, en_linea: conf.pagos.en_linea,
   });
 }));
 

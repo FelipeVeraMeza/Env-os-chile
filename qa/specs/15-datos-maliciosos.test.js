@@ -3,7 +3,7 @@
 // Usa usuarios QA propios y restaura la configuración al terminar: no deja rastros en la base.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { datosEnvio, escenario, formulario, peticion } from '../cliente.js';
+import { conPagoEnLinea, datosEnvio, escenario, formulario, peticion } from '../cliente.js';
 
 let esc;
 let ids;
@@ -13,8 +13,9 @@ before(async () => {
   esc = await escenario();
   const e = await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id), confirmar: true } });
   assert.equal(e.status, 201);
-  const p = await peticion('POST', `/api/envios/${e.datos.id}/pago`, { sesion: esc.cliente });
-  ids = { envio: e.datos.id, destinatario: e.datos.destinatario_id, direccion: e.datos.direccion_id, usuario: esc.clienteB.usuario.id, token: p.datos.token, comuna: esc.comuna.id };
+  let token = 'sin-pago-en-linea';
+  await conPagoEnLinea({ skip() {} }, esc, async () => { token = (await peticion('POST', `/api/envios/${e.datos.id}/pago`, { sesion: esc.cliente })).datos.token; });
+  ids = { envio: e.datos.id, destinatario: e.datos.destinatario_id, direccion: e.datos.direccion_id, usuario: esc.clienteB.usuario.id, token, comuna: esc.comuna.id };
   configOriginal = (await peticion('GET', '/api/config/publica')).datos;
 });
 
