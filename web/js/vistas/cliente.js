@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { enviarForm, get, post, patch, api } from '../api.js';
 import {
-  $, $$, abrirBlob, badgePago, clp, comprimirFoto, datosForm, errorToast, esqueleto, html, icono, marcarErrores, modal, montar, toast, vacio,
+  $, $$, abrirBlob, badgePago, clp, comprimirFoto, datosForm, errorToast, esqueleto, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio,
 } from '../ui.js';
 import { comunasCobertura, direccionTexto, itemEnvio, opcionesComunas } from './comun.js';
 import { pagar, subirComprobante } from './envios.js';
@@ -10,11 +10,8 @@ import { pagar, subirComprobante } from './envios.js';
 export async function inicio() {
   const vista = $('#vista');
   montar(vista, esqueleto(3));
-  const { items, total } = await get('/api/envios?limite=100');
-  const enCurso = items.filter((e) => ['creado', 'asignado', 'en_ruta', 'fallido', 'reagendado'].includes(e.estado));
-  const porPagar = items.filter((e) => e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado));
-  const enRevision = items.filter((e) => e.estado_pago === 'en_revision' && e.estado !== 'anulado');
-  const entregados = items.filter((e) => e.estado === 'entregado');
+  // Las cifras vienen contadas por el servidor sobre TODOS los envíos (antes se contaban solo los últimos 100 de la lista).
+  const [{ items }, r] = await Promise.all([get('/api/envios?limite=6'), get('/api/envios/resumen')]);
   const nombre = app.usuario.nombre.split(' ')[0];
   montar(vista, html`
     <section class="hero">
@@ -26,16 +23,16 @@ export async function inicio() {
       </div>
     </section>
     <div class="grid g4" style="margin-bottom:20px">
-      <div class="kpi"><div class="etiqueta">En curso</div><div class="valor">${enCurso.length}</div><div class="nota">envíos activos</div></div>
-      <div class="kpi"><div class="etiqueta">Por pagar</div><div class="valor">${porPagar.length}</div><div class="nota">${clp(porPagar.reduce((s, e) => s + e.tarifa_total, 0))}</div></div>
-      <div class="kpi"><div class="etiqueta">Entregados</div><div class="valor">${entregados.length}</div><div class="nota">con foto y GPS</div></div>
-      <div class="kpi destacado"><div class="etiqueta">Total</div><div class="valor">${total}</div><div class="nota">envíos registrados</div></div>
+      <div class="kpi"><div class="etiqueta">En curso</div><div class="valor">${r.en_curso}</div><div class="nota">envíos activos</div></div>
+      <div class="kpi"><div class="etiqueta">Por pagar</div><div class="valor">${r.por_pagar}</div><div class="nota">${clp(r.monto_por_pagar)}</div></div>
+      <div class="kpi"><div class="etiqueta">Entregados</div><div class="valor">${r.entregados}</div><div class="nota">con foto y GPS</div></div>
+      <div class="kpi destacado"><div class="etiqueta">Total</div><div class="valor">${r.total}</div><div class="nota">envíos registrados</div></div>
     </div>
-    ${porPagar.length ? html`<div class="aviso magenta" style="margin-bottom:16px"><b>Tienes ${porPagar.length} envío(s) pendientes de pago.</b> El repartidor solo puede retirar envíos pagados.</div>` : ''}
-    ${enRevision.length ? html`<div class="aviso" style="margin-bottom:16px"><b>${enRevision.length} comprobante(s) de transferencia en revisión.</b> Te entregamos el ticket cuando administración apruebe el pago.</div>` : ''}
+    ${r.por_pagar ? html`<div class="aviso magenta" style="margin-bottom:16px"><b>Tienes ${r.por_pagar} envío(s) pendientes de pago.</b> El repartidor solo puede retirar envíos pagados.</div>` : ''}
+    ${r.en_revision ? html`<div class="aviso" style="margin-bottom:16px"><b>${r.en_revision} comprobante(s) de transferencia en revisión.</b> Te entregamos el ticket cuando administración apruebe el pago.</div>` : ''}
     <div class="card">
       <div class="card-titulo"><h2>Envíos recientes</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
-      <div class="lista-envios">${items.length ? items.slice(0, 6).map((e) => itemEnvio(e)) : vacio('Aún no tienes envíos.', html`<a class="btn" href="#/nuevo">Crear mi primer envío</a>`)}</div>
+      <div class="lista-envios">${items.length ? items.map((e) => itemEnvio(e)) : vacio('Aún no tienes envíos.', html`<a class="btn" href="#/nuevo">Crear mi primer envío</a>`)}</div>
     </div>`);
 }
 
@@ -277,11 +274,13 @@ export async function nuevo() {
     $('input[name="boleta"]', f)?.addEventListener('change', (ev) => { w.boleta = ev.target.files[0] || null; });
     $('input[name="foto"]', f)?.addEventListener('change', (ev) => { w.foto = ev.target.files[0] || null; });
     if (w.paso === 2) {
-      f.addEventListener('input', () => { clearTimeout(w.t); w.t = setTimeout(() => { guardarPaso(); cotizarAhora().then(pintarTarifa).catch(() => {}); }, 400); });
+      // Si el formulario ya no está en pantalla (se confirmó o se cambió de paso antes de los 400 ms), no se hace nada.
+      f.addEventListener('input', () => { clearTimeout(w.t); w.t = setTimeout(() => { if (form() !== f) return; guardarPaso(); cotizarAhora().then(pintarTarifa).catch(() => {}); }, 400); });
     }
-    $('#atras', f).onclick = () => { guardarPaso(); w.paso -= 1; pintar(); };
+    $('#atras', f).onclick = () => { clearTimeout(w.t); guardarPaso(); w.paso -= 1; pintar(); };
     f.onsubmit = async (ev) => {
       ev.preventDefault();
+      clearTimeout(w.t);
       guardarPaso();
       if (!validarLocal()) return;
       const btn = $('#siguiente', f);
@@ -349,7 +348,7 @@ export async function nuevo() {
           <div class="fila"><a class="btn azul" href="#/envio/${envio.id}">Ver detalle</a><a class="btn sec" href="#/nuevo" id="otro">Crear otro envío</a></div>
         </div>
       </div>`);
-    api(`/api/envios/${envio.id}/qr.png`, { blob: true }).then((b) => { $('#qr').src = URL.createObjectURL(b); }).catch(() => {});
+    api(`/api/envios/${envio.id}/qr.png`, { blob: true }).then((b) => mostrarBlob($('#qr'), b)).catch(() => {});
     $('#pagar')?.addEventListener('click', () => pagar(envio, () => ir(`#/envio/${envio.id}`)));
     $('#transferir').onclick = () => subirComprobante(envio, () => ir(`#/envio/${envio.id}`));
     $('#t80')?.addEventListener('click', () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { blob: true })).catch(errorToast));
@@ -396,8 +395,14 @@ export async function libreta() {
     };
   };
   $$('[data-agregar]').forEach((b) => { b.onclick = () => formDireccion(b.dataset.agregar); });
-  $$('[data-principal]').forEach((b) => { b.onclick = async () => { const [d, di] = b.dataset.principal.split(':'); await patch(`/api/destinatarios/${d}/direcciones/${di}`, { es_principal: true }).catch(errorToast); libreta(); }; });
-  $$('[data-quitar]').forEach((b) => { b.onclick = async () => { const [d, di] = b.dataset.quitar.split(':'); await patch(`/api/destinatarios/${d}/direcciones/${di}`, { activa: false }).catch(errorToast); toast('Dirección quitada (se conserva en envíos anteriores)'); libreta(); }; });
+  // El aviso de éxito solo se muestra si el cambio se guardó (antes decía "Dirección quitada" aunque fallara).
+  const cambiarDireccion = async (clave, cambio, ok) => {
+    const [d, di] = clave.split(':');
+    try { await patch(`/api/destinatarios/${d}/direcciones/${di}`, cambio); if (ok) toast(ok, 'ok'); } catch (err) { errorToast(err); }
+    libreta();
+  };
+  $$('[data-principal]').forEach((b) => { b.onclick = () => cambiarDireccion(b.dataset.principal, { es_principal: true }); });
+  $$('[data-quitar]').forEach((b) => { b.onclick = () => cambiarDireccion(b.dataset.quitar, { activa: false }, 'Dirección quitada (se conserva en envíos anteriores)'); });
   $('#nuevo-dest').onclick = () => {
     const m = modal(html`<h2>Nuevo destinatario</h2><form class="pila" id="f-dest" novalidate>
       <label class="campo">Nombre completo *<input name="nombre"></label>

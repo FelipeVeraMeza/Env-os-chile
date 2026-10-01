@@ -45,8 +45,29 @@ export const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
 // Fecha AAAA-MM-DD opcional de un filtro; si viene con otro formato es un error del cliente.
 export function fechaFiltro(valor, nombre) {
   if (valor === undefined || valor === '') return null;
-  if (!FECHA_ISO.test(String(valor)) || Number.isNaN(new Date(`${valor}T00:00:00Z`).getTime())) throw falla(400, `${nombre}: usa el formato AAAA-MM-DD`);
+  const d = new Date(`${valor}T00:00:00Z`);
+  // "2026-02-31" pasa el formato pero no existe: JavaScript lo corre al 3 de marzo, por eso se compara de vuelta.
+  if (!FECHA_ISO.test(String(valor)) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== String(valor)) {
+    throw falla(400, `${nombre}: usa una fecha válida con el formato AAAA-MM-DD`);
+  }
   return String(valor);
+}
+
+// Texto de búsqueda para ILIKE: se recorta, se limita a 100 caracteres y se escapan los comodines (% y _),
+// así buscar "50%" o "a_b" encuentra ese texto literal en vez de todos los registros.
+export function patronBusqueda(valor) {
+  const texto = String(valor ?? '').trim().slice(0, 100);
+  return `%${texto.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
+// Rango de fechas de un reporte (AAAA-MM-DD, hora de Chile). Por defecto, del día 1 del mes a hoy.
+// Una fecha imposible o un rango invertido es un error del cliente (400), no un reporte vacío.
+export function rangoFechas(q = {}) {
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+  const desde = fechaFiltro(q.desde, 'desde') || `${hoy.slice(0, 8)}01`;
+  const hasta = fechaFiltro(q.hasta, 'hasta') || hoy;
+  if (desde > hasta) throw falla(400, 'La fecha "desde" no puede ser posterior a "hasta"');
+  return { desde, hasta };
 }
 
 export function idNumerico(valor, nombre = 'id') {

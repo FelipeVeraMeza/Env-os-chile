@@ -130,7 +130,8 @@ export class ErrorNegocio extends Error {
 export function normalizarTelefono(valor) {
   if (!valor) return null;
   let d = String(valor).replace(/[^\d]/g, '');
-  if (d.startsWith('56')) d = d.slice(2);
+  if (d.startsWith('0056')) d = d.slice(2); // prefijo internacional marcado con 00 en vez de +
+  if (d.startsWith('56') && d.length > 9) d = d.slice(2);
   if (d.length === 8) d = '9' + d;
   if (!/^9\d{8}$/.test(d)) return null;
   return `+56 9 ${d.slice(1, 5)} ${d.slice(5)}`;
@@ -143,7 +144,8 @@ export function normalizarRut(valor) {
   if (limpio.length < 2) return null;
   const cuerpo = limpio.slice(0, -1);
   const dv = limpio.slice(-1);
-  if (!/^\d{1,8}$/.test(cuerpo)) return null;
+  // Un RUT de cuerpo 0 ("0-0") calza con el dígito verificador pero no existe.
+  if (!/^\d{1,8}$/.test(cuerpo) || Number(cuerpo) === 0) return null;
   let suma = 0;
   let mult = 2;
   for (let i = cuerpo.length - 1; i >= 0; i--) {
@@ -162,6 +164,13 @@ function entero(v) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+// Largo máximo de los textos que escribe el usuario: lo que pasa de esto no cabe en la etiqueta térmica ni en las pantallas.
+export const LARGOS = {
+  descripcion_producto: 200, observaciones: 300, courier_punto: 120, courier_codigo: 60,
+  nombre: 120, correo: 200, notas: 500, calle: 120, numero: 20, depto: 40, referencia: 200, alias: 60,
+};
+const excede = (v, max) => v !== undefined && v !== null && String(v).trim().length > max;
+
 // Límites absolutos (también para cotización especial): evitan valores que no caben en la base.
 export const LIMITES = { bultos: 100, peso_kg: 1000, dim_cm: 500, valor_declarado: 50_000_000, monto: 100_000_000 };
 
@@ -170,7 +179,8 @@ export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
   const errores = {};
   if (!p.descripcion_producto || !String(p.descripcion_producto).trim()) {
     errores.descripcion_producto = 'Describe el producto';
-  }
+  } else if (excede(p.descripcion_producto, LARGOS.descripcion_producto)) errores.descripcion_producto = `Máximo ${LARGOS.descripcion_producto} caracteres`;
+  if (excede(p.observaciones, LARGOS.observaciones)) errores.observaciones = `Máximo ${LARGOS.observaciones} caracteres`;
   const bultos = entero(p.bultos ?? 1);
   if (!Number.isInteger(bultos) || bultos < 1) errores.bultos = 'Debe haber al menos 1 bulto';
   else if (bultos > LIMITES.bultos) errores.bultos = `Fuera de rango: hasta ${LIMITES.bultos} bultos por envío`;
@@ -196,6 +206,9 @@ export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
 export function validarDestinatario(d) {
   const errores = {};
   if (!d || !String(d.nombre || '').trim()) errores.nombre = 'Nombre obligatorio';
+  else if (excede(d.nombre, LARGOS.nombre)) errores.nombre = `Máximo ${LARGOS.nombre} caracteres`;
+  if (excede(d?.correo, LARGOS.correo)) errores.correo = 'Correo inválido';
+  if (excede(d?.notas, LARGOS.notas)) errores.notas = `Máximo ${LARGOS.notas} caracteres`;
   if (!normalizarTelefono(d?.telefono)) errores.telefono = 'Teléfono inválido (formato +56 9 XXXX XXXX)';
   if (d?.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.correo)) errores.correo = 'Correo inválido';
   if (d?.rut && !normalizarRut(d.rut)) errores.rut = 'RUT inválido';
@@ -207,6 +220,9 @@ export function validarDireccion(d) {
   if (!d || !String(d.calle || '').trim()) errores.calle = 'Calle obligatoria';
   if (!d || !String(d.numero || '').trim()) errores.numero = 'Número obligatorio';
   if (!d || !d.comuna_id) errores.comuna_id = 'Selecciona la comuna';
+  for (const k of ['calle', 'numero', 'depto', 'referencia', 'alias']) {
+    if (!errores[k] && excede(d?.[k], LARGOS[k])) errores[k] = `Máximo ${LARGOS[k]} caracteres`;
+  }
   return errores;
 }
 
@@ -231,6 +247,8 @@ export function validarDestino(e, listas = CONFIG_POR_DEFECTO.listas, puntoCouri
   else if (tipo === 'punto_courier') {
     if (!listas.couriers.includes(e.courier_empresa)) errores.courier_empresa = `Selecciona la empresa (${listas.couriers.slice(0, 2).join(', ')}, …)`;
     if (!String(e.courier_punto || '').trim()) errores.courier_punto = 'Indica el punto o sucursal';
+    else if (excede(e.courier_punto, LARGOS.courier_punto)) errores.courier_punto = `Máximo ${LARGOS.courier_punto} caracteres`;
+    if (excede(e.courier_codigo, LARGOS.courier_codigo)) errores.courier_codigo = `Máximo ${LARGOS.courier_codigo} caracteres`;
   }
   if (e.horario_especial && !String(e.franja_horaria || '').trim()) {
     errores.franja_horaria = 'Indica la franja horaria solicitada';
@@ -345,6 +363,9 @@ export const ESTADOS_RECLAMO = {
   pagado: 'Pagado',
 };
 
+// Estados en que el paquete ya está (o estuvo) en manos del repartidor.
+export const ESTADOS_RETIRADO = ['en_ruta', 'entregado', 'fallido', 'reagendado', 'devuelto'];
+
 export const MIME_BOLETA = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
 
 // La boleta es OBLIGATORIA para cobrar el seguro.
@@ -354,6 +375,10 @@ export function validarReclamo({ envio, boleta, datos, reclamosPrevios = [], aho
   }
   if (['borrador', 'anulado'].includes(envio.estado)) {
     throw new ErrorNegocio(409, 'No se puede reclamar el seguro de un envío en borrador o anulado');
+  }
+  // Pérdida, daño o robo solo pueden ocurrir cuando el repartidor ya retiró el paquete.
+  if (!ESTADOS_RETIRADO.includes(envio.estado)) {
+    throw new ErrorNegocio(409, 'El seguro se reclama cuando el envío ya fue retirado por el repartidor');
   }
   if (reclamosPrevios.some((r) => r.estado !== 'rechazado')) {
     throw new ErrorNegocio(409, 'Ya existe un reclamo activo para este envío');
@@ -406,10 +431,23 @@ export function enlacesMapa(d) {
 
 // ---------- Visibilidad de montos ----------
 
-const CAMPOS_MONTO = ['tarifa_base', 'recargo_bultos', 'recargo_horario', 'tarifa_total', 'valor_declarado'];
+// Todo campo con dinero del envío: el repartidor no ve ninguno (incluido el recargo por sobredimensión).
+const CAMPOS_MONTO = ['tarifa_base', 'recargo_bultos', 'recargo_sobredimension', 'recargo_horario', 'tarifa_total', 'valor_declarado',
+  'reembolso_monto', 'reembolso_medio', 'reembolso_nota', 'pago_referencia'];
+// Datos personales que el repartidor no necesita para entregar (solo nombre, teléfono y dirección del destinatario).
+const DATOS_NO_REPARTO = ['destinatario_correo'];
 
 export function ocultarMontos(envio) {
   const copia = { ...envio };
-  for (const c of CAMPOS_MONTO) delete copia[c];
+  for (const c of [...CAMPOS_MONTO, ...DATOS_NO_REPARTO]) delete copia[c];
+  return copia;
+}
+
+// Envío disponible que el repartidor aún no toma: ve dónde y qué llevar (comuna, calle, bultos), pero no a quién
+// (nombre, teléfono, depto ni referencia) hasta que lo toma. Así nadie junta datos personales de envíos ajenos.
+export function vistaDisponible(envio) {
+  const copia = ocultarMontos(envio);
+  for (const c of ['destinatario_nombre', 'destinatario_telefono', 'depto', 'referencia', 'cliente_nombre', 'cliente_telefono', 'cliente_rut',
+    'observaciones', 'token_qr', 'qr_url', 'lat', 'lon']) delete copia[c];
   return copia;
 }

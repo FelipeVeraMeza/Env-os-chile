@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
-import { auditar, exigirSinErrores, falla, idNumerico, ruta } from '../lib/http.js';
+import { auditar, exigirSinErrores, falla, idNumerico, patronBusqueda, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
 import { correoConfigurado } from '../lib/correo.js';
 import { normalizarRut, normalizarTelefono, validarDestinatario, validarDireccion, normalizarLista, ESTADOS, ESTADOS_RECLAMO, MOTIVOS_FALLO, MOTIVOS_RECLAMO, CONFIG_POR_DEFECTO } from '../lib/reglas.js';
-import { autenticar, requiereRol } from '../middleware/auth.js';
+import { autenticar, requiereRol, usuarioOpcional } from '../middleware/auth.js';
 import { config } from '../config.js';
 import { registrarEvento } from '../lib/seguridad.js';
 
@@ -16,7 +16,7 @@ comunas.get('/', ruta(async (req, res) => {
   const params = [];
   if (req.query.cobertura === '1') cond.push('c.en_cobertura');
   if (req.query.region) { params.push(req.query.region); cond.push(`c.region = $${params.length}`); }
-  if (req.query.q) { params.push(`%${req.query.q}%`); cond.push(`c.nombre ILIKE $${params.length}`); }
+  if (req.query.q) { params.push(patronBusqueda(req.query.q)); cond.push(`c.nombre ILIKE $${params.length}`); }
   const { rows } = await query(
     `SELECT c.id, c.nombre, c.provincia, c.region, c.en_cobertura, c.zona_id, c.tarifa_base, z.nombre AS zona_nombre,
        COALESCE(c.tarifa_base, z.tarifa) AS tarifa
@@ -44,16 +44,36 @@ comunas.patch('/:id', autenticar, requiereRol('admin'), ruta(async (req, res) =>
 export const zonas = Router();
 zonas.use(autenticar);
 zonas.get('/', ruta(async (_req, res) => res.json((await query('SELECT * FROM zona ORDER BY orden, nombre')).rows)));
+// Tarifa de zona: pesos enteros entre 0 y 10.000.000. Vacío o nulo no es "cero": es un dato que falta.
+const TARIFA_MAX = 10_000_000;
+function tarifaZona(v) {
+  if (v === '' || v === null || v === undefined || typeof v === 'boolean') return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 && n <= TARIFA_MAX ? n : null;
+}
+function nombreZona(v) {
+  const t = typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
+  return t && t.length <= 60 ? t : null;
+}
+
 zonas.post('/', requiereRol('admin'), ruta(async (req, res) => {
   const { nombre, tarifa, color } = req.body || {};
-  if (!String(nombre || '').trim() || !Number.isInteger(Number(tarifa)) || Number(tarifa) < 0) throw falla(422, 'Nombre y tarifa obligatorios');
-  res.status(201).json(await uno('INSERT INTO zona (nombre, tarifa, color) VALUES ($1, $2, $3) RETURNING *', [nombre.trim(), Number(tarifa), color || null]));
+  const errores = {};
+  if (nombreZona(nombre) === null) errores.nombre = 'Obligatorio (hasta 60 caracteres)';
+  if (tarifaZona(tarifa) === null) errores.tarifa = `Pesos enteros entre $0 y $${TARIFA_MAX.toLocaleString('es-CL')}`;
+  exigirSinErrores(errores, 'Nombre y tarifa obligatorios');
+  const z = await uno('INSERT INTO zona (nombre, tarifa, color) VALUES ($1, $2, $3) RETURNING *', [nombreZona(nombre), tarifaZona(tarifa), color ? String(color).slice(0, 20) : null]);
+  await auditar(req, 'crear', 'zona', z.id, { nombre: z.nombre, tarifa: z.tarifa });
+  res.status(201).json(z);
 }));
 zonas.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
   const { nombre, tarifa, color } = req.body || {};
-  if (tarifa !== undefined && (!Number.isInteger(Number(tarifa)) || Number(tarifa) < 0)) throw falla(422, 'Tarifa inválida');
+  const errores = {};
+  if (nombre !== undefined && nombreZona(nombre) === null) errores.nombre = 'No puede quedar vacío (hasta 60 caracteres)';
+  if (tarifa !== undefined && tarifaZona(tarifa) === null) errores.tarifa = `Pesos enteros entre $0 y $${TARIFA_MAX.toLocaleString('es-CL')}`;
+  exigirSinErrores(errores, 'Tarifa inválida');
   const z = await uno('UPDATE zona SET nombre = COALESCE($1, nombre), tarifa = COALESCE($2, tarifa), color = COALESCE($3, color) WHERE id = $4 RETURNING *',
-    [nombre ?? null, tarifa !== undefined ? Number(tarifa) : null, color ?? null, idNumerico(req.params.id)]);
+    [nombre !== undefined ? nombreZona(nombre) : null, tarifa !== undefined ? tarifaZona(tarifa) : null, color ? String(color).slice(0, 20) : null, idNumerico(req.params.id)]);
   if (!z) throw falla(404, 'Zona no encontrada');
   await auditar(req, 'editar', 'zona', z.id, req.body);
   res.json(z);
@@ -63,41 +83,52 @@ zonas.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
 export const configuracion = Router();
 
 // Datos públicos que necesita la interfaz (sin secretos).
-configuracion.get('/publica', ruta(async (_req, res) => {
+configuracion.get('/publica', ruta(async (req, res) => {
   const conf = await leerConfig();
+  // Los datos de la cuenta bancaria solo se muestran a quien tiene sesión (o en la demo): con inicio de sesión real,
+  // cualquiera en internet podía leerlos sin entrar.
+  const conSesion = config.authMode === 'demo' || Boolean(await usuarioOpcional(req));
   res.json({
     negocio: conf.negocio, tarifas: conf.tarifas, operacion: conf.operacion, ticket: conf.ticket,
-    pagos: { proveedor: conf.pagos.proveedor, en_linea: conf.pagos.en_linea }, transferencia: conf.transferencia, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
+    pagos: { proveedor: conf.pagos.proveedor, en_linea: conf.pagos.en_linea }, transferencia: conSesion ? conf.transferencia : {}, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
     motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave), recuperacion_por_correo: correoConfigurado(),
   });
 }));
 
 configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, res) => {
   const clave = req.params.clave;
-  if (!(clave in CONFIG_POR_DEFECTO)) throw falla(404, 'Clave de configuración desconocida');
+  // Solo claves propias: "constructor", "__proto__" o "toString" existen en todo objeto y no son configuración.
+  if (!Object.hasOwn(CONFIG_POR_DEFECTO, clave)) throw falla(404, 'Clave de configuración desconocida');
   const actual = (await leerConfig())[clave];
   const nuevo = { ...actual };
+  const errores = {};
   for (const [k, v] of Object.entries(req.body || {})) {
-    if (!(k in CONFIG_POR_DEFECTO[clave])) continue; // se ignoran claves desconocidas
+    if (!Object.hasOwn(CONFIG_POR_DEFECTO[clave], k)) continue; // se ignoran claves desconocidas
     const tipo = Array.isArray(CONFIG_POR_DEFECTO[clave][k]) ? 'lista' : typeof CONFIG_POR_DEFECTO[clave][k];
     if (tipo === 'lista') {
       const { lista, error } = normalizarLista(v);
-      if (error) throw falla(422, `${k}: ${error}`);
+      // Con el nombre del campo en los detalles, la pantalla marca cuál lista tiene el problema.
+      if (error) throw falla(422, `${k}: ${error}`, { [k]: error });
       nuevo[k] = lista;
     } else if (tipo === 'number') {
-      if (!Number.isFinite(Number(v)) || Number(v) < 0) throw falla(422, `Valor inválido para ${k}`);
+      // Un campo vacío no es 0 (Number('') === 0): dejaría tarifas o reglas en cero sin querer.
+      if (v === '' || v === null || typeof v === 'boolean' || !Number.isFinite(Number(v)) || Number(v) < 0) {
+        errores[k] = 'Ingresa un número (no puede quedar vacío)';
+        continue;
+      }
       nuevo[k] = Number(v);
     } else if (tipo === 'boolean') nuevo[k] = v === true || v === 'true';
     else nuevo[k] = String(v ?? '');
   }
   if (clave === 'operacion' && !['pagina', 'google', 'waze'].includes(nuevo.qr_destino)) throw falla(422, 'Destino de QR inválido');
   // Valores que dejarían la operación sin sentido (sin intentos, sin espera, montos con decimales).
-  const errores = {};
   if (clave === 'operacion') {
     for (const k of ['intentos_max', 'espera_max_min']) if (!Number.isInteger(nuevo[k]) || nuevo[k] < 1 || nuevo[k] > 60) errores[k] = 'Debe ser un número entero entre 1 y 60';
   }
   if (clave === 'tarifas') {
-    for (const k of ['base', 'recargo_sobredimension', 'recargo_horario_especial']) if (!Number.isInteger(nuevo[k]) || nuevo[k] > 10_000_000) errores[k] = 'Pesos enteros';
+    for (const k of ['base', 'recargo_sobredimension', 'recargo_horario_especial']) if (!errores[k] && (!Number.isInteger(nuevo[k]) || nuevo[k] > 10_000_000)) errores[k] = 'Pesos enteros';
+    // Con tarifa $0 los envíos quedan "sin monto a pagar": no se pueden pagar ni asignar a un repartidor.
+    if (!errores.base && nuevo.base < 1) errores.base = 'La tarifa estándar debe ser mayor que $0';
     if (!(nuevo.peso_max_kg > 0) || nuevo.peso_max_kg > 1000) errores.peso_max_kg = 'Entre 1 y 1000 kg';
     if (!Number.isInteger(nuevo.dim_max_cm) || nuevo.dim_max_cm < 1 || nuevo.dim_max_cm > 500) errores.dim_max_cm = 'Entre 1 y 500 cm';
     if (!(nuevo.peso_estandar_kg > 0) || nuevo.peso_estandar_kg > nuevo.peso_max_kg) errores.peso_estandar_kg = 'Mayor que 0 y no más que el peso máximo';
@@ -116,6 +147,18 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
     if (!png || !png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) errores.logo_url = 'Sube el logo como imagen (PNG, JPG, WebP o SVG)';
     else if (nuevo.logo_url.length > 400_000) errores.logo_url = 'El logo es demasiado grande';
   }
+  if (clave === 'negocio') {
+    for (const k of ['nombre', 'rut', 'telefono', 'correo']) nuevo[k] = String(nuevo[k] ?? '').trim();
+    if (!nuevo.nombre) errores.nombre = 'El nombre de la empresa es obligatorio (aparece en el ticket y en la app)';
+    for (const k of ['nombre', 'rut', 'telefono', 'correo']) if (nuevo[k].length > 80) errores[k] = 'Máximo 80 caracteres';
+    if (nuevo.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nuevo.correo)) errores.correo = 'Correo inválido';
+    if (nuevo.rut) { const rut = normalizarRut(nuevo.rut); if (rut) nuevo.rut = rut; else errores.rut = 'RUT inválido'; }
+    if (nuevo.telefono && !errores.telefono) nuevo.telefono = normalizarTelefono(nuevo.telefono) || nuevo.telefono;
+  }
+  if (clave === 'ticket') {
+    nuevo.pie = String(nuevo.pie ?? '').trim();
+    if (nuevo.pie.length > 200) errores.pie = 'Máximo 200 caracteres (debe caber en la etiqueta)';
+  }
   if (clave === 'transferencia') {
     for (const [k, v] of Object.entries(nuevo)) {
       nuevo[k] = String(v).trim();
@@ -123,7 +166,14 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
     }
   }
   exigirSinErrores(errores, 'Revisa los valores');
-  await query('INSERT INTO config (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor', [clave, JSON.stringify(nuevo)]);
+  await transaccion(async (db) => {
+    await db.query('INSERT INTO config (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor', [clave, JSON.stringify(nuevo)]);
+    // Las comunas en cobertura cobran la tarifa de su zona (Santiago se creó con la tarifa estándar). Si la zona seguía
+    // con la tarifa estándar anterior, se actualiza junto con ella; si no, cambiar la tarifa en Ajustes no tendría efecto.
+    if (clave === 'tarifas' && nuevo.base !== actual.base) {
+      await db.query('UPDATE zona SET tarifa = $1 WHERE tarifa = $2', [nuevo.base, actual.base]);
+    }
+  });
   await auditar(req, 'editar', 'config', clave, nuevo);
   const cambios = Object.keys(nuevo).filter((k) => JSON.stringify(nuevo[k]) !== JSON.stringify(actual[k]));
   if (cambios.length) await registrarEvento(req, 'config_cambiada', { detalle: { clave, cambios: Object.fromEntries(cambios.map((k) => [k, { antes: actual[k], despues: nuevo[k] }])) } });
@@ -145,7 +195,9 @@ destinatarios.get('/', ruta(async (req, res) => {
   const params = [];
   const cond = [];
   if (clienteId) { params.push(clienteId); cond.push(`d.cliente_id = $${params.length}`); }
-  if (req.query.q) { params.push(`%${req.query.q}%`); cond.push(`(d.nombre ILIKE $${params.length} OR d.telefono ILIKE $${params.length})`); }
+  // Los titulares anonimizados no aparecen en la libreta (no se les puede volver a enviar); administración los ve con ?anonimizados=1.
+  if (!(req.usuario.rol === 'admin' && req.query.anonimizados === '1')) cond.push('d.anonimizado_en IS NULL');
+  if (req.query.q) { params.push(patronBusqueda(req.query.q)); cond.push(`(d.nombre ILIKE $${params.length} OR d.telefono ILIKE $${params.length})`); }
   const { rows } = await query(
     `SELECT d.*, COALESCE(json_agg(json_build_object('id', di.id, 'alias', di.alias, 'calle', di.calle, 'numero', di.numero,
         'depto', di.depto, 'referencia', di.referencia, 'comuna_id', di.comuna_id, 'comuna_nombre', c.nombre, 'es_principal', di.es_principal)
@@ -163,6 +215,11 @@ async function destinatarioPropio(req, id) {
   const d = await uno('SELECT * FROM destinatario WHERE id = $1', [id]);
   if (!d || (req.usuario.rol === 'cliente' && d.cliente_id !== req.usuario.id)) throw falla(404, 'Destinatario no encontrado');
   return d;
+}
+
+// Un titular anonimizado (Ley 21.719) no se vuelve a identificar: no se editan sus datos ni se le agregan direcciones.
+function exigirNoAnonimizado(d) {
+  if (d.anonimizado_en) throw falla(409, 'Este destinatario fue anonimizado a pedido del titular: crea uno nuevo si vuelve a enviarle');
 }
 
 // ---------- Derechos del titular de datos (RF-58, Ley 21.719) — solo administración ----------
@@ -207,6 +264,10 @@ destinatarios.post('/', ruta(async (req, res) => {
   for (const k of ['nombre', 'telefono', 'correo', 'rut', 'notas']) if (b[k] !== null && b[k] !== undefined) b[k] = String(b[k]);
   const clienteId = clienteObjetivo(req);
   if (!clienteId) throw falla(422, 'Indica el cliente');
+  // La libreta es de un cliente: administración no puede crear destinatarios a nombre de un repartidor u otro administrador.
+  if (req.usuario.rol === 'admin' && !(await uno("SELECT 1 FROM usuario WHERE id = $1 AND rol = 'cliente'", [clienteId]))) {
+    throw falla(422, 'El cliente indicado no existe', { cliente_id: 'Debe ser un cliente' });
+  }
   exigirSinErrores(validarDestinatario(b));
   const d = await uno(
     'INSERT INTO destinatario (cliente_id, nombre, telefono, correo, rut, notas) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
@@ -216,6 +277,7 @@ destinatarios.post('/', ruta(async (req, res) => {
 
 destinatarios.patch('/:id', ruta(async (req, res) => {
   const d = await destinatarioPropio(req, idNumerico(req.params.id));
+  exigirNoAnonimizado(d);
   const b = { ...d, ...req.body };
   for (const k of ['nombre', 'telefono', 'correo', 'rut', 'notas']) if (b[k] !== null && b[k] !== undefined) b[k] = String(b[k]);
   exigirSinErrores(validarDestinatario(b));
@@ -228,17 +290,26 @@ destinatarios.patch('/:id', ruta(async (req, res) => {
 // Agregar una nueva dirección (p. ej. cuando el destinatario se cambia de casa).
 destinatarios.post('/:id/direcciones', ruta(async (req, res) => {
   const d = await destinatarioPropio(req, idNumerico(req.params.id));
+  exigirNoAnonimizado(d);
   const b = { ...(req.body || {}) };
   for (const k of ['alias', 'calle', 'numero', 'depto', 'referencia']) if (b[k] !== null && b[k] !== undefined) b[k] = String(b[k]);
   exigirSinErrores(validarDireccion(b));
+  // "false" (texto) no es verdadero: solo true marca la dirección como principal.
+  const pedirPrincipal = b.es_principal === true || b.es_principal === 'true';
   const comuna = await uno('SELECT id FROM comuna WHERE id = $1', [Number(b.comuna_id)]);
   if (!comuna) throw falla(422, 'Comuna inexistente', { comuna_id: 'Inexistente' });
-  if (b.es_principal) await query('UPDATE direccion SET es_principal = false WHERE destinatario_id = $1', [d.id]);
-  const di = await uno(
-    `INSERT INTO direccion (destinatario_id, alias, calle, numero, depto, referencia, comuna_id, es_principal)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [d.id, b.alias || null, b.calle.trim(), String(b.numero).trim(), b.depto || null, b.referencia || null, comuna.id, Boolean(b.es_principal)]);
-  await query('UPDATE destinatario SET actualizado_en = now() WHERE id = $1', [d.id]);
+  const di = await transaccion(async (db) => {
+    // La primera dirección activa del destinatario queda como principal (igual que al crear un envío).
+    const { rows: [{ n }] } = await db.query('SELECT count(*)::int AS n FROM direccion WHERE destinatario_id = $1 AND activa AND es_principal', [d.id]);
+    const principal = pedirPrincipal || n === 0;
+    if (principal) await db.query('UPDATE direccion SET es_principal = false WHERE destinatario_id = $1', [d.id]);
+    const { rows: [r] } = await db.query(
+      `INSERT INTO direccion (destinatario_id, alias, calle, numero, depto, referencia, comuna_id, es_principal)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [d.id, b.alias?.trim() || null, b.calle.trim(), String(b.numero).trim(), b.depto?.trim() || null, b.referencia?.trim() || null, comuna.id, principal]);
+    await db.query('UPDATE destinatario SET actualizado_en = now() WHERE id = $1', [d.id]);
+    return r;
+  });
   res.status(201).json(di);
 }));
 
@@ -258,8 +329,17 @@ destinatarios.patch('/:id/direcciones/:dirId', ruta(async (req, res) => {
     const { rows: [actual] } = await db.query('SELECT id FROM direccion WHERE id = $1 AND destinatario_id = $2 FOR UPDATE', [dirId, d.id]);
     if (!actual) return null;
     if (principal) await db.query('UPDATE direccion SET es_principal = false WHERE destinatario_id = $1', [d.id]);
+    // Una dirección desactivada deja de ser la principal.
     const { rows: [r] } = await db.query(
-      'UPDATE direccion SET activa = COALESCE($1, activa), es_principal = COALESCE($2, es_principal) WHERE id = $3 RETURNING *', [activa, principal, dirId]);
+      `UPDATE direccion SET activa = COALESCE($1, activa), es_principal = CASE WHEN COALESCE($1, activa) THEN COALESCE($2, es_principal) ELSE false END
+       WHERE id = $3 RETURNING *`, [activa, principal, dirId]);
+    // Si se desactivó la principal, la dirección activa más reciente pasa a ser la principal (no queda sin ninguna).
+    if (activa === false) {
+      await db.query(
+        `UPDATE direccion SET es_principal = true WHERE id = (
+           SELECT id FROM direccion WHERE destinatario_id = $1 AND activa ORDER BY id DESC LIMIT 1)
+         AND NOT EXISTS (SELECT 1 FROM direccion WHERE destinatario_id = $1 AND activa AND es_principal)`, [d.id]);
+    }
     return r;
   });
   if (!di) throw falla(404, 'Dirección no encontrada');

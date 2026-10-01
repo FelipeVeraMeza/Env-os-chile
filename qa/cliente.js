@@ -42,7 +42,8 @@ export async function crearUsuarioQa(admin, rol, nombre) {
   const password = `Qa.${sufijo}.2026`;
   const r = await peticion('POST', '/api/usuarios', {
     sesion: admin,
-    json: { nombre: `QA ${nombre}`, correo: `qa-${rol}-${nombre.toLowerCase().replace(/\W/g, '')}-${sufijo}@qa.test`, rol, password },
+    // Clave definitiva (no temporal): con AUTH_MODE=jwt una clave temporal solo permite cambiarla.
+    json: { nombre: `QA ${nombre}`, correo: `qa-${rol}-${nombre.toLowerCase().replace(/\W/g, '')}-${sufijo}@qa.test`, rol, password, cambiar_al_entrar: false },
   });
   assert.equal(r.status, 201, `crear usuario QA: ${JSON.stringify(r.datos)}`);
   const usuario = r.datos;
@@ -136,4 +137,15 @@ export async function envioEnRuta(esc, extra = {}) {
   const ret = await peticion('POST', `/api/envios/${c.datos.id}/estado`, { sesion: esc.repartidor, json: { estado: 'en_ruta' } });
   assert.equal(ret.status, 200, JSON.stringify(ret.datos));
   return ret.datos;
+}
+
+// Todos los envíos disponibles para tomar, recorriendo las páginas (la API entrega hasta 500 por página).
+export async function todosDisponibles(sesion) {
+  const items = [];
+  for (let pagina = 1; ; pagina++) {
+    const r = await peticion('GET', `/api/envios/disponibles?limite=500&pagina=${pagina}`, { sesion });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    items.push(...r.datos.items);
+    if (items.length >= r.datos.total || !r.datos.items.length) return { ...r.datos, items };
+  }
 }

@@ -58,12 +58,22 @@ export async function api(ruta, { metodo = 'GET', json, form, blob = false } = {
   }
   if (blob && res.ok) return res.blob();
   const tipo = res.headers.get('content-type') || '';
-  const datos = tipo.includes('json') ? await res.json() : await res.text();
+  // Un proxy o un corte de red puede responder JSON incompleto: se muestra un mensaje claro, no "Unexpected token".
+  let datos;
+  try { datos = tipo.includes('json') ? await res.json() : await res.text(); }
+  catch { throw new ErrorApi(res.status || 0, { error: 'Respuesta incompleta del servidor. Revisa tu conexión e inténtalo de nuevo.' }); }
   // Sesión vencida o cerrada desde otro lado (p. ej. cambio de contraseña): se vuelve a la pantalla de ingreso.
   if (res.status === 401 && headers.Authorization && ruta !== '/api/auth/login') {
     fijarToken(null);
     window.dispatchEvent(new CustomEvent('sesion-expirada', { detail: datos?.error }));
   }
+  // La clave de la demo cambió (DEMO_CLAVE en Railway): se olvida la guardada y se vuelve a pedir, en vez de fallar en cada acción.
+  if (res.status === 401 && datos?.detalles?.demo_clave && leerLS(LS_CLAVE)) {
+    fijarClaveDemo(null);
+    location.reload();
+  }
+  // Contraseña temporal: la API solo permite cambiarla; la app abre el diálogo para hacerlo.
+  if (res.status === 403 && datos?.detalles?.cambiar_clave) window.dispatchEvent(new CustomEvent('cambiar-clave'));
   if (!res.ok) throw new ErrorApi(res.status, typeof datos === 'string' ? { error: datos } : datos);
   return datos;
 }

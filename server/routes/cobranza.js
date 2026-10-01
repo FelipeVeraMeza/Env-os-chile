@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
-import { auditar, falla, idNumerico, ruta } from '../lib/http.js';
-import { compararProveedores, PROVEEDORES_PAGO, validarConciliacion } from '../lib/cobranza.js';
+import { auditar, falla, idNumerico, rangoFechas, ruta } from '../lib/http.js';
+import { compararProveedores, PROVEEDORES_PAGO, SIN_ABONO, validarConciliacion } from '../lib/cobranza.js';
 import { leerConfig } from '../lib/configuracion.js';
 import { firmarEnlace } from '../lib/archivos.js';
 import { aprobarComprobante, rechazarComprobante, registrarEventoPago } from '../lib/pagos.js';
@@ -13,17 +13,12 @@ import { autenticar, requiereRol } from '../middleware/auth.js';
 export const cobranza = Router();
 cobranza.use(autenticar, requiereRol('admin'));
 
-const FECHA = /^\d{4}-\d{2}-\d{2}$/;
-function rango(q) {
-  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
-  return { desde: FECHA.test(q.desde || '') ? q.desde : `${hoy.slice(0, 8)}01`, hasta: FECHA.test(q.hasta || '') ? q.hasta : hoy };
-}
 const TZ = "AT TIME ZONE 'America/Santiago'";
 
 cobranza.get('/resumen', ruta(async (req, res) => {
-  const { desde, hasta } = rango(req.query);
+  const { desde, hasta } = rangoFechas(req.query);
   const p = [desde, hasta];
-  const [cobrado, porProveedor, porCobrar, porConciliar, iniciados, enRevision] = await Promise.all([
+  const [cobrado, porProveedor, porCobrar, porConciliar, iniciados, enRevision, reembolsos] = await Promise.all([
     uno(`SELECT count(*)::int AS pagos, COALESCE(sum(monto), 0)::int AS bruto, COALESCE(sum(comision_estimada), 0)::int AS comision_estimada,
            COALESCE(sum(COALESCE(comision_real, comision_estimada)), 0)::int AS comision, COALESCE(sum(monto - COALESCE(comision_real, comision_estimada)), 0)::int AS neto
          FROM pago WHERE estado = 'aprobado' AND (verificado_en ${TZ})::date BETWEEN $1 AND $2`, p),
@@ -37,16 +32,21 @@ cobranza.get('/resumen', ruta(async (req, res) => {
     // Abonos que la pasarela aún no deposita (o que administración no ha revisado en la cartola).
     uno(`SELECT count(*)::int AS pagos, COALESCE(sum(monto - comision_estimada), 0)::int AS monto_esperado,
            count(*) FILTER (WHERE abono_estimado_en < (now() AT TIME ZONE 'America/Santiago')::date)::int AS atrasados
-         FROM pago WHERE estado = 'aprobado' AND abonado_en IS NULL AND proveedor NOT IN ('manual', 'simulado')`),
+         FROM pago WHERE estado = 'aprobado' AND abonado_en IS NULL AND proveedor <> ALL($1)`, [SIN_ABONO]),
     // Pagos iniciados hace más de 30 minutos sin respuesta: el cliente abandonó o la pasarela no avisó.
-    uno(`SELECT count(*)::int AS n FROM pago WHERE estado = 'iniciado' AND creado_en < now() - interval '30 minutes'`),
+    // Solo cuentan los de envíos que siguen esperando pago (un cobro abierto de un envío ya pagado o anulado no importa).
+    uno(`SELECT count(*)::int AS n FROM pago p JOIN envio e ON e.id = p.envio_id
+         WHERE p.estado = 'iniciado' AND p.creado_en < now() - interval '30 minutes' AND e.estado_pago = 'pendiente' AND e.estado <> 'anulado'`),
     // Comprobantes de transferencia que esperan la revisión de administración (bloquean el retiro).
     uno(`SELECT count(*)::int AS n, COALESCE(sum(monto), 0)::int AS monto FROM pago WHERE estado = 'en_revision'`),
+    // Lo devuelto a clientes en el período: se descuenta de lo cobrado.
+    uno(`SELECT count(*)::int AS n, COALESCE(sum(reembolso_monto), 0)::int AS monto FROM envio
+         WHERE estado_pago = 'reembolsado' AND (reembolsado_en ${TZ})::date BETWEEN $1 AND $2`, p),
   ]);
   const conf = await leerConfig();
   res.json({
     desde, hasta, proveedor_actual: conf.pagos.proveedor,
-    cobrado, por_proveedor: porProveedor.rows, por_cobrar: porCobrar, por_conciliar: porConciliar, sin_respuesta: iniciados.n, en_revision: enRevision,
+    cobrado, reembolsos, cobrado_neto_reembolsos: cobrado.bruto - reembolsos.monto, por_proveedor: porProveedor.rows, por_cobrar: porCobrar, por_conciliar: porConciliar, sin_respuesta: iniciados.n, en_revision: enRevision,
   });
 }));
 
@@ -90,7 +90,7 @@ cobranza.get('/pagos', ruta(async (req, res) => {
   const params = [];
   const p = (v) => { params.push(v); return `$${params.length}`; };
   if (req.query.estado) cond.push(`pg.estado = ${p(req.query.estado)}`);
-  if (req.query.conciliado === 'no') cond.push("pg.estado = 'aprobado' AND pg.abonado_en IS NULL AND pg.proveedor NOT IN ('manual', 'simulado')");
+  if (req.query.conciliado === 'no') cond.push(`pg.estado = 'aprobado' AND pg.abonado_en IS NULL AND pg.proveedor <> ALL(${p(SIN_ABONO)})`);
   if (req.query.conciliado === 'si') cond.push('pg.abonado_en IS NOT NULL');
   const { rows } = await query(
     `SELECT pg.id, pg.envio_id, pg.proveedor, pg.medio, pg.monto, pg.estado, pg.referencia, pg.transaccion_id, pg.verificacion, pg.verificado_en,

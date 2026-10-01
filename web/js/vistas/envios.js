@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
-  $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio, ESTADOS,
+  $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, itemEnvio } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
@@ -56,6 +56,22 @@ export async function registro() {
 }
 
 // ================= Detalle del envío =================
+// Historial completo: los cambios de estado y, en orden, los pasos del pago (comprobante enviado, aprobado o rechazado,
+// pago manual o en línea, reembolso). Antes el historial no mostraba cuándo ni cómo se pagó el envío.
+const MEDIO_TXT = { transferencia: 'transferencia', efectivo: 'efectivo', otro: 'otro medio', en_linea: 'pago en línea' };
+function lineaDeTiempo(e) {
+  const filas = e.historial.map((h) => ({ fecha: h.fecha, titulo: ESTADOS[h.estado_nuevo], detalle: h.motivo, quien: h.usuario_nombre || 'Sistema' }));
+  for (const p of e.pagos || []) {
+    const medio = MEDIO_TXT[p.medio] || p.medio || p.proveedor;
+    if (p.comprobante_adjunto_id) filas.push({ fecha: p.creado_en, titulo: 'Comprobante de transferencia enviado', detalle: p.referencia ? `N° ${p.referencia}` : null, clase: 'pago' });
+    if (p.estado === 'aprobado') filas.push({ fecha: p.verificado_en || p.revisado_en || p.creado_en, titulo: 'Pago aprobado', detalle: `${clp(p.monto)} · ${medio}`, clase: 'pago' });
+    if (p.estado === 'rechazado' && p.comprobante_adjunto_id) filas.push({ fecha: p.revisado_en || p.creado_en, titulo: 'Comprobante rechazado', detalle: p.motivo_rechazo, clase: 'pago rechazo' });
+  }
+  if (e.reembolsado_en) filas.push({ fecha: e.reembolsado_en, titulo: 'Reembolso', detalle: `${clp(e.reembolso_monto)} · ${e.reembolso_medio}`, clase: 'pago' });
+  // Orden por fecha; a igual hora se mantiene el orden en que se registraron.
+  return filas.map((f, i) => ({ ...f, i })).sort((a, b) => new Date(a.fecha) - new Date(b.fecha) || a.i - b.i);
+}
+
 const PROGRESO = [['creado', 'Creado'], ['pagado', 'Pagado'], ['asignado', 'Asignado'], ['en_ruta', 'En ruta'], ['entregado', 'Entregado']];
 
 function nivelProgreso(e) {
@@ -78,7 +94,8 @@ export async function detalle(id) {
   const porPagar = e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado);
   const boletas = e.adjuntos.filter((a) => a.tipo === 'boleta');
   const reclamoActivo = e.reclamos.find((r) => r.estado !== 'rechazado');
-  const puedeReclamar = e.valor_declarado > 0 && !['borrador', 'anulado'].includes(e.estado) && !reclamoActivo;
+  // El seguro se reclama cuando el repartidor ya retiró el paquete (igual que exige el servidor).
+  const puedeReclamar = e.valor_declarado > 0 && ['en_ruta', 'entregado', 'fallido', 'reagendado', 'devuelto'].includes(e.estado) && !reclamoActivo;
   const repartidores = esAdmin ? await get('/api/usuarios/repartidores') : [];
 
   montar(vista, html`
@@ -123,6 +140,7 @@ export async function detalle(id) {
           <div class="card-titulo"><h2>Seguro</h2>${e.valor_declarado ? html`<span class="badge e-creado">${esAdmin ? `Valor declarado ${clp(e.valor_declarado)}` : 'Asegurado'}</span>` : html`<span class="badge e-anulado">Sin seguro</span>`}</div>
           ${e.reclamos.length ? html`<div class="pila">${e.reclamos.map((r) => html`<div class="fila entre"><div><b class="mono">${r.numero}</b> · ${app.conf.motivos_reclamo[r.motivo]}<div class="sub">Reclamado ${clp(r.monto_reclamado)}${r.monto_aprobado ? ` · aprobado ${clp(r.monto_aprobado)}` : ''}</div></div>${badge(r.estado, app.conf.estados_reclamo[r.estado])}</div>`)}</div>` : ''}
           ${boletas.length ? html`<p class="sub" style="margin-top:10px">Boleta(s): ${boletas.map((b) => html`<a href="${archivo(b.url)}" target="_blank" rel="noopener">${b.nombre_original || 'boleta'}</a> `)}</p>` : ''}
+          ${esAdmin && reclamoActivo && ['solicitado', 'en_revision', 'aprobado'].includes(reclamoActivo.estado) ? html`<a class="btn sec chico" href="#/reclamos" style="margin-top:12px">Gestionar el reclamo en Seguros →</a>` : ''}
           ${puedeReclamar ? html`<button class="btn sec" id="reclamar" style="margin-top:12px">Reclamar seguro</button><p class="muted" style="margin-top:6px">Requiere adjuntar la boleta de compra (obligatoria).</p>` : ''}
           ${!e.valor_declarado ? html`<p class="muted">Este envío no declaró valor, por lo que no tiene cobertura de seguro.</p>` : ''}
         </div>
@@ -135,11 +153,11 @@ export async function detalle(id) {
           <p>Entregado ${fechaHora(e.entregado_en)}${e.entrega_receptor ? ` · recibió ${e.entrega_receptor}` : ''}</p>
           ${e.entrega_lat ? html`<p class="sub">GPS: ${e.entrega_lat.toFixed(5)}, ${e.entrega_lon.toFixed(5)}${e.entrega_precision_m ? ` (±${Math.round(e.entrega_precision_m)} m)` : ''} · <a href="https://www.google.com/maps?q=${e.entrega_lat},${e.entrega_lon}" target="_blank" rel="noopener">ver en mapa</a></p>` : ''}</div>` : ''}
         ${fotos.length ? html`<div class="card"><h2>Fotos</h2><div class="fila">${fotos.map((a) => html`<a href="${archivo(a.url)}" target="_blank" rel="noopener" title="${a.tipo === 'foto_entrega' ? 'Foto de entrega' : 'Foto del paquete'}"><img class="foto-mini" src="${archivo(a.url)}" alt="${a.tipo === 'foto_entrega' ? 'Foto de entrega' : 'Foto del paquete'}"></a>`)}</div></div>` : ''}
-        <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${e.historial.map((h) => html`<li><b>${ESTADOS[h.estado_nuevo]}</b>${h.motivo ? html` · <span class="sub">${h.motivo}</span>` : ''}<div class="cuando">${fechaHora(h.fecha)} · ${h.usuario_nombre || 'Sistema'}</div></li>`)}</ol></div>
+        <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${lineaDeTiempo(e).map((h) => html`<li class="${h.clase || ''}"><b>${h.titulo}</b>${h.detalle ? html` · <span class="sub">${h.detalle}</span>` : ''}<div class="cuando">${fechaHora(h.fecha)}${h.quien ? ` · ${h.quien}` : ''}</div></li>`)}</ol></div>
       </div>
     </div>`);
 
-  if (e.folio) api(`/api/envios/${e.id}/qr.png`, { blob: true }).then((b) => { $('#qr').src = URL.createObjectURL(b); }).catch(() => {});
+  if (e.folio) api(`/api/envios/${e.id}/qr.png`, { blob: true }).then((b) => mostrarBlob($('#qr'), b)).catch(() => {});
   $$('[data-ticket]').forEach((b) => { b.onclick = () => abrirBlob(api(`/api/envios/${e.id}/ticket.pdf?formato=${b.dataset.ticket}`, { blob: true })).catch(errorToast); });
   $('#pagar')?.addEventListener('click', () => pagar(e, () => detalle(id)));
   $('#transferir')?.addEventListener('click', () => subirComprobante(e, () => detalle(id)));
@@ -203,7 +221,8 @@ function enlazarAcciones(e, recargar) {
     $('#f-re', m.el).onsubmit = async (ev) => {
       ev.preventDefault();
       const d = datosForm(ev.target);
-      try { await post(`/api/envios/${e.id}/reembolso`, { ...d, monto: Number(d.monto) }); m.cerrar(); toast('Reembolso registrado', 'ok'); recargar(); }
+      // Monto vacío = reembolso total (lo decide el servidor); Number('') sería 0 y se rechazaría.
+      try { await post(`/api/envios/${e.id}/reembolso`, { ...d, monto: d.monto === '' ? undefined : Number(d.monto) }); m.cerrar(); toast('Reembolso registrado', 'ok'); recargar(); }
       catch (err) { marcarErrores(ev.target, err.detalles); errorToast(err); }
     };
   });
@@ -333,19 +352,21 @@ export function subirComprobante(envio, alTerminar) {
 export function revisarComprobante(c, alTerminar) {
   const m = modal(html`<h2>Comprobante de ${c.folio}</h2>
     <p class="sub">${c.cliente_nombre} · debe transferir <b>${clp(c.monto)}</b> · enviado ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}</p>
-    ${c.usado_en?.length ? html`<div class="aviso alerta" style="margin:10px 0"><b>Atención:</b> este mismo comprobante o N° de operación ya se usó en ${c.usado_en.join(', ')}.</div>` : ''}
+    ${c.usado_en?.length ? html`<div class="aviso alerta" style="margin:10px 0"><b>Atención:</b> este mismo comprobante o N° de operación ya se usó en ${listaCorta(c.usado_en, 5)}.</div>` : ''}
     <div style="margin:12px 0;text-align:center">${c.mime === 'application/pdf'
       ? html`<a class="btn sec" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Descargar comprobante (PDF)</a>`
       : html`<a href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener" title="Abrir en tamaño completo"><img src="${archivo(c.comprobante_url)}" alt="Comprobante de transferencia de ${c.folio}" style="max-width:100%;max-height:42vh;border-radius:12px"></a>`}</div>
     <form class="pila" id="f-revision" novalidate>
       <label class="campo">N° de operación <small>(según la cartola)</small><input name="referencia" maxlength="60" value="${c.referencia || ''}"></label>
       <label class="campo">Motivo del rechazo <small>(obligatorio si rechazas: el cliente lo verá)</small><input name="motivo" maxlength="300" placeholder="Ej. el monto no coincide, imagen ilegible"></label>
-      <div class="fila"><button class="btn" name="decision" value="aprobar">Aprobar pago</button><button class="btn peligro" name="decision" value="rechazar">Rechazar</button></div>
+      <div class="fila"><button type="button" class="btn" data-decision="aprobar">Aprobar pago</button><button type="button" class="btn peligro" data-decision="rechazar">Rechazar</button></div>
     </form>`);
-  $('#f-revision', m.el).onsubmit = async (ev) => {
-    ev.preventDefault();
-    const f = ev.target;
-    const aprobar = ev.submitter?.value === 'aprobar';
+  // Enter en un campo no decide nada: antes enviaba el formulario con el primer botón y APROBABA el pago
+  // aunque se estuviera escribiendo el motivo del rechazo. Solo cuenta el botón que se pulsa.
+  const f = $('#f-revision', m.el);
+  f.onsubmit = (ev) => ev.preventDefault();
+  $$('[data-decision]', f).forEach((b) => { b.onclick = () => decidir(b.dataset.decision === 'aprobar'); });
+  const decidir = async (aprobar) => {
     if (!aprobar && !f.motivo.value.trim()) return marcarErrores(f, { motivo: 'Indica el motivo: el cliente lo verá' });
     try {
       if (aprobar) await post(`/api/cobranza/comprobantes/${c.id}/aprobar`, { referencia: f.referencia.value });
@@ -372,14 +393,18 @@ export async function pagar(envio, alTerminar) {
     </div>
     <p class="muted" style="margin-top:10px">Simulación: en la etapa de desarrollo se conecta con Webpay Plus, Mercado Pago o Flow. No se cobra dinero real.</p>
     <div class="fila" style="margin-top:14px"><button class="btn grande" id="aprobar">Pagar ${clp(pago.monto)}</button><button class="btn sec" id="rechazar">Simular rechazo</button></div>`);
+  const botones = () => $$('#aprobar, #rechazar', m.el);
   const confirmarPago = async (resultado) => {
+    // Un doble clic enviaba dos confirmaciones: la segunda fallaba con "El pago ya fue procesado".
+    if (botones().some((b) => b.disabled)) return;
+    botones().forEach((b) => { b.disabled = true; });
     try {
       const r = await post(`/api/pagos/${pago.token}/confirmar`, { resultado });
       m.cerrar();
       if (r.estado === 'aprobado') toast('¡Pago aprobado! Tu envío ya puede ser retirado.', 'ok');
       else toast('Pago rechazado. Puedes intentarlo nuevamente.', 'error');
       alTerminar?.();
-    } catch (err) { errorToast(err); }
+    } catch (err) { errorToast(err); botones().forEach((b) => { b.disabled = false; }); }
   };
   $('#aprobar', m.el).onclick = () => confirmarPago('aprobado');
   $('#rechazar', m.el).onclick = () => confirmarPago('rechazado');
@@ -436,7 +461,7 @@ export async function reclamos() {
         <td data-label="N°" class="mono"><b>${r.numero}</b></td><td data-label="Envío"><a href="#/envio/${r.envio_id}">${r.folio}</a></td>${esAdmin ? html`<td data-label="Cliente">${r.cliente_nombre}</td>` : ''}
         <td data-label="Motivo">${app.conf.motivos_reclamo[r.motivo]}</td>${esAdmin ? html`<td data-label="Declarado" class="num">${clp(r.valor_declarado)}</td>` : ''}<td data-label="Reclamado" class="num">${clp(r.monto_reclamado)}</td>
         <td data-label="Aprobado" class="num">${r.monto_aprobado ? clp(r.monto_aprobado) : '—'}</td>
-        <td data-label="Boleta"><a href="${archivo(r.boleta_url)}" target="_blank" rel="noopener">N° ${r.boleta_numero} · ${clp(r.boleta_monto)}</a></td>
+        <td data-label="Boleta">${r.boleta_url ? html`<a href="${archivo(r.boleta_url)}" target="_blank" rel="noopener">N° ${r.boleta_numero} · ${clp(r.boleta_monto)}</a>` : html`N° ${r.boleta_numero} · ${clp(r.boleta_monto)}`}</td>
         <td data-label="Estado">${badge(r.estado, app.conf.estados_reclamo[r.estado])}</td>
         ${esAdmin ? html`<td data-label="Acción"><div class="fila">
           ${r.estado === 'solicitado' ? html`<button class="btn sec chico" data-revisar="${r.id}">Revisar</button>` : ''}
@@ -460,14 +485,18 @@ export async function reclamos() {
         <form class="pila" id="f-res" novalidate>
           <label class="campo">Monto aprobado<input type="number" name="monto_aprobado" value="${r.monto_reclamado}" max="${r.monto_reclamado}"></label>
           <label class="campo">Nota (obligatoria si se rechaza)<textarea name="nota"></textarea></label>
-          <div class="fila"><button class="btn" name="decision" value="aprobar">Aprobar</button><button class="btn peligro" name="decision" value="rechazar">Rechazar</button></div>
+          <div class="fila"><button type="button" class="btn" data-decision="aprobar">Aprobar</button><button type="button" class="btn peligro" data-decision="rechazar">Rechazar</button></div>
         </form>`);
-      $('#f-res', m.el).onsubmit = async (ev) => {
-        ev.preventDefault();
-        const d = { ...datosForm(ev.target), decision: ev.submitter.value };
-        try { await post(`/api/reclamos/${r.id}/resolver`, d); m.cerrar(); toast('Reclamo resuelto', 'ok'); reclamos(); }
-        catch (err) { marcarErrores(ev.target, err.detalles); errorToast(err); }
-      };
+      // Enter en el monto no aprueba el reclamo: solo el botón que se pulsa decide.
+      const fr = $('#f-res', m.el);
+      fr.onsubmit = (ev) => ev.preventDefault();
+      $$('[data-decision]', fr).forEach((btn) => {
+        btn.onclick = async () => {
+          const d = { ...datosForm(fr), decision: btn.dataset.decision };
+          try { await post(`/api/reclamos/${r.id}/resolver`, d); m.cerrar(); toast('Reclamo resuelto', 'ok'); reclamos(); }
+          catch (err) { marcarErrores(fr, err.detalles); errorToast(err); }
+        };
+      });
     };
   });
 }

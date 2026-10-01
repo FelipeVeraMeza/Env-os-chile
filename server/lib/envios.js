@@ -53,7 +53,7 @@ export async function detalleCompleto(envio, usuario) {
     query('SELECT id, tipo, nombre_original, mime, tamano, subido_en FROM adjunto WHERE envio_id = $1 ORDER BY id', [envio.id]),
     usuario.rol === 'repartidor' ? { rows: [] } : query('SELECT * FROM reclamo_seguro WHERE envio_id = $1 ORDER BY id DESC', [envio.id]),
     usuario.rol === 'repartidor' ? { rows: [] } : query(
-      `SELECT id, proveedor, medio, monto, estado, referencia, creado_en, comprobante_adjunto_id, motivo_rechazo, revisado_en
+      `SELECT id, proveedor, medio, monto, estado, referencia, creado_en, comprobante_adjunto_id, motivo_rechazo, revisado_en, verificado_en
        FROM pago WHERE envio_id = $1 ORDER BY id DESC`, [envio.id]),
   ]);
   // El repartidor no ve montos: ni la boleta de compra ni el comprobante de pago.

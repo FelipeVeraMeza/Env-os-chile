@@ -4,14 +4,12 @@
 //  3. Espera a que la app responda y ejecuta la suite QA contra Railway.
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { leerArchivoEnv } from '../qa/entornos.js';
 
 const archivoEnv = process.argv[2] || '.env.railway';
 if (!fs.existsSync(archivoEnv)) { console.error(`✖ No existe ${archivoEnv}`); process.exit(1); }
-const vars = {};
-for (const l of fs.readFileSync(archivoEnv, 'utf8').split(/\r?\n/)) {
-  const m = l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/);
-  if (m) vars[m[1]] = m[2].trim();
-}
+// Mismo lector que el resto: JWT_SECRET="abc" se sube como abc (antes se subía con las comillas incluidas).
+const vars = leerArchivoEnv(fs.readFileSync(archivoEnv, 'utf8'));
 Object.assign(process.env, vars);
 
 const paso = (t) => console.log(`\n━━ ${t}`);

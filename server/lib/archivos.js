@@ -6,6 +6,9 @@ import { config } from '../config.js';
 
 export const subida = multer({
   storage: multer.memoryStorage(),
+  // Los navegadores envían el nombre del archivo en UTF-8: leído como latin1 (el valor por defecto) "cañón.jpg"
+  // quedaba guardado como "caÃ±Ã³n.jpg" en la ficha del envío y en la descarga.
+  defParamCharset: 'utf8',
   // Límites también para los campos de texto: evita formularios gigantes que agoten la memoria.
   limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1, fields: 40, fieldSize: 64 * 1024, parts: 45 },
 });
@@ -137,6 +140,18 @@ export async function borrarArchivos(rutas) {
     try { await fs.unlink(rutaLocal(r)); borrados++; } catch (err) { if (err.code !== 'ENOENT') throw err; }
   }
   return borrados;
+}
+
+// Guarda el archivo y ejecuta la operación que lo registra. Si la operación falla (409 por otra persona, error de la
+// base…), el archivo ya subido se borra: si no, quedaría en el almacenamiento sin ningún registro que lo use.
+export async function conArchivo(buffer, mime, operacion) {
+  const archivo = await guardarArchivo(buffer, mime);
+  try {
+    return await operacion(archivo);
+  } catch (err) {
+    await borrarArchivos([archivo.ruta]).catch((e) => console.error('[archivos] no se pudo borrar un archivo sin uso', e.message));
+    throw err;
+  }
 }
 
 function rutaLocal(relativa) {

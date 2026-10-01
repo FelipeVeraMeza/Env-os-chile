@@ -33,6 +33,10 @@ async function iniciar() {
   process.on('SIGINT', () => cerrar('SIGINT'));
 }
 
+// Red de seguridad: una promesa rechazada que nadie maneja termina el proceso en Node 22 (y Railway lo reinicia,
+// cortando a todos los usuarios). Se registra el error y el servidor sigue atendiendo.
+process.on('unhandledRejection', (err) => console.error('[api] promesa rechazada sin manejar:', err));
+
 iniciar().catch((err) => {
   console.error('[api] no se pudo iniciar:', err.message);
   const ayuda = err.ayuda || explicarErrorConexion(err);

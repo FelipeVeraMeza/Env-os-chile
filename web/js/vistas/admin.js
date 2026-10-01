@@ -1,8 +1,17 @@
 import { app } from '../app.js';
 import { get, patch, post, put } from '../api.js';
-import { $, $$, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
+import { $, $$, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 import { limpiarCacheComunas } from './comun.js';
 import { revisarComprobante } from './envios.js';
+
+// Si los datos no se pueden cargar (p. ej. un rango con "desde" posterior a "hasta"), se explica y se ofrece volver al
+// período por defecto. Antes la pantalla quedaba cargando para siempre.
+function errorRango(vista, err, reintentar) {
+  montar(vista, html`<div class="card"><h2>No se pudieron cargar los datos</h2><p class="sub">${err.message}</p>
+    <button class="btn sec" id="volver-rango">Ver el mes actual</button></div>`);
+  $('#volver-rango').onclick = reintentar;
+  errorToast(err);
+}
 
 // ================= Panel de ganancias =================
 export async function panel(rango = {}) {
@@ -11,12 +20,15 @@ export async function panel(rango = {}) {
   const desde = rango.desde || `${hoy.slice(0, 8)}01`;
   const hasta = rango.hasta || hoy;
   montar(vista, esqueleto(4));
-  const [g, pendientes, reclamosAbiertos, comprobantes] = await Promise.all([
-    get(`/api/reportes/ganancias?desde=${desde}&hasta=${hasta}`),
-    get('/api/envios?estado=creado&repartidor_id=sin&limite=5'),
-    get('/api/reclamos?estado=solicitado'),
-    get('/api/cobranza/comprobantes').catch(() => []),
-  ]);
+  let g; let pendientes; let reclamosAbiertos; let comprobantes;
+  try {
+    [g, pendientes, reclamosAbiertos, comprobantes] = await Promise.all([
+      get(`/api/reportes/ganancias?desde=${desde}&hasta=${hasta}`),
+      get('/api/envios?estado=creado&repartidor_id=sin&limite=5'),
+      get('/api/reclamos?estado=solicitado'),
+      get('/api/cobranza/comprobantes').catch(() => []),
+    ]);
+  } catch (err) { return errorRango(vista, err, () => panel()); }
   const estados = Object.fromEntries(g.por_estado.map((r) => [r.estado, r.n]));
 
   montar(vista, html`
@@ -187,8 +199,9 @@ export async function tarifas() {
 
   const guardar = (clave) => async (e) => {
     e.preventDefault();
+    marcarErrores(e.target, {});
     try { app.conf[clave] = await put(`/api/config/${clave}`, datosForm(e.target)); toast('Cambios guardados', 'ok'); }
-    catch (err) { errorToast(err); }
+    catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
   };
   $('#f-tarifas').onsubmit = guardar('tarifas');
   $('#f-operacion').onsubmit = guardar('operacion');
@@ -368,6 +381,7 @@ export async function ajustes() {
     </div>`);
   const guardar = (clave) => async (e) => {
     e.preventDefault();
+    marcarErrores(e.target, {});
     try {
       app.conf[clave] = await put(`/api/config/${clave}`, datosForm(e.target));
       toast('Cambios guardados', 'ok');
@@ -376,7 +390,7 @@ export async function ajustes() {
         const marca = document.querySelector('.marca img');
         if (marca) marca.src = app.conf.negocio.logo_url || 'icons/icono.svg';
       }
-    } catch (err) { errorToast(err); }
+    } catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
   };
   $('#f-negocio').onsubmit = guardar('negocio');
   // El logo se achica a 256 px y se convierte a PNG en el teléfono/computador antes de guardarlo.
@@ -404,7 +418,7 @@ export async function ajustes() {
       e.target.couriers.value = listas.couriers.join('\n');
       e.target.franjas.value = listas.franjas.join('\n');
       toast('Opciones guardadas', 'ok');
-    } catch (err) { errorToast(err); }
+    } catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
   };
   $('#nuevo-costo').onclick = () => {
     const m = modal(html`<h2>Registrar costo</h2><form class="pila" id="f-c" novalidate>
@@ -446,13 +460,17 @@ export async function cobranza(rango = {}) {
   const desde = rango.desde || `${hoy.slice(0, 8)}01`;
   const hasta = rango.hasta || hoy;
   montar(vista, esqueleto(4));
-  const [r, pagos, est, comprobantes] = await Promise.all([
-    get(`/api/cobranza/resumen?desde=${desde}&hasta=${hasta}`),
-    get('/api/cobranza/pagos'),
-    get(`/api/cobranza/estimar${rango.envios_mes ? `?envios_mes=${rango.envios_mes}` : ''}`),
-    get('/api/cobranza/comprobantes'),
-  ]);
-  const pendienteAbono = (p) => p.estado === 'aprobado' && !p.abonado_en && !['manual', 'simulado'].includes(p.proveedor);
+  let r; let pagos; let est; let comprobantes;
+  try {
+    [r, pagos, est, comprobantes] = await Promise.all([
+      get(`/api/cobranza/resumen?desde=${desde}&hasta=${hasta}`),
+      get('/api/cobranza/pagos'),
+      get(`/api/cobranza/estimar${rango.envios_mes ? `?envios_mes=${rango.envios_mes}` : ''}`),
+      get('/api/cobranza/comprobantes'),
+    ]);
+  } catch (err) { return errorRango(vista, err, () => cobranza()); }
+  // Las transferencias ya están en la cuenta: no hay abono de una pasarela que conciliar.
+  const pendienteAbono = (p) => p.estado === 'aprobado' && !p.abonado_en && !['manual', 'simulado', 'transferencia'].includes(p.proveedor);
   montar(vista, html`
     <div class="encabezado"><div><h1>Cobranza</h1><p>Un envío queda "pagado" solo con un pago verificado. Aquí ves lo cobrado, lo que falta cobrar, lo que se lleva la pasarela y los abonos por llegar.</p></div>
       <form class="fila" id="rango-c">
@@ -460,7 +478,7 @@ export async function cobranza(rango = {}) {
         <label class="campo">Hasta<input type="date" name="hasta" value="${hasta}" max="${hoy}"></label>
       </form></div>
     <div class="grid g4">
-      <div class="kpi destacado"><div class="etiqueta">Cobrado (verificado)</div><div class="valor">${clp(r.cobrado.bruto)}</div><div class="nota">${r.cobrado.pagos} pagos · neto ${clp(r.cobrado.neto)}</div></div>
+      <div class="kpi destacado"><div class="etiqueta">Cobrado (verificado)</div><div class="valor">${clp(r.cobrado.bruto)}</div><div class="nota">${r.cobrado.pagos} pagos · neto ${clp(r.cobrado.neto)}${r.reembolsos?.monto ? ` · reembolsado ${clp(r.reembolsos.monto)}` : ''}</div></div>
       <div class="kpi"><div class="etiqueta">Comisiones de pago</div><div class="valor">${clp(r.cobrado.comision)}</div><div class="nota">${r.cobrado.bruto ? ((r.cobrado.comision / r.cobrado.bruto) * 100).toFixed(2) : '0.00'}% de lo cobrado</div></div>
       <div class="kpi"><div class="etiqueta">Por cobrar</div><div class="valor">${clp(r.por_cobrar.monto)}</div><div class="nota">${r.por_cobrar.envios} envíos sin pagar${r.por_cobrar.envios ? ` · el más antiguo hace ${r.por_cobrar.dias_mas_antiguo} día(s)` : ''}</div></div>
       <div class="kpi"><div class="etiqueta">Abonos por llegar</div><div class="valor">${clp(r.por_conciliar.monto_esperado)}</div><div class="nota">${r.por_conciliar.pagos} pagos${r.por_conciliar.atrasados ? ` · ${r.por_conciliar.atrasados} atrasado(s)` : ''}</div></div>
@@ -471,7 +489,7 @@ export async function cobranza(rango = {}) {
         <tbody>${comprobantes.map((c) => html`<tr>
           <td data-label="Enviado">${fechaHora(c.creado_en)}</td><td data-label="Folio" class="mono"><a href="#/envio/${c.envio_id}">${c.folio}</a></td>
           <td data-label="Cliente">${c.cliente_nombre}</td><td data-label="Monto" class="num">${clp(c.monto)}</td>
-          <td data-label="N° operación">${c.referencia || html`<span class="muted">—</span>`}${c.usado_en.length ? html`<div><span class="badge e-fallido">Ya usado en ${c.usado_en.join(', ')}</span></div>` : ''}</td>
+          <td data-label="N° operación">${c.referencia || html`<span class="muted">—</span>`}${c.usado_en.length ? html`<div><span class="badge e-fallido ajustable" title="${c.usado_en.join(', ')}">Ya usado en ${listaCorta(c.usado_en)}</span></div>` : ''}</td>
           <td data-label="Acción"><button class="btn chico" data-revisar-comprobante="${c.id}">Revisar</button></td>
         </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay comprobantes pendientes ✔</p>`}
     </div>
@@ -530,9 +548,12 @@ export async function seguridad(filtro = {}) {
   montar(vista, esqueleto(4));
   const horas = filtro.horas || 24;
   const qs = new URLSearchParams({ limite: 150, ...(filtro.sospechosos ? { sospechosos: '1' } : {}), ...(filtro.tipo ? { tipo: filtro.tipo } : {}) });
-  const [r, alertas, extraccion, eventos] = await Promise.all([
-    get(`/api/seguridad/resumen?horas=${horas}`), get('/api/seguridad/alertas'), get(`/api/seguridad/extraccion?horas=${Math.max(horas, 24 * 7)}`), get(`/api/seguridad/eventos?${qs}`),
-  ]);
+  let r; let alertas; let extraccion; let eventos;
+  try {
+    [r, alertas, extraccion, eventos] = await Promise.all([
+      get(`/api/seguridad/resumen?horas=${horas}`), get('/api/seguridad/alertas'), get(`/api/seguridad/extraccion?horas=${Math.max(horas, 24 * 7)}`), get(`/api/seguridad/eventos?${qs}`),
+    ]);
+  } catch (err) { return errorRango(vista, err, () => seguridad()); }
   const t = r.totales;
   const kpi = (etq, valor, nota, alerta) => html`<div class="kpi ${alerta ? 'destacado' : ''}"><div class="etiqueta">${etq}</div><div class="valor">${valor}</div><div class="nota">${nota}</div></div>`;
   montar(vista, html`
@@ -575,7 +596,12 @@ export async function seguridad(filtro = {}) {
 
   $('#horas').onchange = (e) => seguridad({ ...filtro, horas: Number(e.target.value) });
   $('#f-eventos').onchange = (e) => seguridad({ ...datosForm(e.currentTarget), horas });
-  $$('[data-ip]').forEach((a) => { a.onclick = async (ev) => { ev.preventDefault(); const lista = await get(`/api/seguridad/eventos?ip=${encodeURIComponent(a.dataset.ip)}&limite=50`); detalleIp(a.dataset.ip, lista); }; });
+  $$('[data-ip]').forEach((a) => {
+    a.onclick = async (ev) => {
+      ev.preventDefault();
+      try { detalleIp(a.dataset.ip, await get(`/api/seguridad/eventos?ip=${encodeURIComponent(a.dataset.ip)}&limite=50`)); } catch (err) { errorToast(err); }
+    };
+  });
   $$('[data-revisar]').forEach((b) => {
     b.onclick = () => {
       const m = modal(html`<h2>Revisar alerta</h2><form class="pila" id="f-rev" novalidate>

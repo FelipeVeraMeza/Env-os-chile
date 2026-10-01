@@ -197,6 +197,8 @@ function pantallaLogin(mensaje) {
       const r = await post('/api/auth/login', { correo: d.correo.trim(), password: d.password });
       fijarToken(r.token);
       app.usuario = r.usuario;
+      // La configuración se vuelve a pedir con la sesión: los datos de la cuenta para transferir solo llegan a quien entró.
+      app.conf = await get('/api/config/publica').catch(() => app.conf);
       pintarSelector();
       ir(INICIO[app.usuario.rol]);
     } catch (err) {
@@ -232,6 +234,11 @@ function dialogoCambiarClave({ obligatorio = false } = {}) {
       if (app.usuario) app.usuario.debe_cambiar_clave = false;
       m.cerrar();
       toast('Contraseña actualizada', 'ok');
+      // Con la contraseña temporal la API no entregaba datos: se recarga la configuración y la pantalla de fondo.
+      if (obligatorio) {
+        app.conf = await get('/api/config/publica').catch(() => app.conf);
+        ir(location.hash || INICIO[app.usuario?.rol]);
+      }
     } catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
   };
 }
@@ -365,6 +372,7 @@ async function iniciar() {
   if (!conSesion()) app.usuario = app.perfiles.find((p) => p.id === perfilActual()) || null;
   pintarSelector();
   window.addEventListener('sesion-expirada', (e) => { if (app.usuario) cerrarSesion(e.detail || 'Tu sesión expiró: vuelve a iniciar sesión.'); });
+  window.addEventListener('cambiar-clave', () => { if (app.usuario && !$('#f-clave-nueva')) { app.usuario.debe_cambiar_clave = true; dialogoCambiarClave({ obligatorio: true }); } });
   window.addEventListener('hashchange', enrutar);
   enrutar();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

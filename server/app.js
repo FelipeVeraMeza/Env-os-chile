@@ -47,6 +47,9 @@ export function crearApp() {
   app.use(cors({
     origin: (origen, cb) => cb(null, !origen || config.corsOrigins.includes(origen) || config.corsOrigins.includes('*')),
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Demo-Usuario', 'X-Demo-Rol', 'X-Demo-Clave'],
+    // Con la interfaz en otro dominio (Vercel) el navegador solo deja leer estas cabeceras si se exponen:
+    // nombre del archivo descargado (CSV, ticket) y cuánto esperar tras el límite de peticiones.
+    exposedHeaders: ['Content-Disposition', 'Retry-After', 'RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset'],
   }));
   app.use(compression()); // gzip: la interfaz y los JSON pesan ~70 % menos en 4G
   // Cámara y ubicación solo para la propia app; nada de micrófono, pagos del navegador ni USB.

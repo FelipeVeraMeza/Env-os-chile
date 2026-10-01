@@ -81,15 +81,18 @@ export async function uno(texto, params) {
 
 export async function transaccion(fn) {
   const cliente = await pool.connect();
+  let roto;
   try {
     await cliente.query('BEGIN');
     const resultado = await fn(cliente);
     await cliente.query('COMMIT');
     return resultado;
   } catch (err) {
-    await cliente.query('ROLLBACK');
+    // Si la conexión se cortó, el ROLLBACK también falla: se informa el error original (no el del ROLLBACK)
+    // y la conexión rota se descarta en vez de devolverla al pool para la siguiente petición.
+    await cliente.query('ROLLBACK').catch((e) => { roto = e; });
     throw err;
   } finally {
-    cliente.release();
+    cliente.release(roto);
   }
 }

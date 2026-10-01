@@ -35,6 +35,9 @@ export const PROVEEDORES_PAGO = {
   },
 };
 
+// Medios que no esperan un abono de una pasarela (el dinero ya está en la cuenta o no es real).
+export const SIN_ABONO = ['manual', 'simulado', 'transferencia'];
+
 export const VERIFICACIONES = ['simulado', 'webhook', 'consulta_api', 'manual'];
 
 // Costo de cobrar un monto con un proveedor.
@@ -93,13 +96,19 @@ export function verificarConfirmacion(pago, informe) {
 // entre lo cobrado y lo abonado (así siempre cuadra con la cartola).
 export function validarConciliacion(pago, { monto_abonado: abonado, abonado_en: fecha }, hoy = new Date()) {
   if (pago.estado !== 'aprobado') throw new ErrorNegocio(409, 'Solo se concilia un pago aprobado');
+  // Transferencias, pagos manuales y el simulador no pasan por una pasarela: no hay abono que esperar ni comisión.
+  if (SIN_ABONO.includes(pago.proveedor)) throw new ErrorNegocio(409, 'Este pago no pasa por una pasarela: no tiene abono que conciliar');
   if (pago.abonado_en) throw new ErrorNegocio(409, 'El pago ya fue conciliado');
   const errores = {};
   const m = abonado === '' || abonado === null || abonado === undefined ? NaN : Number(abonado);
   if (!Number.isInteger(m) || m < 0 || m > pago.monto) errores.monto_abonado = `Debe estar entre $0 y $${pago.monto}`;
-  const f = fecha ? new Date(fecha) : hoy;
-  if (Number.isNaN(f.getTime())) errores.abonado_en = 'Fecha inválida';
+  // Fecha de calendario real: "2026-02-31" no se corre al 3 de marzo, es un error.
+  const f = fecha ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(fecha)) ? `${fecha}T00:00:00Z` : fecha) : hoy;
+  const pagadoEl = pago.verificado_en ? new Date(pago.verificado_en).toISOString().slice(0, 10) : null;
+  if (Number.isNaN(f.getTime()) || (/^\d{4}-\d{2}-\d{2}$/.test(String(fecha)) && f.toISOString().slice(0, 10) !== String(fecha))) errores.abonado_en = 'Fecha inválida';
   else if (f.getTime() > hoy.getTime() + 864e5) errores.abonado_en = 'La fecha de abono no puede ser futura';
+  // El dinero no puede llegar a la cuenta antes de que el cliente pagara.
+  else if (pagadoEl && f.toISOString().slice(0, 10) < pagadoEl) errores.abonado_en = `El abono no puede ser anterior al pago (${pagadoEl})`;
   if (Object.keys(errores).length) throw new ErrorNegocio(422, 'Revisa los datos de la conciliación', errores);
   return { monto_abonado: m, comision_real: pago.monto - m, abonado_en: f.toISOString().slice(0, 10) };
 }

@@ -16,6 +16,16 @@ export async function registrarEventoPago(db, { pagoId, tipo, estado = null, mon
   );
 }
 
+// Cuando el envío queda pagado (por cualquier medio), los cobros en línea que quedaron abiertos ya no sirven: se anulan.
+// Si no, Cobranza los mostraba para siempre como "pagos sin respuesta de la pasarela".
+export async function cerrarCobrosAbiertos(db, envioId) {
+  const { rows } = await db.query(
+    "UPDATE pago SET estado = 'anulado', actualizado_en = now() WHERE envio_id = $1 AND estado = 'iniciado' RETURNING id, monto", [envioId]);
+  for (const p of rows) {
+    await registrarEventoPago(db, { pagoId: p.id, tipo: 'rechazo', estado: 'anulado', monto: p.monto, datos: { motivo: 'El envío se pagó por otro medio' } });
+  }
+}
+
 // Comisión y neto estimados al momento de cobrar, con la tabla de costos del proveedor.
 export function costoDelCobro(monto, proveedor) {
   const p = PROVEEDORES_PAGO[proveedor] || PROVEEDORES_PAGO.transferencia;
@@ -93,6 +103,7 @@ export async function confirmarPago(req, tokenPago, resultado, autorizar) {
       `UPDATE envio SET estado_pago = 'pagado', pago_medio = 'en_linea', pago_referencia = $1, pagado_en = now(), actualizado_en = now()
        WHERE id = $2 AND estado_pago <> 'pagado'`, [transaccionId, p.envio_id]);
     if (!r.rowCount) throw falla(409, 'El envío ya estaba pagado');
+    await cerrarCobrosAbiertos(db, p.envio_id);
     return p.envio_id;
   });
   if (envioId?.anulado) throw falla(409, 'El envío fue anulado o cambió su monto: este pago ya no es válido');
@@ -151,6 +162,7 @@ export async function aprobarComprobante(pagoId, { referencia, usuarioId }) {
     await db.query(
       `UPDATE envio SET estado_pago = 'pagado', pago_medio = 'transferencia', pago_referencia = $1, pagado_en = now(), actualizado_en = now()
        WHERE id = $2`, [ref, p.envio_id]);
+    await cerrarCobrosAbiertos(db, p.envio_id);
     // Pendiente a futuro (D-13): emitir aquí la boleta electrónica en el SII por este pago.
     return p.envio_id;
   });
