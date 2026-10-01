@@ -4,7 +4,7 @@ import { auditar, exigirSinErrores, falla, idNumerico, patronBusqueda, ruta } fr
 import { leerConfig } from '../lib/configuracion.js';
 import { correoConfigurado } from '../lib/correo.js';
 import { normalizarRut, normalizarTelefono, validarDestinatario, validarDireccion, normalizarLista, ESTADOS, ESTADOS_RECLAMO, MOTIVOS_FALLO, MOTIVOS_RECLAMO, CONFIG_POR_DEFECTO } from '../lib/reglas.js';
-import { autenticar, requiereRol } from '../middleware/auth.js';
+import { autenticar, requiereRol, usuarioOpcional } from '../middleware/auth.js';
 import { config } from '../config.js';
 import { registrarEvento } from '../lib/seguridad.js';
 
@@ -83,11 +83,14 @@ zonas.patch('/:id', requiereRol('admin'), ruta(async (req, res) => {
 export const configuracion = Router();
 
 // Datos públicos que necesita la interfaz (sin secretos).
-configuracion.get('/publica', ruta(async (_req, res) => {
+configuracion.get('/publica', ruta(async (req, res) => {
   const conf = await leerConfig();
+  // Los datos de la cuenta bancaria solo se muestran a quien tiene sesión (o en la demo): con inicio de sesión real,
+  // cualquiera en internet podía leerlos sin entrar.
+  const conSesion = config.authMode === 'demo' || Boolean(await usuarioOpcional(req));
   res.json({
     negocio: conf.negocio, tarifas: conf.tarifas, operacion: conf.operacion, ticket: conf.ticket,
-    pagos: { proveedor: conf.pagos.proveedor, en_linea: conf.pagos.en_linea }, transferencia: conf.transferencia, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
+    pagos: { proveedor: conf.pagos.proveedor, en_linea: conf.pagos.en_linea }, transferencia: conSesion ? conf.transferencia : {}, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
     motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave), recuperacion_por_correo: correoConfigurado(),
   });
 }));
@@ -191,6 +194,8 @@ destinatarios.get('/', ruta(async (req, res) => {
   const params = [];
   const cond = [];
   if (clienteId) { params.push(clienteId); cond.push(`d.cliente_id = $${params.length}`); }
+  // Los titulares anonimizados no aparecen en la libreta (no se les puede volver a enviar); administración los ve con ?anonimizados=1.
+  if (!(req.usuario.rol === 'admin' && req.query.anonimizados === '1')) cond.push('d.anonimizado_en IS NULL');
   if (req.query.q) { params.push(patronBusqueda(req.query.q)); cond.push(`(d.nombre ILIKE $${params.length} OR d.telefono ILIKE $${params.length})`); }
   const { rows } = await query(
     `SELECT d.*, COALESCE(json_agg(json_build_object('id', di.id, 'alias', di.alias, 'calle', di.calle, 'numero', di.numero,
@@ -258,6 +263,10 @@ destinatarios.post('/', ruta(async (req, res) => {
   for (const k of ['nombre', 'telefono', 'correo', 'rut', 'notas']) if (b[k] !== null && b[k] !== undefined) b[k] = String(b[k]);
   const clienteId = clienteObjetivo(req);
   if (!clienteId) throw falla(422, 'Indica el cliente');
+  // La libreta es de un cliente: administración no puede crear destinatarios a nombre de un repartidor u otro administrador.
+  if (req.usuario.rol === 'admin' && !(await uno("SELECT 1 FROM usuario WHERE id = $1 AND rol = 'cliente'", [clienteId]))) {
+    throw falla(422, 'El cliente indicado no existe', { cliente_id: 'Debe ser un cliente' });
+  }
   exigirSinErrores(validarDestinatario(b));
   const d = await uno(
     'INSERT INTO destinatario (cliente_id, nombre, telefono, correo, rut, notas) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',

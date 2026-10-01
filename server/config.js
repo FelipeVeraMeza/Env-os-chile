@@ -68,7 +68,8 @@ export const config = {
   // URL pública del backend. Se usa en los QR. En Railway se toma sola de RAILWAY_PUBLIC_DOMAIN.
   publicBaseUrl,
   // Orígenes permitidos para el frontend (ej. el dominio de Vercel). La URL pública siempre se incluye.
-  corsOrigins: [...new Set([publicBaseUrl, ...lista(process.env.CORS_ORIGINS, 'http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000')])],
+  // Sin barra final: el navegador envía el origen sin ella ("https://x.vercel.app"), y con "https://x.vercel.app/" no calzaba nunca.
+  corsOrigins: [...new Set([publicBaseUrl, ...lista(process.env.CORS_ORIGINS, 'http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000').map((o) => o.replace(/\/+$/, ''))])],
   // Clave opcional para que la demo publicada no quede abierta a cualquiera.
   demoClave: process.env.DEMO_CLAVE || '',
   almacenamiento: {

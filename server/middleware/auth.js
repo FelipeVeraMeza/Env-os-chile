@@ -43,10 +43,24 @@ export const autenticar = ruta(async (req, _res, next) => {
 
   if (!usuario) throw falla(401, config.authMode === 'demo' ? 'Selecciona un perfil de demostración' : 'Debes iniciar sesión', { sesion: 'requerida' });
   if (!usuario.activo) throw falla(403, 'Usuario desactivado');
+  // Contraseña temporal asignada por administración: hasta cambiarla, la sesión solo sirve para cambiarla
+  // (antes solo lo exigía la pantalla; la API aceptaba todo con la clave que administración conoce).
+  if (bearer && usuario.debe_cambiar_clave && !RUTAS_CLAVE_TEMPORAL.includes(String(req.originalUrl || '').split('?')[0])) {
+    throw falla(403, 'Debes cambiar tu contraseña temporal antes de continuar', { cambiar_clave: true });
+  }
   delete usuario.sesion_version;
   req.usuario = usuario;
   next();
 });
+
+const RUTAS_CLAVE_TEMPORAL = ['/api/auth/yo', '/api/auth/cambiar-clave', '/api/auth/cambiar-password', '/api/auth/cerrar-sesiones'];
+
+// Usuario de la sesión si la hay (para respuestas públicas que muestran algo más a quien inició sesión). Nunca falla.
+export async function usuarioOpcional(req) {
+  let usuario = null;
+  await autenticar(req, {}, (err) => { if (!err) usuario = req.usuario; });
+  return usuario;
+}
 
 export function firmarSesion(u) {
   return jwt.sign({ sub: u.id, rol: u.rol, v: u.sesion_version ?? 0 }, config.jwtSecret, { algorithm: 'HS256', expiresIn: `${config.jwtDias}d` });

@@ -11,7 +11,8 @@ seguimiento.get('/:folio', ruta(async (req, res) => {
   // El correlativo se rellena a 6 dígitos pero puede crecer (sobre 999.999 envíos en un año tiene 7 o más).
   if (!/^ENV-\d{4}-\d{6,9}$/.test(folio)) throw falla(400, 'Folio con formato inválido (ej. ENV-2026-000123)');
   const e = await uno(
-    `SELECT e.id, e.folio, e.estado, e.tipo_destino, e.courier_empresa, e.intentos, e.estado_pago, e.confirmado_en, e.entregado_en,
+    // Sin el estado del pago: los folios son correlativos y cualquiera podría recorrerlos para saber quién pagó.
+    `SELECT e.id, e.folio, e.estado, e.tipo_destino, e.courier_empresa, e.intentos, e.confirmado_en, e.entregado_en,
             e.horario_especial, e.franja_horaria, c.nombre AS comuna
      FROM envio e JOIN comuna c ON c.id = e.comuna_id WHERE e.folio = $1`, [folio]);
   if (!e) throw falla(404, 'No encontramos un envío con ese folio');

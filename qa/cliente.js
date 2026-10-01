@@ -42,7 +42,8 @@ export async function crearUsuarioQa(admin, rol, nombre) {
   const password = `Qa.${sufijo}.2026`;
   const r = await peticion('POST', '/api/usuarios', {
     sesion: admin,
-    json: { nombre: `QA ${nombre}`, correo: `qa-${rol}-${nombre.toLowerCase().replace(/\W/g, '')}-${sufijo}@qa.test`, rol, password },
+    // Clave definitiva (no temporal): con AUTH_MODE=jwt una clave temporal solo permite cambiarla.
+    json: { nombre: `QA ${nombre}`, correo: `qa-${rol}-${nombre.toLowerCase().replace(/\W/g, '')}-${sufijo}@qa.test`, rol, password, cambiar_al_entrar: false },
   });
   assert.equal(r.status, 201, `crear usuario QA: ${JSON.stringify(r.datos)}`);
   const usuario = r.datos;

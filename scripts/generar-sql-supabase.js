@@ -96,7 +96,7 @@ $bucket$;
 
 COMMIT;
 
--- Verificación: debe mostrar 346 comunas, 34 en cobertura y 5 claves de configuración.
+-- Verificación: debe mostrar 346 comunas, 34 en cobertura y ${Object.keys(CONFIG_POR_DEFECTO).length} claves de configuración.
 SELECT
   (SELECT count(*) FROM comuna) AS comunas,
   (SELECT count(*) FROM comuna WHERE en_cobertura) AS en_cobertura,

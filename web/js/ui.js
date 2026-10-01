@@ -43,11 +43,16 @@ export function errorToast(err) { toast(err.message || 'Ocurrió un error', 'err
 // Abre un modal; devuelve { el, cerrar }. onClose se ejecuta al cerrar.
 // fijo: true → no se cierra con Escape, clic afuera ni ✕ (solo por código).
 export function modal(contenido, { onClose, fijo = false } = {}) {
+  // Al cerrar, el foco vuelve al botón que abrió el modal (teclado y lectores de pantalla no pierden su lugar).
+  const origen = document.activeElement;
   const fondo = document.createElement('div');
   fondo.className = 'modal-fondo';
   fondo.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${fijo ? '' : '<button class="btn-icono cerrar" aria-label="Cerrar">✕</button>'}<div class="modal-cuerpo"></div></div>`;
   montar($('.modal-cuerpo', fondo), contenido);
-  const cerrar = () => { fondo.remove(); document.removeEventListener('keydown', esc); onClose?.(); };
+  const cerrar = () => {
+    fondo.remove(); document.removeEventListener('keydown', esc); onClose?.();
+    if (origen?.isConnected && typeof origen.focus === 'function') origen.focus({ preventScroll: true });
+  };
   const esc = (e) => { if (e.key === 'Escape' && !fijo) cerrar(); };
   fondo.addEventListener('click', (e) => { if (e.target === fondo && !fijo) cerrar(); });
   $('.cerrar', fondo)?.addEventListener('click', cerrar);
@@ -114,15 +119,32 @@ export async function comprimirFoto(file, lado = 1600, calidad = 0.8) {
   return new File([blob], (file.name || 'foto').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
 }
 
-export function obtenerGps() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new Error('Este dispositivo no entrega ubicación GPS'));
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, precision: Math.round(p.coords.accuracy) }),
-      (e) => reject(new Error(e.code === 1 ? 'Permiso de ubicación denegado. Actívalo para cerrar la entrega.' : 'No se pudo obtener la ubicación GPS')),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-    );
-  });
+function posicion(opciones) {
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, opciones));
+}
+
+// GPS de alta precisión; si no responde a tiempo (dentro de un edificio suele pasar), se reintenta con la ubicación
+// aproximada del teléfono (red/wifi) en vez de dejar al repartidor sin poder cerrar la entrega.
+export async function obtenerGps() {
+  if (!navigator.geolocation) throw new Error('Este dispositivo no entrega ubicación GPS');
+  const aCoords = (p) => ({ lat: p.coords.latitude, lon: p.coords.longitude, precision: Math.round(p.coords.accuracy) });
+  try {
+    return aCoords(await posicion({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }));
+  } catch (e) {
+    if (e.code === 1) throw new Error('Permiso de ubicación denegado. Actívalo para cerrar la entrega.');
+    try { return aCoords(await posicion({ enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 })); }
+    catch { throw new Error('No se pudo obtener la ubicación GPS. Sal a un lugar abierto e inténtalo de nuevo.'); }
+  }
+}
+
+// Muestra un archivo (QR, vista previa) en un <img> y libera la memoria de la imagen anterior: las pantallas que se
+// refrescan solas cada 30 s acumulaban una imagen nueva en memoria en cada vuelta.
+export function mostrarBlob(img, blob) {
+  if (!img) return;
+  if (img.dataset.blob) URL.revokeObjectURL(img.dataset.blob);
+  const url = URL.createObjectURL(blob);
+  img.dataset.blob = url;
+  img.src = url;
 }
 
 export const ICONOS = {

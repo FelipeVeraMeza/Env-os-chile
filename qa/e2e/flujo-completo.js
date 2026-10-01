@@ -98,7 +98,7 @@ try {
     const a = admin.pagina;
     await a.goto(`${URL_APP}/#/envio/${envioId}`, { waitUntil: 'networkidle' });
     await a.click('#revisar-comprobante');
-    await a.click('#f-revision button[value="aprobar"]');
+    await a.click('#f-revision button[data-decision="aprobar"]');
     await a.locator('#asignar').waitFor();
     await a.selectOption('#asignar', String(repartidor.perfil.id));
     await a.locator('.badge', { hasText: 'Asignado' }).first().waitFor();

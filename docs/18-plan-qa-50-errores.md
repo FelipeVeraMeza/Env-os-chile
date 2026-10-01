@@ -1,6 +1,8 @@
-# 18 · Plan QA: 50 errores encontrados y corregidos (01-10-2026)
+# 18 · Plan QA: 100 errores encontrados y corregidos (01-10-2026)
 
-**Rol:** jefatura de proyecto y QA · **Versión revisada:** último commit subido (`30-09-1`) · **Estado:** ✅ 50 de 50 corregidos + 2 adicionales encontrados por las pruebas nuevas (52 en total).
+**Rol:** jefatura de proyecto y QA · **Versión revisada:** último commit subido (`30-09-1`) · **Estado:** ✅ dos rondas cerradas: QA-01 a QA-52 (primera ronda, 50 + 2 encontrados por las pruebas) y QA-53 a QA-102 (segunda ronda, 50). **102 errores corregidos en total.**
+
+La segunda ronda está en la [sección 5](#5-segunda-ronda-qa-53-a-qa-102).
 
 ## 1. Objetivo y alcance
 
@@ -82,7 +84,7 @@ Encontrar y corregir 50 errores reales de la plataforma antes de la fecha meta (
 | QA-28 | Media | El repartidor podía "ordenar" en su ruta envíos ya entregados o anulados. | Solo envíos que siguen en su ruta. `server/routes/envios.js` | CP-209 |
 | QA-29 | Media | El seguimiento rechazaba como "formato inválido" los folios de 7 dígitos (desde el envío 1.000.000 del año). | Se aceptan 6 a 9 dígitos. `server/routes/publico.js` | CP-215 |
 | QA-43 | Media | Un envío podía acumular fotos y boletas sin límite, llenando el almacenamiento. | Máximo 20 adjuntos por envío. `server/routes/envios.js` | CP-217 |
-| QA-48 | Alta | El QR de un envío a **punto courier** (Starken, Blue Express…) llevaba al repartidor a la casa del destinatario en Google Maps, no al punto. | Para punto courier se muestra la página con el punto. `server/routes/publico.js` | CP-216 |
+| QA-48 | Alta | El QR de un envío a **punto courier** (Starken, Blue Express…) abría el mapa directo, sin indicar que la entrega es en un punto ni la empresa o sucursal (el repartidor podía terminar tocando el timbre de una casa). | Para punto courier se muestra la página con el punto, la empresa y los botones de mapa. `server/routes/publico.js` | CP-216 |
 
 ### Seguro
 
@@ -144,21 +146,123 @@ Encontrar y corregir 50 errores reales de la plataforma antes de la fecha meta (
 
 "revisión" = verificado por revisión de código y por las suites de regresión (el caso no se puede provocar desde la API sin simular fallas de red o de memoria).
 
-## 5. Riesgos y pendientes para la próxima iteración
+## 5. Segunda ronda (QA-53 a QA-102)
+
+Mismo método. Esta vez el foco fue lo que la primera ronda no cubrió a fondo: las pantallas (`web/js/vistas/`), el service worker, los scripts de despliegue y los flujos de dinero que quedaron como riesgo (reembolsos, conciliación, archivos huérfanos).
+
+**Resultado de la segunda ronda**
+
+| Suite | Antes de la ronda | Después |
+|---|---|---|
+| Pruebas unitarias | 59 ✔ | **65 ✔** (6 nuevas: `tests/unit/correcciones-qa-2.test.js`) |
+| QA de la API | 154 ✔ · 2 omitidas | **164 ✔** · 2 omitidas (las mismas) · 10 casos nuevos CP-220 a CP-229 (`qa/specs/21-plan-qa-ronda-2.test.js`) |
+| Flujo completo, accesibilidad y carga | ✔ | ✔ (carga: 200/200 envíos, 0 errores) |
+| Verificación en navegador | — | Enter ya no aprueba pagos (reproducido antes y después), panel con rango inválido, cifras del inicio del cliente |
+
+| Severidad | Cantidad |
+|---|---|
+| Crítica | 2 |
+| Alta | 8 |
+| Media | 24 |
+| Baja | 16 |
+| **Total** | **50** |
+
+**Cambio de comportamiento a comunicar (QA-81):** con inicio de sesión real, quien entra con una contraseña temporal asignada por administración ya no puede usar nada hasta cambiarla (antes solo lo pedía la pantalla). La prueba CP-85 se actualizó a esta regla.
+
+### Pantallas y aplicación
+
+| N° | Sev. | Qué pasaba | Corrección | Prueba |
+|---|---|---|---|---|
+| QA-53 | Crítica | Al revisar un comprobante, escribir el motivo del rechazo y pulsar **Enter APROBABA el pago** (el formulario se enviaba con el primer botón, "Aprobar"). | Solo decide el botón que se pulsa. `web/js/vistas/envios.js` | navegador: antes "pagado", después sigue "en revisión" |
+| QA-54 | Alta | Lo mismo al resolver un reclamo de seguro: Enter en el monto aprobaba el reclamo. | Solo decide el botón. `web/js/vistas/envios.js` | revisión |
+| QA-55 | Media | El reembolso desde la pantalla enviaba 0 con el monto vacío (anulaba la corrección QA-21). | Vacío = reembolso total. `web/js/vistas/envios.js` | revisión |
+| QA-56 | Baja | El botón "Reclamar seguro" aparecía antes del retiro y el servidor lo rechazaba. | Mismos estados que exige el servidor. `web/js/vistas/envios.js` | revisión |
+| QA-57 | Media | Doble clic en "Pagar" (pago en línea) enviaba dos confirmaciones; la segunda mostraba un error. | Botones bloqueados mientras se procesa. `web/js/vistas/envios.js` | revisión |
+| QA-58 | Baja | El QR y la vista previa de la foto quedaban en memoria en cada refresco automático (cada 30 s): las pantallas abiertas todo el día consumían cada vez más. | Se libera la imagen anterior. `web/js/ui.js` | revisión |
+| QA-59 | Media | Panel de ganancias con "desde" posterior a "hasta": la pantalla quedaba cargando para siempre. | Mensaje claro y botón "Ver el mes actual". `web/js/vistas/admin.js` | navegador |
+| QA-60 | Media | Cobranza: el mismo problema. | Mismo manejo. `web/js/vistas/admin.js` | revisión |
+| QA-61 | Baja | Seguridad: un error al cargar o al abrir la actividad de una IP dejaba la pantalla sin respuesta. | Errores manejados. `web/js/vistas/admin.js` | revisión |
+| QA-62 | Alta | Las cifras del inicio del cliente (en curso, por pagar, entregados) se calculaban solo con sus **últimos 100 envíos**: con más, eran incorrectas. | El servidor las cuenta todas (`/api/envios/resumen`). `server/routes/envios.js`, `web/js/vistas/cliente.js` | CP-220, navegador |
+| QA-63 | Baja | Libreta: "Dirección quitada" se mostraba aunque la operación fallara. | El aviso solo sale si se guardó. `web/js/vistas/cliente.js` | revisión |
+| QA-64 | Media | La libreta y el asistente de nuevo envío mostraban destinatarios anonimizados ("Titular anonimizado"). | No se listan (administración los ve con `?anonimizados=1`). `server/routes/catalogos.js` | CP-221 |
+| QA-65 | Alta | El service worker no guardaba `cuenta.js`: **la app no abría sin conexión** (era la promesa de la PWA). | Incluido en la caché. `web/sw.js` | revisión |
+| QA-66 | Media | El service worker guardaba respuestas de error (404, 502 durante un despliegue) y las mostraba sin conexión. | Solo se guardan respuestas correctas. `web/sw.js` | revisión |
+| QA-67 | Baja | Ajustes → opciones del envío: un error no marcaba el campo. | Se marca el campo. `web/js/vistas/admin.js` | revisión |
+| QA-68 | Baja | Con la hora del teléfono atrasada, la cuenta regresiva de espera pasaba de 5:00 y el anillo se salía de escala. | Se limita a la espera máxima. `web/js/vistas/repartidor.js` | revisión |
+| QA-69 | Media | "No se pudo entregar": mientras buscaba el GPS (hasta 25 s) no se veía nada y un segundo toque lo enviaba otra vez. | Botón bloqueado con "Obteniendo ubicación…". `web/js/vistas/repartidor.js` | revisión |
+| QA-70 | Media | Si se cambiaba la `DEMO_CLAVE`, quien tenía la anterior veía errores en cada acción sin que se le pidiera la nueva. | Se olvida la clave guardada y se vuelve a pedir. `web/js/api.js` | revisión |
+| QA-71 | Baja | Al cerrar un modal, el foco del teclado se perdía (accesibilidad). | Vuelve al botón que lo abrió. `web/js/ui.js` | accesibilidad ✔ |
+
+### Datos personales y seguridad
+
+| N° | Sev. | Qué pasaba | Corrección | Prueba |
+|---|---|---|---|---|
+| QA-72 | Alta | Se podía crear un envío para un destinatario **anonimizado**, volviendo a asociarle una dirección (Ley 21.719). | 409. `server/routes/envios.js` | CP-221 |
+| QA-73 | Media | El seguimiento público decía si el envío estaba pagado; como los folios son correlativos, cualquiera podía recorrerlos. | Se quitó el estado del pago. `server/routes/publico.js` | CP-224 |
+| QA-81 | Crítica | Contraseña temporal asignada por administración: la API aceptaba todo sin cambiarla (solo la pantalla lo pedía), con una clave que administración conoce. | Hasta cambiarla, la sesión solo sirve para cambiarla. `server/middleware/auth.js`, `web/js/app.js` | CP-85 (actualizado) |
+| QA-83 | Alta | Todos los repartidores veían **nombre, teléfono, depto y referencia** del destinatario de todos los envíos disponibles, aunque no los tomaran. | Ven comuna, calle y bultos; el resto, al tomarlo. `server/lib/reglas.js`, `server/routes/envios.js` | CP-223, unitaria |
+| QA-84 | Media | El repartidor recibía el correo del destinatario, que no necesita para entregar. | Se oculta. `server/lib/reglas.js` | CP-223, unitaria |
+| QA-102 | Media | Con inicio de sesión real, los datos de la **cuenta bancaria** para transferir se entregaban a cualquiera sin iniciar sesión. | Solo con sesión (o en la demo). `server/routes/catalogos.js`, `web/js/app.js` | revisión |
+
+### Dinero: reembolsos, cobranza y conciliación
+
+| N° | Sev. | Qué pasaba | Corrección | Prueba |
+|---|---|---|---|---|
+| QA-74 | Alta | El reembolso no quedaba en la bitácora del pago ni se descontaba en Cobranza (riesgo anotado en la primera ronda). | Evento "reembolso" en la bitácora (migración 012) y "reembolsado" en el resumen. `server/routes/envios.js`, `cobranza.js` | CP-225 |
+| QA-78 | Alta | Cada transferencia aprobada aparecía como **"abono por llegar" de una pasarela** y se podía "conciliar", registrando un costo de pasarela que no existe. | Transferencias, pagos manuales y simulador no se concilian. `server/lib/cobranza.js`, `cobranza.js`, `admin.js` | CP-226, unitaria |
+| QA-76 | Media | La conciliación aceptaba una fecha de abono anterior al pago. | Rechazada. `server/lib/cobranza.js` | unitaria |
+| QA-77 | Baja | Una fecha de abono imposible (31-02) se corría al mes siguiente. | Rechazada. `server/lib/cobranza.js` | unitaria |
+| QA-86 | Media | Si un envío se pagaba por transferencia o a mano, su cobro en línea abierto quedaba para siempre como "pago sin respuesta de la pasarela". | Se anula al pagarse; el aviso solo cuenta envíos aún sin pagar. `server/lib/pagos.js`, `cobranza.js` | CP-227 |
+| QA-82 | Media | El CSV escribía el peso con punto decimal: Excel en español lo leía como 25 en vez de 2,5. | Coma decimal. `server/routes/envios.js` | CP-228 |
+| QA-79 | Baja | La tasa de intentos fallidos del panel contaba borradores y anulados en el total. | Solo envíos que salieron a ruta. `server/routes/operacion.js` | revisión |
+
+### Operación y validaciones
+
+| N° | Sev. | Qué pasaba | Corrección | Prueba |
+|---|---|---|---|---|
+| QA-75 | Media | Si la operación fallaba después de subir la foto, boleta o comprobante (p. ej. otra persona cambió el envío), el archivo quedaba en el almacenamiento sin registro (riesgo anotado en la primera ronda). | Se borra si la operación falla. `server/lib/archivos.js` y rutas | unitaria |
+| QA-80 | Media | "Cerrados hoy" del repartidor contaba un envío devuelto otro día si hoy se le hacía otro cambio (p. ej. un reembolso). | Cuenta la fecha real del cierre. `server/routes/envios.js` | CP-130 |
+| QA-85 | Baja | La nota al resolver un reclamo no tenía largo máximo. | Hasta 500. `server/routes/operacion.js` | CP-229 |
+| QA-87 | Media | Descripción, observaciones y punto courier del envío no tenían largo máximo (desbordaban la etiqueta térmica). | 200 / 300 / 120 caracteres. `server/lib/reglas.js` | CP-229, unitaria |
+| QA-88 | Baja | Nombre, notas y dirección del destinatario no tenían largo máximo. | Largos máximos. `server/lib/reglas.js` | CP-229, unitaria |
+| QA-89 | Baja | El RUT "0-0" se aceptaba como válido. | Rechazado. `server/lib/reglas.js` | CP-229, unitaria |
+| QA-96 | Media | Administración podía crear envíos a nombre de un cliente **desactivado**. | Solo clientes activos. `server/routes/envios.js` | CP-222 |
+| QA-97 | Media | Administración podía crear destinatarios en la "libreta" de un repartidor o de otro administrador. | Solo clientes. `server/routes/catalogos.js` | CP-222 |
+| QA-101 | Media | Dentro de un edificio el GPS de alta precisión no responde y el repartidor no podía cerrar la entrega. | Si no responde, se usa la ubicación aproximada del teléfono. `web/js/ui.js` | revisión |
+
+### Servidor y despliegue
+
+| N° | Sev. | Qué pasaba | Corrección | Prueba |
+|---|---|---|---|---|
+| QA-90 | Alta | `npm run verificar` **nunca podía terminar en "Todo listo"**: su archivo de prueba no era un PDF real y el almacenamiento lo rechazaba. | Archivo de prueba válido. `scripts/verificar-despliegue.js` | ejecutado antes (✖) y después (✔) |
+| QA-91 | Baja | La verificación dejaba su archivo de prueba en el disco. | Se borra. `scripts/verificar-despliegue.js` | ejecutado |
+| QA-92 | Media | La verificación daba por buena una `JWT_SECRET` de ejemplo de las plantillas (tiene 44 caracteres). | Se rechazan las claves de ejemplo. `scripts/verificar-despliegue.js` | ejecutado |
+| QA-93 | Media | `npm run publicar` subía a Railway los valores con sus comillas (`JWT_SECRET="…"` quedaba con comillas). | Lector común que las quita. `scripts/publicar.js`, `qa/entornos.js` | unitaria |
+| QA-94 | Baja | En `entornos.env`, los espacios al final y los comentarios al final de la línea quedaban pegados a las URLs. | Se quitan. `qa/entornos.js` | unitaria |
+| QA-95 | Baja | El SQL para Supabase decía que la verificación debía mostrar 5 claves de configuración; son 7. | Se calcula al generarlo. `scripts/generar-sql-supabase.js` | regenerado |
+| QA-98 | Media | Sin red de seguridad: en Node 22 una promesa rechazada sin manejar termina el proceso y Railway reinicia la app, cortando a todos. | Se registra y el servidor sigue. `server/index.js` | revisión |
+| QA-99 | Media | `CORS_ORIGINS` con barra final (`https://x.vercel.app/`) bloqueaba la interfaz publicada en Vercel. | Se quita la barra. `server/config.js` | revisión |
+| QA-100 | Baja | `web/config.js` estaba desactualizado: el selector de servidor no ofrecía la URL de Railway. | Regenerado con `npm run build:web`. | regenerado |
+
+"revisión" = verificado por revisión de código y por las suites de regresión (flujo completo, accesibilidad, carga).
+
+## 6. Riesgos y pendientes para la próxima iteración
+
+Resueltos en la segunda ronda: el reembolso ya queda en la bitácora de pagos (QA-74) y los archivos ya no quedan huérfanos (QA-75).
 
 | Riesgo / pendiente | Acción propuesta | Responsable |
 |---|---|---|
-| El reembolso no queda en la bitácora de pagos (`pago_evento`) ni descuenta de cobranza. | Registrar el reembolso como evento de pago y mostrarlo en Cobranza. | Desarrollo |
-| Los archivos subidos quedan huérfanos si la operación falla después de guardarlos. | Limpieza periódica de archivos sin registro en `adjunto`. | Desarrollo |
+| Archivos huérfanos de antes de la segunda ronda pueden seguir en el almacenamiento. | Script de limpieza de archivos sin registro en `adjunto`. | Desarrollo |
+| La regla de contraseña temporal (QA-81) y los datos bancarios con sesión (QA-102) solo se ejercitan con `AUTH_MODE=jwt`; la suite de CI corre en modo demo. | Correr `npm run qa:railway` contra un ambiente con inicio de sesión real antes de producción. | QA |
 | Los límites de intentos de inicio de sesión viven en memoria (un solo servidor). | Pasarlos a la base si se usa más de una instancia en Railway. | Desarrollo |
 | Las comunas con zona propia distinta de Santiago no cambian con la tarifa estándar (por diseño). | Pantalla para editar zonas en *Tarifas y reglas*. | Producto |
 
-## 6. Cómo verificar
+## 7. Cómo verificar
 
 ```bash
 docker compose up -d && cp .env.example .env && npm install
-npm test                 # 59 unitarias
+npm test                 # 65 unitarias
 npm run dev              # en otra terminal
-npm run qa:local         # 156 casos (CP-200 a CP-218 cubren este plan)
+npm run qa:local         # 166 casos (CP-200 a CP-229 cubren este plan)
 npm run e2e && npm run accesibilidad && npm run carga
 ```

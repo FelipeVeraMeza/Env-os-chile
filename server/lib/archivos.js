@@ -142,6 +142,18 @@ export async function borrarArchivos(rutas) {
   return borrados;
 }
 
+// Guarda el archivo y ejecuta la operación que lo registra. Si la operación falla (409 por otra persona, error de la
+// base…), el archivo ya subido se borra: si no, quedaría en el almacenamiento sin ningún registro que lo use.
+export async function conArchivo(buffer, mime, operacion) {
+  const archivo = await guardarArchivo(buffer, mime);
+  try {
+    return await operacion(archivo);
+  } catch (err) {
+    await borrarArchivos([archivo.ruta]).catch((e) => console.error('[archivos] no se pudo borrar un archivo sin uso', e.message));
+    throw err;
+  }
+}
+
 function rutaLocal(relativa) {
   const abs = path.resolve(config.uploadDir, relativa);
   if (!abs.startsWith(config.uploadDir + path.sep)) throw new Error('Ruta fuera del directorio de archivos');

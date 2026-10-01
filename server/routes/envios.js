@@ -5,16 +5,16 @@ import { query, transaccion, uno } from '../db/pool.js';
 import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, patronBusqueda, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
 import {
-  calcularTarifa, normalizarRut, normalizarTelefono, rolPuedeTransicionar, validarDestinatario, validarDestino,
+  calcularTarifa, normalizarRut, normalizarTelefono, rolPuedeTransicionar, validarDestinatario, validarDestino, vistaDisponible,
   validarDireccion, validarPaquete, validarSubidaComprobante, validarTransicion, validarUbicacion, ESTADOS, LIMITES, MIME_COMPROBANTE,
 } from '../lib/reglas.js';
 import {
   cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
 } from '../lib/envios.js';
-import { guardarArchivo, subida } from '../lib/archivos.js';
+import { conArchivo, subida } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
-import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, iniciarPago, registrarComprobante, registrarEventoPago } from '../lib/pagos.js';
+import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, cerrarCobrosAbiertos, iniciarPago, registrarComprobante, registrarEventoPago } from '../lib/pagos.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
 
@@ -85,8 +85,9 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const conf = await leerConfig();
   const clienteId = req.usuario.rol === 'cliente' ? req.usuario.id : Number(b.cliente_id);
   if (req.usuario.rol === 'admin') {
-    const cli = Number.isInteger(clienteId) ? await uno("SELECT id FROM usuario WHERE id = $1 AND rol = 'cliente'", [clienteId]) : null;
-    if (!cli) throw falla(422, 'Selecciona el cliente dueño del envío', { cliente_id: 'Obligatorio' });
+    // Solo clientes activos: un cliente desactivado no puede tener envíos nuevos a su nombre.
+    const cli = Number.isInteger(clienteId) ? await uno("SELECT id FROM usuario WHERE id = $1 AND rol = 'cliente' AND activo", [clienteId]) : null;
+    if (!cli) throw falla(422, 'Selecciona el cliente dueño del envío (debe estar activo)', { cliente_id: 'Obligatorio' });
   }
 
   const errores = {};
@@ -120,8 +121,10 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const envio = await transaccion(async (db) => {
     let destinatarioId = b.destinatario_id ? Number(b.destinatario_id) : null;
     if (destinatarioId) {
-      const { rows } = await db.query('SELECT id FROM destinatario WHERE id = $1 AND cliente_id = $2', [destinatarioId, clienteId]);
+      const { rows } = await db.query('SELECT id, anonimizado_en FROM destinatario WHERE id = $1 AND cliente_id = $2', [destinatarioId, clienteId]);
       if (!rows[0]) throw falla(422, 'Destinatario no encontrado en la libreta del cliente');
+      // Un titular anonimizado (Ley 21.719) no recibe envíos nuevos: se le volvería a asociar una dirección y datos.
+      if (rows[0].anonimizado_en) throw falla(409, 'Este destinatario fue anonimizado: crea uno nuevo para enviarle', { destinatario_id: 'Anonimizado' });
     } else {
       const d = b.destinatario;
       const { rows: [nuevo] } = await db.query(
@@ -202,7 +205,12 @@ function filtrosListado(req) {
   if (desde) cond.push(`(e.creado_en ${TZ})::date >= ${p(desde)}::date`);
   if (hasta) cond.push(`(e.creado_en ${TZ})::date <= ${p(hasta)}::date`);
   // Envíos cerrados (entregados o devueltos) hoy, sin importar cuándo se crearon.
-  if (q.cerrados === 'hoy') cond.push(`(COALESCE(e.entregado_en, e.actualizado_en) ${TZ})::date = ${p(hoyChile())}::date`);
+  // La fecha del cierre es la del cambio a entregado/devuelto (no la última modificación: un reembolso u otro cambio
+  // posterior hacía contar como "cerrado hoy" un envío devuelto otro día).
+  if (q.cerrados === 'hoy') {
+    cond.push(`e.estado IN ('entregado', 'devuelto') AND (COALESCE(e.entregado_en,
+      (SELECT max(h.fecha) FROM envio_estado h WHERE h.envio_id = e.id AND h.estado_nuevo = e.estado)) ${TZ})::date = ${p(hoyChile())}::date`);
+  }
   if (q.q) {
     const t = p(patronBusqueda(q.q));
     cond.push(`(e.folio ILIKE ${t} OR d.nombre ILIKE ${t} OR d.telefono ILIKE ${t} OR di.calle ILIKE ${t} OR c.nombre ILIKE ${t})`);
@@ -224,6 +232,21 @@ envios.get('/', ruta(async (req, res) => {
   res.json({ total: total.n, pagina, limite, items: rows.map((e) => presentar(e, req.usuario)) });
 }));
 
+// Resumen para la pantalla de inicio: cuenta TODOS los envíos visibles (no solo los últimos 100 de la lista).
+envios.get('/resumen', ruta(async (req, res) => {
+  const { where, params } = filtrosListado({ usuario: req.usuario, query: {} });
+  const r = await uno(
+    `SELECT count(*)::int AS total,
+       count(*) FILTER (WHERE e.estado IN ('creado','asignado','en_ruta','fallido','reagendado'))::int AS en_curso,
+       count(*) FILTER (WHERE e.estado_pago = 'pendiente' AND e.estado NOT IN ('borrador','anulado'))::int AS por_pagar,
+       COALESCE(sum(e.tarifa_total) FILTER (WHERE e.estado_pago = 'pendiente' AND e.estado NOT IN ('borrador','anulado')), 0)::int AS monto_por_pagar,
+       count(*) FILTER (WHERE e.estado_pago = 'en_revision' AND e.estado <> 'anulado')::int AS en_revision,
+       count(*) FILTER (WHERE e.estado = 'entregado')::int AS entregados
+     FROM envio e JOIN destinatario d ON d.id = e.destinatario_id JOIN direccion di ON di.id = e.direccion_id JOIN comuna c ON c.id = e.comuna_id ${where}`, params);
+  if (req.usuario.rol === 'repartidor') delete r.monto_por_pagar;
+  res.json(r);
+}));
+
 // Exportación CSV de lo que se está viendo (RF-37). Separador ";" para Excel en español.
 envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const { where, params } = filtrosListado(req);
@@ -233,7 +256,8 @@ envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, re
     ['Cliente', 'cliente_nombre'], ['Destinatario', 'destinatario_nombre'], ['Teléfono', 'destinatario_telefono'],
     ['Dirección', (e) => `${e.calle} ${e.numero}${e.depto ? ' ' + e.depto : ''}`], ['Comuna', 'comuna_nombre'],
     ['Tipo destino', 'tipo_destino'], ['Courier', 'courier_empresa'], ['Producto', 'descripcion_producto'], ['Bultos', 'bultos'],
-    ['Peso kg', 'peso_kg'], ...(req.usuario.rol === 'admin' ? [['Valor declarado', 'valor_declarado']] : []), ['Horario especial', (e) => (e.horario_especial ? 'Sí' : 'No')],
+    // Excel en español (Chile) usa coma decimal: "2.5" se leería como 25 o como texto.
+    ['Peso kg', (e) => String(e.peso_kg).replace('.', ',')], ...(req.usuario.rol === 'admin' ? [['Valor declarado', 'valor_declarado']] : []), ['Horario especial', (e) => (e.horario_especial ? 'Sí' : 'No')],
     ['Tarifa total', 'tarifa_total'], ['Repartidor', 'repartidor_nombre'], ['Intentos', 'intentos'],
     ['Entregado', (e) => (e.entregado_en ? new Date(e.entregado_en).toLocaleString('es-CL', { timeZone: 'America/Santiago' }) : '')],
   ];
@@ -259,7 +283,8 @@ envios.get('/disponibles', requiereRol('admin', 'repartidor'), ruta(async (req, 
   const conf = await leerConfig();
   if (req.usuario.rol === 'repartidor' && !conf.operacion.autoasignacion) return res.json({ autoasignacion: false, total: 0, items: [] });
   const { rows } = await query(`${SELECT_ENVIO} WHERE ${SIN_ASIGNAR} ORDER BY e.horario_especial DESC, e.pagado_en, e.id LIMIT 100`);
-  res.json({ autoasignacion: conf.operacion.autoasignacion, total: rows.length, items: rows.map((e) => presentar(e, req.usuario)) });
+  const vista = req.usuario.rol === 'repartidor' ? (e) => vistaDisponible(presentar(e, req.usuario)) : (e) => presentar(e, req.usuario);
+  res.json({ autoasignacion: conf.operacion.autoasignacion, total: rows.length, items: rows.map(vista) });
 }));
 
 // El repartidor toma un envío disponible. La condición va en el UPDATE para que, si dos
@@ -410,8 +435,7 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
   if (precision !== null && (!Number.isFinite(precision) || precision < 0 || precision > 100_000)) throw falla(422, 'Precisión GPS inválida', { precision: 'Inválida' });
   const receptor = String(req.body.receptor ?? '').trim().slice(0, 120) || null;
 
-  const archivo = await guardarArchivo(quitarExif(req.file.buffer), req.file.mimetype);
-  await transaccion(async (db) => {
+  await conArchivo(quitarExif(req.file.buffer), req.file.mimetype, (archivo) => transaccion(async (db) => {
     await db.query(
       `INSERT INTO adjunto (envio_id, tipo, nombre_original, mime, tamano, ruta, sha256, subido_por)
        VALUES ($1, 'foto_entrega', $2, $3, $4, $5, $6, $7)`,
@@ -423,7 +447,7 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
       [ubic?.lat ?? null, ubic?.lon ?? null, precision, receptor, envio.id, envio.estado],
     ));
     await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: receptor ? `Recibe: ${receptor}` : null });
-  });
+  }));
   await auditar(req, 'entregar', 'envio', envio.id, { lat: ubic?.lat, lon: ubic?.lon });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));
@@ -439,12 +463,11 @@ envios.post('/:id/adjuntos', requiereRol('admin', 'cliente'), subida.single('arc
   const { n } = await uno("SELECT count(*)::int AS n FROM adjunto WHERE envio_id = $1 AND tipo IN ('foto_paquete', 'boleta')", [envio.id]);
   if (n >= MAX_ADJUNTOS) throw falla(409, `El envío ya tiene ${MAX_ADJUNTOS} archivos adjuntos (máximo)`);
   const buffer = req.file.mimetype === 'image/jpeg' ? quitarExif(req.file.buffer) : req.file.buffer;
-  const archivo = await guardarArchivo(buffer, req.file.mimetype);
-  const adj = await uno(
+  const adj = await conArchivo(buffer, req.file.mimetype, (archivo) => uno(
     `INSERT INTO adjunto (envio_id, tipo, nombre_original, mime, tamano, ruta, sha256, subido_por)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, tipo, nombre_original, mime, tamano, subido_en`,
     [envio.id, tipo, req.file.originalname, req.file.mimetype, archivo.tamano, archivo.ruta, archivo.sha256, req.usuario.id],
-  );
+  ));
   await auditar(req, 'adjuntar', 'envio', envio.id, { tipo, adjunto_id: adj.id });
   res.status(201).json(adj);
 }));
@@ -503,6 +526,7 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
     await db.query(
       `UPDATE envio SET estado_pago = 'pagado', pago_medio = $1, pago_referencia = $2, pagado_en = now(), actualizado_en = now() WHERE id = $3`,
       [medio, referencia, envio.id]);
+    await cerrarCobrosAbiertos(db, envio.id);
   });
   await auditar(req, 'pago_manual', 'envio', envio.id, { medio, referencia });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
@@ -517,8 +541,8 @@ envios.post('/:id/comprobante', requiereRol('admin', 'cliente'), subida.single('
   if (!MIME_COMPROBANTE.includes(req.file.mimetype)) throw falla(422, 'El comprobante debe ser una imagen (JPG, PNG, WebP) o un PDF', { archivo: 'Formato inválido' });
   const referencia = String(req.body.referencia || '').trim().slice(0, 60) || null;
   const buffer = req.file.mimetype === 'image/jpeg' ? quitarExif(req.file.buffer) : req.file.buffer;
-  const guardado = await guardarArchivo(buffer, req.file.mimetype);
-  const pago = await registrarComprobante(envio, { ...guardado, nombre: req.file.originalname, mime: req.file.mimetype }, { referencia, usuarioId: req.usuario.id });
+  const pago = await conArchivo(buffer, req.file.mimetype, (guardado) => registrarComprobante(
+    envio, { ...guardado, nombre: req.file.originalname, mime: req.file.mimetype }, { referencia, usuarioId: req.usuario.id }));
   await auditar(req, 'comprobante_pago', 'envio', envio.id, { pago_id: pago.id, referencia });
   res.status(201).json(pago);
 }));
@@ -535,9 +559,15 @@ envios.post('/:id/reembolso', requiereRol('admin'), ruta(async (req, res) => {
   if (!Number.isInteger(monto) || monto <= 0 || monto > envio.tarifa_total) errores.monto = `Entre $1 y $${envio.tarifa_total.toLocaleString('es-CL')}`;
   if (!['transferencia', 'efectivo', 'pasarela', 'otro'].includes(medio)) errores.medio = 'Medio inválido';
   exigirSinErrores(errores);
-  exigirSinConflicto(await query(
-    `UPDATE envio SET estado_pago = 'reembolsado', reembolso_monto = $1, reembolso_medio = $2, reembolso_nota = $3, reembolsado_en = now(), actualizado_en = now()
-     WHERE id = $4 AND estado_pago = 'pagado'`, [monto, medio, String(req.body?.nota || '').trim().slice(0, 300) || null, envio.id]));
+  const nota = String(req.body?.nota || '').trim().slice(0, 300) || null;
+  await transaccion(async (db) => {
+    exigirSinConflicto(await db.query(
+      `UPDATE envio SET estado_pago = 'reembolsado', reembolso_monto = $1, reembolso_medio = $2, reembolso_nota = $3, reembolsado_en = now(), actualizado_en = now()
+       WHERE id = $4 AND estado_pago = 'pagado'`, [monto, medio, nota, envio.id]));
+    // El reembolso queda en la bitácora del pago que se devuelve (respaldo ante reclamos y para cuadrar la cobranza).
+    const { rows: [p] } = await db.query("SELECT id FROM pago WHERE envio_id = $1 AND estado = 'aprobado' ORDER BY id DESC LIMIT 1", [envio.id]);
+    if (p) await registrarEventoPago(db, { pagoId: p.id, tipo: 'reembolso', estado: 'reembolsado', monto, datos: { medio, nota }, usuarioId: req.usuario.id });
+  });
   await auditar(req, 'reembolsar', 'envio', envio.id, { monto, medio });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));

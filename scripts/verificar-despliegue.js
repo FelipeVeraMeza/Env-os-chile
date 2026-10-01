@@ -1,9 +1,9 @@
 // Verifica que la configuración funciona ANTES de subir a Railway.
 // Uso:  npm run verificar            (lee .env)
 //       npm run verificar -- --railway (además exige lo necesario para producción)
-import { config } from '../server/config.js';
+import { config, validarSecreto } from '../server/config.js';
 import { conectar, explicarErrorConexion, pool } from '../server/db/pool.js';
-import { asegurarAlmacenamiento, guardarArchivo, leerArchivo } from '../server/lib/archivos.js';
+import { asegurarAlmacenamiento, borrarArchivos, guardarArchivo, leerArchivo } from '../server/lib/archivos.js';
 
 const estricto = process.argv.includes('--railway');
 let fallas = 0;
@@ -22,8 +22,9 @@ if (config.db.esSupabase && !config.db.pooler) {
 if (config.db.esSupabase && config.db.pooler && /:6543\b/.test(process.env.DATABASE_URL || '')) {
   aviso('Puerto 6543 = Transaction pooler. Se recomienda el Session pooler (puerto 5432) para migraciones y bloqueos.');
 }
-if (config.jwtSecret === 'solo-para-desarrollo-cambiar' || config.jwtSecret.length < 32) {
-  (estricto ? falla : aviso)('JWT_SECRET no definido o muy corto (mínimo 32 caracteres). También firma los enlaces de fotos y boletas.');
+// También se rechazan las claves de ejemplo de las plantillas (una de ellas tiene 44 caracteres y pasaba como válida).
+if (config.jwtSecret.length < 32 || validarSecreto({ ...process.env, AUTH_MODE: 'jwt', PUBLIC_BASE_URL: 'https://verificacion.invalid', JWT_SECRET: config.jwtSecret })) {
+  (estricto ? falla : aviso)('JWT_SECRET no definido, muy corto (mínimo 32 caracteres) o con el valor de ejemplo. También firma los enlaces de fotos y boletas.');
 } else ok('JWT_SECRET definido');
 if (config.admin.password === 'Cambiar.Esta.Clave.2026') (estricto ? falla : aviso)('ADMIN_PASSWORD sigue con el valor de ejemplo');
 else ok(`Administrador inicial: ${config.admin.correo}`);
@@ -55,11 +56,15 @@ console.log('\n3) Archivos (fotos y boletas)');
 try {
   const alm = await asegurarAlmacenamiento();
   ok(`Almacenamiento listo (${alm.driver}: ${alm.destino})`);
-  const prueba = Buffer.from(`verificacion ${new Date().toISOString()}`);
+  // Debe ser un PDF de verdad: el almacenamiento revisa los primeros bytes y rechazaba el texto de prueba anterior,
+  // así que esta verificación nunca podía terminar en "Todo listo".
+  const prueba = Buffer.from(`%PDF-1.4\n% verificacion ${new Date().toISOString()}\n%%EOF\n`);
   const g = await guardarArchivo(prueba, 'application/pdf');
   const leido = await leerArchivo(g.ruta);
   if (leido && Buffer.compare(leido, prueba) === 0) ok('Escritura y lectura de prueba correctas');
   else falla('El archivo de prueba no se pudo leer de vuelta');
+  // El archivo de prueba se borra (antes quedaba en el disco o en el bucket después de cada verificación).
+  if (alm.driver === 'local') await borrarArchivos([g.ruta]).catch(() => {});
   if (alm.driver === 'supabase') {
     const anonimo = await fetch(`${config.almacenamiento.supabaseUrl}/storage/v1/object/public/${config.almacenamiento.bucket}/${g.ruta.slice(3)}`);
     if (anonimo.ok) falla('¡El archivo es accesible públicamente! Marca el bucket como privado.');

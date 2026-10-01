@@ -26,7 +26,13 @@ test('CP-85 · Inicio de sesión con correo y contraseña; sesión de 30 días (
   assert.ok(payload.exp - payload.iat >= 30 * 24 * 3600 - 5, 'la sesión dura 30 días');
   const yo = await peticion('GET', '/api/auth/yo', { sesion: conToken(ok.datos.token) });
   assert.equal(yo.datos.id, u.id);
-  assert.equal((await peticion('GET', '/api/envios', { sesion: conToken(ok.datos.token) })).status, 200);
+  // La contraseña la asignó administración (temporal): hasta cambiarla, la sesión solo sirve para cambiarla (QA-81).
+  const bloqueada = await peticion('GET', '/api/envios', { sesion: conToken(ok.datos.token) });
+  assert.equal(bloqueada.status, 403);
+  assert.equal(bloqueada.datos.detalles.cambiar_clave, true);
+  const cambio = await peticion('POST', '/api/auth/cambiar-clave', { sesion: conToken(ok.datos.token), json: { actual: u.clave, nueva: 'Propia.Clave.2026' } });
+  assert.equal(cambio.status, 200);
+  assert.equal((await peticion('GET', '/api/envios', { sesion: conToken(cambio.datos.token) })).status, 200);
 });
 
 test('CP-86 · Cambiar la contraseña cierra las otras sesiones (RF-02)', async () => {

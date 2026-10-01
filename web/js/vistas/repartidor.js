@@ -1,7 +1,7 @@
 import { app } from '../app.js';
 import { api, archivo, enviarForm, get, post, put } from '../api.js';
 import {
-  $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, html, montar, obtenerGps, toast, vacio, ESTADOS,
+  $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, html, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, direccionTexto } from './comun.js';
 
@@ -130,7 +130,9 @@ export async function detalleRepartidor(id) {
     });
     if (e.llegada_en) {
       const tick = () => {
-        const restante = Math.max(0, espera - segundosDesdeLlegada());
+        // Si la hora del teléfono va atrasada respecto del servidor, la llegada parece "en el futuro": se limita a la espera
+        // completa (antes el contador pasaba de 5:00 y el anillo se salía de escala).
+        const restante = Math.min(espera, Math.max(0, espera - segundosDesdeLlegada()));
         const reloj = $('#reloj');
         if (!reloj) return clearInterval(temporizador);
         reloj.textContent = `${String(Math.floor(restante / 60)).padStart(2, '0')}:${String(restante % 60).padStart(2, '0')}`;
@@ -183,7 +185,7 @@ function entregar(e, recargar) {
     if (!f) return;
     foto = await comprimirFoto(f);
     const img = $('#prev', cont);
-    img.src = URL.createObjectURL(foto);
+    mostrarBlob(img, foto);
     img.style.display = 'block';
     listo();
   };
@@ -224,13 +226,20 @@ function fallido(e, segundosDesdeLlegada, espera, recargar) {
     const motivo = ev.target.motivo.value;
     if (!motivo) return toast('Selecciona un motivo', 'error');
     if (!(await confirmar('¿Registrar intento fallido?', 'Quedará registrado con tu ubicación.'))) return;
+    // Mientras se busca la ubicación (hasta 25 s) el botón queda tomado y avisa: antes no pasaba nada en pantalla
+    // y un segundo toque enviaba el intento otra vez.
+    const btn = $('button.peligro', ev.target);
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Obteniendo ubicación…';
     const u = await obtenerGps().catch(() => null);
+    btn.textContent = 'Registrando…';
     try {
       await post(`/api/envios/${e.id}/estado`, { estado: 'fallido', motivo, detalle: ev.target.detalle.value || undefined, ...(u ? { lat: u.lat, lon: u.lon } : {}) });
       cont.remove();
       toast('Intento fallido registrado', 'ok');
       recargar();
-    } catch (err) { errorToast(err); }
+    } catch (err) { errorToast(err); btn.disabled = false; btn.textContent = 'Registrar intento fallido'; }
   };
 }
 

@@ -149,6 +149,16 @@ Todo se ejecuta solo en cada cambio con GitHub Actions (`.github/workflows/prueb
 | CP-216 | QR de punto courier muestra el punto | QA-48 |
 | CP-217 | Máximo de adjuntos y nombres con tildes | QA-07, QA-43, QA-51 |
 | CP-218 | CSV legible y cabeceras CORS expuestas | QA-30, QA-42 |
+| CP-220 | El inicio del cliente cuenta todos sus envíos | QA-62 |
+| CP-221 | Destinatario anonimizado: fuera de la libreta y sin envíos nuevos | QA-64, QA-72 |
+| CP-222 | Sin envíos para clientes desactivados ni libreta de no-clientes | QA-96, QA-97 |
+| CP-223 | Disponibles sin datos personales hasta tomarlos; sin correo del destinatario | QA-83, QA-84 |
+| CP-224 | Seguimiento público sin estado del pago | QA-73 |
+| CP-225 | Reembolso en la bitácora del pago y descontado en Cobranza | QA-74 |
+| CP-226 | Transferencias no se concilian como abonos de pasarela | QA-78 |
+| CP-227 | Cobro en línea abierto se anula al pagar por otro medio | QA-86 |
+| CP-228 | CSV con coma decimal | QA-82 |
+| CP-229 | Largos máximos, RUT 0-0 y nota de reclamo | QA-85, QA-87, QA-88, QA-89 |
 
 ## 4. Criterios de aceptación (UAT con el cliente)
 

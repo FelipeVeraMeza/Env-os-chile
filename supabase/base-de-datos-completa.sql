@@ -5,7 +5,7 @@
 --  CÓMO USARLO: Supabase → SQL Editor → New query → pegar TODO este archivo → Run.
 --  Se puede ejecutar más de una vez: si la base ya existe, no hace nada.
 --
---  Crea: 12 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
+--  Crea: 13 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
 --  dentro de Santiago), tarifas ($3.500 base, +$1.000 horario especial, 20 kg / 60 cm),
 --  reglas de operación (3 intentos, 5 min de espera) y el bucket privado de fotos y boletas.
 --  Los usuarios los crea la app en su primer arranque (ADMIN_EMAIL / ADMIN_PASSWORD en Railway).
@@ -675,6 +675,22 @@ END
 $migracion$;
 
 -- ---------------------------------------------------------------------------
+-- Migración 012_reembolso_en_bitacora.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '012_reembolso_en_bitacora.sql') THEN
+    -- El reembolso de un envío queda en la bitácora del pago que se devuelve (respaldo ante reclamos y para que
+    -- Cobranza descuente lo devuelto). Antes solo quedaba en la ficha del envío.
+    ALTER TABLE pago_evento DROP CONSTRAINT IF EXISTS pago_evento_tipo_check;
+    ALTER TABLE pago_evento ADD CONSTRAINT pago_evento_tipo_check
+      CHECK (tipo IN ('inicio', 'notificacion', 'verificacion', 'rechazo', 'conciliacion', 'reembolso'));
+    INSERT INTO schema_migracion (nombre) VALUES ('012_reembolso_en_bitacora.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
 -- Zona "Santiago" y 346 comunas (solo si la tabla está vacía)
 -- ---------------------------------------------------------------------------
 INSERT INTO zona (nombre, tarifa, color, orden) VALUES ('Santiago', 3500, '#1d4ed8', 1)
@@ -1065,7 +1081,7 @@ $bucket$;
 
 COMMIT;
 
--- Verificación: debe mostrar 346 comunas, 34 en cobertura y 5 claves de configuración.
+-- Verificación: debe mostrar 346 comunas, 34 en cobertura y 7 claves de configuración.
 SELECT
   (SELECT count(*) FROM comuna) AS comunas,
   (SELECT count(*) FROM comuna WHERE en_cobertura) AS en_cobertura,

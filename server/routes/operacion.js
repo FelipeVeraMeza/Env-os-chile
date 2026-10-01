@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
 import { auditar, falla, fechaFiltro, idNumerico, rangoFechas, ruta } from '../lib/http.js';
 import { cargarEnvio, exigirAcceso, exigirSinConflicto, siguienteFolio } from '../lib/envios.js';
-import { guardarArchivo, leerArchivo, subida, verificarFirma, firmarEnlace } from '../lib/archivos.js';
+import { borrarArchivos, guardarArchivo, leerArchivo, subida, verificarFirma, firmarEnlace } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { normalizarRut, validarReclamo } from '../lib/reglas.js';
 import { registrarEvento } from '../lib/seguridad.js';
@@ -125,11 +125,13 @@ reclamos.post('/envio/:id', requiereRol('admin', 'cliente'), subida.single('bole
   const descripcion = String(req.body.descripcion || '').trim();
   if (descripcion.length > 1000) throw falla(422, 'Revisa los datos del reclamo', { descripcion: 'Máximo 1000 caracteres' });
 
+  let subido = null;
   const reclamo = await transaccion(async (db) => {
     let adjuntoId = boletaExistente?.id;
     if (req.file) {
       const buffer = req.file.mimetype === 'image/jpeg' ? quitarExif(req.file.buffer) : req.file.buffer;
       const archivo = await guardarArchivo(buffer, req.file.mimetype);
+      subido = archivo.ruta;
       const { rows: [a] } = await db.query(
         `INSERT INTO adjunto (envio_id, tipo, nombre_original, mime, tamano, ruta, sha256, subido_por)
          VALUES ($1, 'boleta', $2, $3, $4, $5, $6, $7) RETURNING id`,
@@ -145,6 +147,10 @@ reclamos.post('/envio/:id', requiereRol('admin', 'cliente'), subida.single('bole
       [numero, envio.id, b.motivo, descripcion || null, Number(b.monto_reclamado), adjuntoId, String(b.boleta_numero).trim().slice(0, 40),
         b.boleta_fecha, Number(b.boleta_monto), rutEmisor ? normalizarRut(rutEmisor) : null, req.usuario.id]);
     return r;
+  }).catch(async (err) => {
+    // Si el reclamo no se guardó (p. ej. otro reclamo activo creado al mismo tiempo), la boleta subida se borra.
+    if (subido) await borrarArchivos([subido]).catch(() => {});
+    throw err;
   });
   await auditar(req, 'crear', 'reclamo_seguro', reclamo.id, { envio_id: envio.id, monto: reclamo.monto_reclamado });
   res.status(201).json(reclamo);
@@ -189,6 +195,7 @@ reclamos.post('/:id/resolver', requiereRol('admin'), ruta(async (req, res) => {
   const r = await reclamoAccesible(req);
   if (!['solicitado', 'en_revision'].includes(r.estado)) throw falla(409, 'El reclamo ya fue resuelto');
   const { decision, monto_aprobado: monto, nota } = req.body || {};
+  if (String(nota || '').trim().length > 500) throw falla(422, 'La nota puede tener hasta 500 caracteres', { nota: 'Máximo 500 caracteres' });
   if (decision === 'rechazar') {
     if (!String(nota || '').trim()) throw falla(422, 'Indica el motivo del rechazo', { nota: 'Obligatorio' });
   } else if (decision === 'aprobar') {
@@ -198,7 +205,7 @@ reclamos.post('/:id/resolver', requiereRol('admin'), ruta(async (req, res) => {
   const act = await uno(
     `UPDATE reclamo_seguro SET estado = $1, monto_aprobado = $2, resolucion_nota = $3, resuelto_por = $4, resuelto_en = now()
      WHERE id = $5 AND estado IN ('solicitado', 'en_revision') RETURNING *`,
-    [decision === 'aprobar' ? 'aprobado' : 'rechazado', decision === 'aprobar' ? Number(monto) : null, nota || null, req.usuario.id, r.id]);
+    [decision === 'aprobar' ? 'aprobado' : 'rechazado', decision === 'aprobar' ? Number(monto) : null, String(nota || '').trim() || null, req.usuario.id, r.id]);
   if (!act) throw falla(409, 'El reclamo ya fue resuelto por otra persona');
   await auditar(req, decision, 'reclamo_seguro', r.id, { monto_aprobado: act.monto_aprobado });
   res.json(act);
@@ -279,7 +286,8 @@ reportes.get('/ganancias', ruta(async (req, res) => {
     query(`SELECT estado, count(*)::int AS n FROM envio WHERE (creado_en ${tz})::date BETWEEN $1 AND $2 GROUP BY estado`, p),
     query('SELECT tipo, sum(monto)::int AS total FROM costo WHERE fecha BETWEEN $1 AND $2 GROUP BY tipo ORDER BY total DESC', p),
   ]);
-  const totalCreados = porEstado.rows.reduce((s, r) => s + r.n, 0);
+  // Tasa de intentos fallidos: sobre los envíos que salieron a ruta (borradores, anulados y los que esperan retiro no cuentan).
+  const totalCreados = porEstado.rows.filter((r) => ['en_ruta', 'entregado', 'fallido', 'reagendado', 'devuelto'].includes(r.estado)).reduce((s, r) => s + r.n, 0);
   const reembolsos = await uno(`SELECT count(*)::int AS n, COALESCE(sum(reembolso_monto), 0)::int AS monto
     FROM envio WHERE estado_pago = 'reembolsado' AND (reembolsado_en ${tz})::date BETWEEN $1 AND $2`, p);
   const fallidosIntentos = await uno(`SELECT COALESCE(sum(intentos), 0)::int AS n FROM envio WHERE (creado_en ${tz})::date BETWEEN $1 AND $2`, p);

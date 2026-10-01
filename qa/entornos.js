@@ -4,15 +4,26 @@ import { fileURLToPath } from 'node:url';
 
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+// Lee un archivo KEY=valor. Quita espacios al final, un comentario al final de la línea ("URL=… # nota") y las comillas
+// que envuelven el valor. Antes quedaban los espacios y el comentario pegados a las URLs.
+export function leerArchivoEnv(contenido) {
+  const vars = {};
+  for (const linea of contenido.split(/\r?\n/)) {
+    const m = linea.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)$/);
+    if (!m) continue;
+    let v = m[2].trim();
+    const comillas = /^(["'])(.*)\1$/.exec(v);
+    if (comillas) v = comillas[2];
+    else v = v.replace(/\s+#.*$/, '').trim();
+    vars[m[1]] = v;
+  }
+  return vars;
+}
+
 function leer(archivo) {
   const ruta = path.join(raiz, archivo);
   if (!fs.existsSync(ruta)) return {};
-  const vars = {};
-  for (const linea of fs.readFileSync(ruta, 'utf8').split(/\r?\n/)) {
-    const m = linea.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m) vars[m[1]] = m[2].replace(/^["']|["']$/g, '');
-  }
-  return vars;
+  return leerArchivoEnv(fs.readFileSync(ruta, 'utf8'));
 }
 
 // Prioridad: variables de entorno > entornos.local.env > entornos.env

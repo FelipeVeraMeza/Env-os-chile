@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
-  $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio, ESTADOS,
+  $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, itemEnvio } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
@@ -78,7 +78,8 @@ export async function detalle(id) {
   const porPagar = e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado);
   const boletas = e.adjuntos.filter((a) => a.tipo === 'boleta');
   const reclamoActivo = e.reclamos.find((r) => r.estado !== 'rechazado');
-  const puedeReclamar = e.valor_declarado > 0 && !['borrador', 'anulado'].includes(e.estado) && !reclamoActivo;
+  // El seguro se reclama cuando el repartidor ya retiró el paquete (igual que exige el servidor).
+  const puedeReclamar = e.valor_declarado > 0 && ['en_ruta', 'entregado', 'fallido', 'reagendado', 'devuelto'].includes(e.estado) && !reclamoActivo;
   const repartidores = esAdmin ? await get('/api/usuarios/repartidores') : [];
 
   montar(vista, html`
@@ -139,7 +140,7 @@ export async function detalle(id) {
       </div>
     </div>`);
 
-  if (e.folio) api(`/api/envios/${e.id}/qr.png`, { blob: true }).then((b) => { $('#qr').src = URL.createObjectURL(b); }).catch(() => {});
+  if (e.folio) api(`/api/envios/${e.id}/qr.png`, { blob: true }).then((b) => mostrarBlob($('#qr'), b)).catch(() => {});
   $$('[data-ticket]').forEach((b) => { b.onclick = () => abrirBlob(api(`/api/envios/${e.id}/ticket.pdf?formato=${b.dataset.ticket}`, { blob: true })).catch(errorToast); });
   $('#pagar')?.addEventListener('click', () => pagar(e, () => detalle(id)));
   $('#transferir')?.addEventListener('click', () => subirComprobante(e, () => detalle(id)));
@@ -203,7 +204,8 @@ function enlazarAcciones(e, recargar) {
     $('#f-re', m.el).onsubmit = async (ev) => {
       ev.preventDefault();
       const d = datosForm(ev.target);
-      try { await post(`/api/envios/${e.id}/reembolso`, { ...d, monto: Number(d.monto) }); m.cerrar(); toast('Reembolso registrado', 'ok'); recargar(); }
+      // Monto vacío = reembolso total (lo decide el servidor); Number('') sería 0 y se rechazaría.
+      try { await post(`/api/envios/${e.id}/reembolso`, { ...d, monto: d.monto === '' ? undefined : Number(d.monto) }); m.cerrar(); toast('Reembolso registrado', 'ok'); recargar(); }
       catch (err) { marcarErrores(ev.target, err.detalles); errorToast(err); }
     };
   });
@@ -340,12 +342,14 @@ export function revisarComprobante(c, alTerminar) {
     <form class="pila" id="f-revision" novalidate>
       <label class="campo">N° de operación <small>(según la cartola)</small><input name="referencia" maxlength="60" value="${c.referencia || ''}"></label>
       <label class="campo">Motivo del rechazo <small>(obligatorio si rechazas: el cliente lo verá)</small><input name="motivo" maxlength="300" placeholder="Ej. el monto no coincide, imagen ilegible"></label>
-      <div class="fila"><button class="btn" name="decision" value="aprobar">Aprobar pago</button><button class="btn peligro" name="decision" value="rechazar">Rechazar</button></div>
+      <div class="fila"><button type="button" class="btn" data-decision="aprobar">Aprobar pago</button><button type="button" class="btn peligro" data-decision="rechazar">Rechazar</button></div>
     </form>`);
-  $('#f-revision', m.el).onsubmit = async (ev) => {
-    ev.preventDefault();
-    const f = ev.target;
-    const aprobar = ev.submitter?.value === 'aprobar';
+  // Enter en un campo no decide nada: antes enviaba el formulario con el primer botón y APROBABA el pago
+  // aunque se estuviera escribiendo el motivo del rechazo. Solo cuenta el botón que se pulsa.
+  const f = $('#f-revision', m.el);
+  f.onsubmit = (ev) => ev.preventDefault();
+  $$('[data-decision]', f).forEach((b) => { b.onclick = () => decidir(b.dataset.decision === 'aprobar'); });
+  const decidir = async (aprobar) => {
     if (!aprobar && !f.motivo.value.trim()) return marcarErrores(f, { motivo: 'Indica el motivo: el cliente lo verá' });
     try {
       if (aprobar) await post(`/api/cobranza/comprobantes/${c.id}/aprobar`, { referencia: f.referencia.value });
@@ -372,14 +376,18 @@ export async function pagar(envio, alTerminar) {
     </div>
     <p class="muted" style="margin-top:10px">Simulación: en la etapa de desarrollo se conecta con Webpay Plus, Mercado Pago o Flow. No se cobra dinero real.</p>
     <div class="fila" style="margin-top:14px"><button class="btn grande" id="aprobar">Pagar ${clp(pago.monto)}</button><button class="btn sec" id="rechazar">Simular rechazo</button></div>`);
+  const botones = () => $$('#aprobar, #rechazar', m.el);
   const confirmarPago = async (resultado) => {
+    // Un doble clic enviaba dos confirmaciones: la segunda fallaba con "El pago ya fue procesado".
+    if (botones().some((b) => b.disabled)) return;
+    botones().forEach((b) => { b.disabled = true; });
     try {
       const r = await post(`/api/pagos/${pago.token}/confirmar`, { resultado });
       m.cerrar();
       if (r.estado === 'aprobado') toast('¡Pago aprobado! Tu envío ya puede ser retirado.', 'ok');
       else toast('Pago rechazado. Puedes intentarlo nuevamente.', 'error');
       alTerminar?.();
-    } catch (err) { errorToast(err); }
+    } catch (err) { errorToast(err); botones().forEach((b) => { b.disabled = false; }); }
   };
   $('#aprobar', m.el).onclick = () => confirmarPago('aprobado');
   $('#rechazar', m.el).onclick = () => confirmarPago('rechazado');
@@ -436,7 +444,7 @@ export async function reclamos() {
         <td data-label="N°" class="mono"><b>${r.numero}</b></td><td data-label="Envío"><a href="#/envio/${r.envio_id}">${r.folio}</a></td>${esAdmin ? html`<td data-label="Cliente">${r.cliente_nombre}</td>` : ''}
         <td data-label="Motivo">${app.conf.motivos_reclamo[r.motivo]}</td>${esAdmin ? html`<td data-label="Declarado" class="num">${clp(r.valor_declarado)}</td>` : ''}<td data-label="Reclamado" class="num">${clp(r.monto_reclamado)}</td>
         <td data-label="Aprobado" class="num">${r.monto_aprobado ? clp(r.monto_aprobado) : '—'}</td>
-        <td data-label="Boleta"><a href="${archivo(r.boleta_url)}" target="_blank" rel="noopener">N° ${r.boleta_numero} · ${clp(r.boleta_monto)}</a></td>
+        <td data-label="Boleta">${r.boleta_url ? html`<a href="${archivo(r.boleta_url)}" target="_blank" rel="noopener">N° ${r.boleta_numero} · ${clp(r.boleta_monto)}</a>` : html`N° ${r.boleta_numero} · ${clp(r.boleta_monto)}`}</td>
         <td data-label="Estado">${badge(r.estado, app.conf.estados_reclamo[r.estado])}</td>
         ${esAdmin ? html`<td data-label="Acción"><div class="fila">
           ${r.estado === 'solicitado' ? html`<button class="btn sec chico" data-revisar="${r.id}">Revisar</button>` : ''}
@@ -460,14 +468,18 @@ export async function reclamos() {
         <form class="pila" id="f-res" novalidate>
           <label class="campo">Monto aprobado<input type="number" name="monto_aprobado" value="${r.monto_reclamado}" max="${r.monto_reclamado}"></label>
           <label class="campo">Nota (obligatoria si se rechaza)<textarea name="nota"></textarea></label>
-          <div class="fila"><button class="btn" name="decision" value="aprobar">Aprobar</button><button class="btn peligro" name="decision" value="rechazar">Rechazar</button></div>
+          <div class="fila"><button type="button" class="btn" data-decision="aprobar">Aprobar</button><button type="button" class="btn peligro" data-decision="rechazar">Rechazar</button></div>
         </form>`);
-      $('#f-res', m.el).onsubmit = async (ev) => {
-        ev.preventDefault();
-        const d = { ...datosForm(ev.target), decision: ev.submitter.value };
-        try { await post(`/api/reclamos/${r.id}/resolver`, d); m.cerrar(); toast('Reclamo resuelto', 'ok'); reclamos(); }
-        catch (err) { marcarErrores(ev.target, err.detalles); errorToast(err); }
-      };
+      // Enter en el monto no aprueba el reclamo: solo el botón que se pulsa decide.
+      const fr = $('#f-res', m.el);
+      fr.onsubmit = (ev) => ev.preventDefault();
+      $$('[data-decision]', fr).forEach((btn) => {
+        btn.onclick = async () => {
+          const d = { ...datosForm(fr), decision: btn.dataset.decision };
+          try { await post(`/api/reclamos/${r.id}/resolver`, d); m.cerrar(); toast('Reclamo resuelto', 'ok'); reclamos(); }
+          catch (err) { marcarErrores(fr, err.detalles); errorToast(err); }
+        };
+      });
     };
   });
 }
