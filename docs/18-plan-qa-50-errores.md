@@ -254,10 +254,10 @@ Se revisó uno por uno cada error corregido y cada pantalla de los tres perfiles
 El informe completo, con la evidencia de cada caso, está en **[docs/19](19-verificacion-caso-por-caso.md)** y se regenera con
 `npm run verificar:casos`.
 
-- Nueva suite **`npm run interfaz`** (`qa/e2e/correcciones-interfaz.js`): reproduce en un navegador real 18 correcciones de pantalla que
+- Nueva suite **`npm run interfaz`** (`qa/e2e/correcciones-interfaz.js`): reproduce en un navegador real 20 correcciones de pantalla que
   antes solo se habían revisado leyendo el código (Enter en revisiones, reembolso vacío, doble clic en pagar, rangos inválidos,
   GPS de respaldo, foco de los modales, app sin conexión…). Corre en GitHub Actions.
-- Resultado: de 102 errores, **90 con prueba automática que pasa** y **12 verificados a mano** (necesitan inicio de sesión real,
+- Resultado: de 104 errores, **91 con prueba automática que pasa** y **13 verificados a mano** (necesitan inicio de sesión real,
   simular una caída de la base o ejecutar un script de despliegue). **Ninguno falla.**
 - La verificación encontró que **QA-67 estaba incompleta**: la pantalla marcaba el campo con error, pero el servidor no decía qué lista
   fallaba. Corregido.

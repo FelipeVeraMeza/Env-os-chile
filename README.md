@@ -110,7 +110,7 @@ npm test               # 67 pruebas unitarias (reglas de negocio, limitador, Sup
 npm run verificar      # revisa variables, conexión a la base y almacenamiento antes de desplegar
 npm run qa:local       # 169 casos QA contra la API (CP-01 … CP-232) en localhost
 npm run e2e            # flujo completo por la interfaz: cliente, admin y repartidor a la vez
-npm run interfaz       # 18 correcciones de pantalla verificadas en el navegador (Enter, GPS, sin conexión…)
+npm run interfaz       # 20 correcciones de pantalla verificadas en el navegador (Enter, GPS, sin conexión…)
 npm run verificar:casos # cruza cada error corregido con su prueba y escribe docs/19
 npm run carga          # 40 clientes + 15 repartidores simultáneos (0 errores, folios únicos)
 npm run rendimiento    # cada pantalla < 2 s con 4G simulado
