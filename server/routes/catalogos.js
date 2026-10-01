@@ -107,7 +107,8 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
     const tipo = Array.isArray(CONFIG_POR_DEFECTO[clave][k]) ? 'lista' : typeof CONFIG_POR_DEFECTO[clave][k];
     if (tipo === 'lista') {
       const { lista, error } = normalizarLista(v);
-      if (error) throw falla(422, `${k}: ${error}`);
+      // Con el nombre del campo en los detalles, la pantalla marca cuál lista tiene el problema.
+      if (error) throw falla(422, `${k}: ${error}`, { [k]: error });
       nuevo[k] = lista;
     } else if (tipo === 'number') {
       // Un campo vacío no es 0 (Number('') === 0): dejaría tarifas o reglas en cero sin querer.

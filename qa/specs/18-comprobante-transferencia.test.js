@@ -2,7 +2,7 @@
 // administración lo aprueba o lo rechaza. El pago manda: sin pago aprobado no hay ticket, asignación ni retiro.
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { API, datosEnvio, escenario, formulario, jpegPrueba, pdfPrueba, peticion } from '../cliente.js';
+import { API, datosEnvio, escenario, formulario, jpegPrueba, pdfPrueba, peticion, todosDisponibles } from '../cliente.js';
 
 let esc;
 let envio;
@@ -53,8 +53,8 @@ test('CP-163 · El cliente sube el comprobante: el pago queda en revisión y no 
   assert.equal(d.datos.estado_pago, 'en_revision');
   assert.equal(d.datos.pagos[0].estado, 'en_revision');
   assert.ok(d.datos.pagos[0].comprobante.url, 'el cliente ve su comprobante');
-  const disp = await peticion('GET', '/api/envios/disponibles', { sesion: esc.repartidor });
-  assert.ok(!disp.datos.items.some((e) => e.id === envio.id), 'no aparece en disponibles');
+  const disp = await todosDisponibles(esc.repartidor);
+  assert.ok(!disp.items.some((e) => e.id === envio.id), 'no aparece en disponibles');
   assert.equal((await peticion('POST', `/api/envios/${envio.id}/tomar`, { sesion: esc.repartidor })).status, 409);
   assert.equal((await peticion('POST', `/api/envios/${envio.id}/asignar`, { sesion: esc.admin, json: { repartidor_id: esc.repartidor.usuario.id } })).status, 409);
   assert.equal((await peticion('GET', `/api/envios/${envio.id}/ticket.pdf`, { sesion: esc.cliente })).status, 409);

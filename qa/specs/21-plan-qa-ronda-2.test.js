@@ -50,8 +50,13 @@ test('CP-222 · QA-96/QA-97 · No se crean envíos para un cliente desactivado n
 test('CP-223 · QA-83/QA-84 · Envíos disponibles: el repartidor no ve a quién entregar hasta que lo toma; nunca el correo', async () => {
   const c = await crear({ destinatario: { nombre: 'QA Privada', telefono: '+56 9 4444 5555', correo: 'privada@qa.test' } });
   await pagarPorTransferencia(esc, c.datos.id);
-  const disp = await peticion('GET', '/api/envios/disponibles', { sesion: esc.repartidor });
-  const item = disp.datos.items.find((e) => e.id === c.datos.id);
+  // Se recorren las páginas: con muchos envíos disponibles, el nuevo puede no estar en la primera.
+  let item;
+  for (let pagina = 1; !item; pagina++) {
+    const disp = await peticion('GET', `/api/envios/disponibles?limite=500&pagina=${pagina}`, { sesion: esc.repartidor });
+    item = disp.datos.items.find((e) => e.id === c.datos.id);
+    if (!disp.datos.items.length) break;
+  }
   assert.ok(item, 'aparece como disponible');
   for (const campo of ['destinatario_nombre', 'destinatario_telefono', 'destinatario_correo', 'referencia', 'depto', 'tarifa_total']) assert.equal(item[campo], undefined, campo);
   assert.ok(item.comuna_nombre && item.calle);

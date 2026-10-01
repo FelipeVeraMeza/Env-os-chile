@@ -1,6 +1,6 @@
 import { app } from '../app.js';
 import { get, patch, post, put } from '../api.js';
-import { $, $$, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
+import { $, $$, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 import { limpiarCacheComunas } from './comun.js';
 import { revisarComprobante } from './envios.js';
 
@@ -489,7 +489,7 @@ export async function cobranza(rango = {}) {
         <tbody>${comprobantes.map((c) => html`<tr>
           <td data-label="Enviado">${fechaHora(c.creado_en)}</td><td data-label="Folio" class="mono"><a href="#/envio/${c.envio_id}">${c.folio}</a></td>
           <td data-label="Cliente">${c.cliente_nombre}</td><td data-label="Monto" class="num">${clp(c.monto)}</td>
-          <td data-label="N° operación">${c.referencia || html`<span class="muted">—</span>`}${c.usado_en.length ? html`<div><span class="badge e-fallido">Ya usado en ${c.usado_en.join(', ')}</span></div>` : ''}</td>
+          <td data-label="N° operación">${c.referencia || html`<span class="muted">—</span>`}${c.usado_en.length ? html`<div><span class="badge e-fallido ajustable" title="${c.usado_en.join(', ')}">Ya usado en ${listaCorta(c.usado_en)}</span></div>` : ''}</td>
           <td data-label="Acción"><button class="btn chico" data-revisar-comprobante="${c.id}">Revisar</button></td>
         </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay comprobantes pendientes ✔</p>`}
     </div>

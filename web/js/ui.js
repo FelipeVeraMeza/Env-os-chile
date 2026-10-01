@@ -27,6 +27,11 @@ export const ESTADOS = {
   fallido: 'Fallido', reagendado: 'Reagendado', devuelto: 'Devuelto', anulado: 'Anulado',
 };
 export const badge = (estado, texto) => html`<span class="badge e-${estado}">${texto || ESTADOS[estado] || estado}</span>`;
+// Lista corta de folios: los 3 primeros y "y N más" (un comprobante reutilizado puede aparecer en muchos envíos).
+export function listaCorta(items, max = 3) {
+  return items.length <= max ? items.join(', ') : `${items.slice(0, max).join(', ')} y ${items.length - max} más`;
+}
+
 export const PAGO_TXT = { pendiente: 'Pago pendiente', en_revision: 'Pago en revisión', pagado: 'Pagado', reembolsado: 'Reembolsado' };
 export const badgePago = (e) => badge(['pagado', 'en_revision', 'reembolsado'].includes(e) ? e : 'pendiente', PAGO_TXT[e] || PAGO_TXT.pendiente);
 

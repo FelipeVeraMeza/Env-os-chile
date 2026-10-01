@@ -138,3 +138,14 @@ export async function envioEnRuta(esc, extra = {}) {
   assert.equal(ret.status, 200, JSON.stringify(ret.datos));
   return ret.datos;
 }
+
+// Todos los envíos disponibles para tomar, recorriendo las páginas (la API entrega hasta 500 por página).
+export async function todosDisponibles(sesion) {
+  const items = [];
+  for (let pagina = 1; ; pagina++) {
+    const r = await peticion('GET', `/api/envios/disponibles?limite=500&pagina=${pagina}`, { sesion });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    items.push(...r.datos.items);
+    if (items.length >= r.datos.total || !r.datos.items.length) return { ...r.datos, items };
+  }
+}

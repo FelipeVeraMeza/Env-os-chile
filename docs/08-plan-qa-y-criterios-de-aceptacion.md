@@ -159,6 +159,9 @@ Todo se ejecuta solo en cada cambio con GitHub Actions (`.github/workflows/prueb
 | CP-227 | Cobro en línea abierto se anula al pagar por otro medio | QA-86 |
 | CP-228 | CSV con coma decimal | QA-82 |
 | CP-229 | Largos máximos, RUT 0-0 y nota de reclamo | QA-85, QA-87, QA-88, QA-89 |
+| CP-230 | Libreta sin repetidos: misma persona y dirección se reutilizan | Mejora M-05 |
+| CP-231 | Detalle con la fecha de verificación del pago (historial) | Mejora M-02 |
+| CP-232 | Disponibles con el total real y por páginas | QA-104 |
 
 ## 4. Criterios de aceptación (UAT con el cliente)
 

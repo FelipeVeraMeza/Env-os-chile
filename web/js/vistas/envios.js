@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
-  $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
+  $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, itemEnvio } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
@@ -56,6 +56,22 @@ export async function registro() {
 }
 
 // ================= Detalle del envío =================
+// Historial completo: los cambios de estado y, en orden, los pasos del pago (comprobante enviado, aprobado o rechazado,
+// pago manual o en línea, reembolso). Antes el historial no mostraba cuándo ni cómo se pagó el envío.
+const MEDIO_TXT = { transferencia: 'transferencia', efectivo: 'efectivo', otro: 'otro medio', en_linea: 'pago en línea' };
+function lineaDeTiempo(e) {
+  const filas = e.historial.map((h) => ({ fecha: h.fecha, titulo: ESTADOS[h.estado_nuevo], detalle: h.motivo, quien: h.usuario_nombre || 'Sistema' }));
+  for (const p of e.pagos || []) {
+    const medio = MEDIO_TXT[p.medio] || p.medio || p.proveedor;
+    if (p.comprobante_adjunto_id) filas.push({ fecha: p.creado_en, titulo: 'Comprobante de transferencia enviado', detalle: p.referencia ? `N° ${p.referencia}` : null, clase: 'pago' });
+    if (p.estado === 'aprobado') filas.push({ fecha: p.verificado_en || p.revisado_en || p.creado_en, titulo: 'Pago aprobado', detalle: `${clp(p.monto)} · ${medio}`, clase: 'pago' });
+    if (p.estado === 'rechazado' && p.comprobante_adjunto_id) filas.push({ fecha: p.revisado_en || p.creado_en, titulo: 'Comprobante rechazado', detalle: p.motivo_rechazo, clase: 'pago rechazo' });
+  }
+  if (e.reembolsado_en) filas.push({ fecha: e.reembolsado_en, titulo: 'Reembolso', detalle: `${clp(e.reembolso_monto)} · ${e.reembolso_medio}`, clase: 'pago' });
+  // Orden por fecha; a igual hora se mantiene el orden en que se registraron.
+  return filas.map((f, i) => ({ ...f, i })).sort((a, b) => new Date(a.fecha) - new Date(b.fecha) || a.i - b.i);
+}
+
 const PROGRESO = [['creado', 'Creado'], ['pagado', 'Pagado'], ['asignado', 'Asignado'], ['en_ruta', 'En ruta'], ['entregado', 'Entregado']];
 
 function nivelProgreso(e) {
@@ -124,6 +140,7 @@ export async function detalle(id) {
           <div class="card-titulo"><h2>Seguro</h2>${e.valor_declarado ? html`<span class="badge e-creado">${esAdmin ? `Valor declarado ${clp(e.valor_declarado)}` : 'Asegurado'}</span>` : html`<span class="badge e-anulado">Sin seguro</span>`}</div>
           ${e.reclamos.length ? html`<div class="pila">${e.reclamos.map((r) => html`<div class="fila entre"><div><b class="mono">${r.numero}</b> · ${app.conf.motivos_reclamo[r.motivo]}<div class="sub">Reclamado ${clp(r.monto_reclamado)}${r.monto_aprobado ? ` · aprobado ${clp(r.monto_aprobado)}` : ''}</div></div>${badge(r.estado, app.conf.estados_reclamo[r.estado])}</div>`)}</div>` : ''}
           ${boletas.length ? html`<p class="sub" style="margin-top:10px">Boleta(s): ${boletas.map((b) => html`<a href="${archivo(b.url)}" target="_blank" rel="noopener">${b.nombre_original || 'boleta'}</a> `)}</p>` : ''}
+          ${esAdmin && reclamoActivo && ['solicitado', 'en_revision', 'aprobado'].includes(reclamoActivo.estado) ? html`<a class="btn sec chico" href="#/reclamos" style="margin-top:12px">Gestionar el reclamo en Seguros →</a>` : ''}
           ${puedeReclamar ? html`<button class="btn sec" id="reclamar" style="margin-top:12px">Reclamar seguro</button><p class="muted" style="margin-top:6px">Requiere adjuntar la boleta de compra (obligatoria).</p>` : ''}
           ${!e.valor_declarado ? html`<p class="muted">Este envío no declaró valor, por lo que no tiene cobertura de seguro.</p>` : ''}
         </div>
@@ -136,7 +153,7 @@ export async function detalle(id) {
           <p>Entregado ${fechaHora(e.entregado_en)}${e.entrega_receptor ? ` · recibió ${e.entrega_receptor}` : ''}</p>
           ${e.entrega_lat ? html`<p class="sub">GPS: ${e.entrega_lat.toFixed(5)}, ${e.entrega_lon.toFixed(5)}${e.entrega_precision_m ? ` (±${Math.round(e.entrega_precision_m)} m)` : ''} · <a href="https://www.google.com/maps?q=${e.entrega_lat},${e.entrega_lon}" target="_blank" rel="noopener">ver en mapa</a></p>` : ''}</div>` : ''}
         ${fotos.length ? html`<div class="card"><h2>Fotos</h2><div class="fila">${fotos.map((a) => html`<a href="${archivo(a.url)}" target="_blank" rel="noopener" title="${a.tipo === 'foto_entrega' ? 'Foto de entrega' : 'Foto del paquete'}"><img class="foto-mini" src="${archivo(a.url)}" alt="${a.tipo === 'foto_entrega' ? 'Foto de entrega' : 'Foto del paquete'}"></a>`)}</div></div>` : ''}
-        <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${e.historial.map((h) => html`<li><b>${ESTADOS[h.estado_nuevo]}</b>${h.motivo ? html` · <span class="sub">${h.motivo}</span>` : ''}<div class="cuando">${fechaHora(h.fecha)} · ${h.usuario_nombre || 'Sistema'}</div></li>`)}</ol></div>
+        <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${lineaDeTiempo(e).map((h) => html`<li class="${h.clase || ''}"><b>${h.titulo}</b>${h.detalle ? html` · <span class="sub">${h.detalle}</span>` : ''}<div class="cuando">${fechaHora(h.fecha)}${h.quien ? ` · ${h.quien}` : ''}</div></li>`)}</ol></div>
       </div>
     </div>`);
 
@@ -335,7 +352,7 @@ export function subirComprobante(envio, alTerminar) {
 export function revisarComprobante(c, alTerminar) {
   const m = modal(html`<h2>Comprobante de ${c.folio}</h2>
     <p class="sub">${c.cliente_nombre} · debe transferir <b>${clp(c.monto)}</b> · enviado ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}</p>
-    ${c.usado_en?.length ? html`<div class="aviso alerta" style="margin:10px 0"><b>Atención:</b> este mismo comprobante o N° de operación ya se usó en ${c.usado_en.join(', ')}.</div>` : ''}
+    ${c.usado_en?.length ? html`<div class="aviso alerta" style="margin:10px 0"><b>Atención:</b> este mismo comprobante o N° de operación ya se usó en ${listaCorta(c.usado_en, 5)}.</div>` : ''}
     <div style="margin:12px 0;text-align:center">${c.mime === 'application/pdf'
       ? html`<a class="btn sec" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Descargar comprobante (PDF)</a>`
       : html`<a href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener" title="Abrir en tamaño completo"><img src="${archivo(c.comprobante_url)}" alt="Comprobante de transferencia de ${c.folio}" style="max-width:100%;max-height:42vh;border-radius:12px"></a>`}</div>

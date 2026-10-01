@@ -1,6 +1,6 @@
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { datosEnvio, escenario, pagarPorTransferencia, peticion } from '../cliente.js';
+import { datosEnvio, escenario, pagarPorTransferencia, peticion, todosDisponibles } from '../cliente.js';
 
 let esc;
 let envio;
@@ -14,7 +14,8 @@ async function crearEnvio() {
 
 const pagar = (id) => pagarPorTransferencia(esc, id);
 
-const disponibles = async (sesion) => (await peticion('GET', '/api/envios/disponibles', { sesion })).datos;
+// Todas las páginas: con muchos envíos disponibles, uno recién pagado puede no estar en la primera.
+const disponibles = (sesion) => todosDisponibles(sesion);
 
 test('CP-110 · Un envío SIN pagar no aparece como disponible ni se puede tomar', async () => {
   envio = await crearEnvio();

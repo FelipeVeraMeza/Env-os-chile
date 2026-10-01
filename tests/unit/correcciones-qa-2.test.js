@@ -77,3 +77,23 @@ test('QA-75 · si la operación falla después de subir el archivo, el archivo s
   assert.equal(fs.existsSync(path.join(config.uploadDir, ok)), true);
   fs.unlinkSync(path.join(config.uploadDir, ok));
 });
+
+test('QA-99 · CORS_ORIGINS con barra final igual permite la interfaz publicada', async () => {
+  const { origenesCors } = await import('../../server/config.js');
+  const o = origenesCors({ CORS_ORIGINS: 'https://envios.vercel.app/, https://envios.cl//' }, 'https://api.up.railway.app');
+  assert.ok(o.includes('https://envios.vercel.app'));
+  assert.ok(o.includes('https://envios.cl'));
+  assert.ok(o.includes('https://api.up.railway.app'));
+});
+
+test('QA-95/QA-100 · los archivos generados están al día (SQL de Supabase y configuración de la interfaz)', async () => {
+  const { CONFIG_POR_DEFECTO } = await import('../../server/lib/reglas.js');
+  const sql = fs.readFileSync(path.join(process.cwd(), 'supabase', 'base-de-datos-completa.sql'), 'utf8');
+  assert.match(sql, new RegExp(`${Object.keys(CONFIG_POR_DEFECTO).length} claves de configuración`));
+  const migraciones = fs.readdirSync(path.join(process.cwd(), 'server', 'db', 'migrations')).filter((f) => f.endsWith('.sql'));
+  for (const m of migraciones) assert.ok(sql.includes(`Migración ${m}`), `falta ${m} en el SQL de Supabase`);
+  const { cargarEntornos } = await import('../../qa/entornos.js');
+  const railway = (cargarEntornos().URL_RAILWAY || '').replace(/\/+$/, '');
+  const web = fs.readFileSync(path.join(process.cwd(), 'web', 'config.js'), 'utf8');
+  if (railway && !railway.includes('CAMBIAR')) assert.ok(web.includes(`"URL_RAILWAY": "${railway}"`), 'web/config.js no tiene la URL de Railway: npm run build:web');
+});

@@ -20,17 +20,24 @@ export async function ruta() {
   ]);
   const enRuta = activos.items.filter((e) => e.estado === 'en_ruta');
   const porRetirar = activos.items.filter((e) => e.estado !== 'en_ruta');
-  // Orden de la ruta (RF-60): flechas para subir o bajar cada parada; se guarda en el servidor.
-  const orden = activos.items.map((e) => e.id);
+  // Orden de la ruta (RF-60): flechas para subir o bajar cada parada dentro de su sección (en ruta / por retirar);
+  // cada sección se numera desde 1. Antes la numeración era una sola y saltaba (1, 3, 4 arriba y 2 abajo).
+  const secciones = [enRuta.map((e) => e.id), porRetirar.map((e) => e.id)];
+  const seccionDe = (id) => secciones.find((l) => l.includes(id));
   const mover = async (id, paso) => {
-    const i = orden.indexOf(id);
+    const lista = seccionDe(id);
+    const i = lista.indexOf(id);
     const j = i + paso;
-    if (j < 0 || j >= orden.length) return;
-    [orden[i], orden[j]] = [orden[j], orden[i]];
-    try { await put('/api/envios/ruta/orden', { ids: orden }); ruta(); } catch (err) { errorToast(err); }
+    if (j < 0 || j >= lista.length) return;
+    [lista[i], lista[j]] = [lista[j], lista[i]];
+    try { await put('/api/envios/ruta/orden', { ids: secciones.flat() }); ruta(); } catch (err) { errorToast(err); }
   };
-  const flechas = (e) => html`<div class="flechas-ruta"><button class="btn-icono" data-mover="${e.id}" data-paso="-1" aria-label="Subir parada">▲</button>
-    <span class="sub">${orden.indexOf(e.id) + 1}</span><button class="btn-icono" data-mover="${e.id}" data-paso="1" aria-label="Bajar parada">▼</button></div>`;
+  const flechas = (e) => {
+    const lista = seccionDe(e.id);
+    const i = lista.indexOf(e.id);
+    return html`<div class="flechas-ruta"><button class="btn-icono" data-mover="${e.id}" data-paso="-1" aria-label="Subir parada ${i + 1}" ${i === 0 ? html`disabled` : ''}>▲</button>
+    <span class="sub">${i + 1}</span><button class="btn-icono" data-mover="${e.id}" data-paso="1" aria-label="Bajar parada ${i + 1}" ${i === lista.length - 1 ? html`disabled` : ''}>▼</button></div>`;
+  };
   const tarjeta = (e) => html`<div class="parada">${flechas(e)}<a class="item-envio" href="${enlace(e)}">
     <div><div class="fila"><span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
       ${e.tipo_destino === 'punto_courier' ? html`<span class="badge e-asignado">${e.courier_empresa}</span>` : ''}</div>
@@ -53,16 +60,31 @@ export async function ruta() {
     <div class="card"><h2>En ruta</h2><div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
     <div class="card"><h2>Por retirar / reintentar</h2><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
     ${disponibles.autoasignacion || esAdmin ? html`<div class="card"><div class="card-titulo"><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
-      <div class="lista-envios">${disponibles.items.length ? disponibles.items.map(libre) : vacio('No hay envíos nuevos por tomar.')}</div></div>`
+      <div class="lista-envios" id="lista-disponibles">${disponibles.items.length ? disponibles.items.slice(0, 10).map(libre) : vacio('No hay envíos nuevos por tomar.')}</div>
+      ${disponibles.total > 10 ? html`<button class="btn sec ancho" id="ver-disponibles" style="margin-top:12px">Ver los ${disponibles.total - 10} restantes</button>` : ''}</div>`
     : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
   $$('[data-mover]').forEach((b) => { b.onclick = () => mover(Number(b.dataset.mover), Number(b.dataset.paso)); });
-  $$('[data-tomar]').forEach((b) => {
+  // Los disponibles se muestran de a 10: con muchos, la ruta propia quedaba perdida al final de una lista larga.
+  $('#ver-disponibles')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      // Si hay más de los que vinieron en la primera carga, se piden (hasta 500 de una vez).
+      const todos = disponibles.total > disponibles.items.length ? (await get('/api/envios/disponibles?limite=500')).items : disponibles.items;
+      montar($('#lista-disponibles'), html`${todos.map(libre)}`);
+      if (disponibles.total > todos.length) btn.replaceWith(Object.assign(document.createElement('p'), { className: 'muted', textContent: `Mostrando ${todos.length} de ${disponibles.total}: toma los primeros para ver más.` }));
+      else btn.remove();
+      enlazarTomar();
+    } catch (err) { errorToast(err); btn.disabled = false; }
+  });
+  const enlazarTomar = () => $$('[data-tomar]').forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;
       try { await post(`/api/envios/${b.dataset.tomar}/tomar`); toast('Envío agregado a tu ruta', 'ok'); ruta(); }
       catch (err) { errorToast(err); ruta(); }
     };
   });
+  enlazarTomar();
 }
 
 // ================= Detalle para el repartidor: acciones grandes para usar en la calle =================

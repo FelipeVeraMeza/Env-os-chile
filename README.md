@@ -54,6 +54,7 @@ Crea la base en Supabase (tablas, RLS, comunas, configuración, usuarios y bucke
 | 16 | [Inicio de sesión: cómo activarlo](docs/16-inicio-de-sesion.md) |
 | 17 | [**Seguridad**: vulnerabilidades corregidas, monitoreo y qué hacer ante un hackeo](docs/17-seguridad.md) |
 | 18 | [**Plan QA: 102 errores encontrados y corregidos en dos rondas** (01-10-2026)](docs/18-plan-qa-50-errores.md) |
+| 19 | [**Verificación caso por caso** de los 102 errores (se regenera con `npm run verificar:casos`)](docs/19-verificacion-caso-por-caso.md) |
 | 📘 | [**Manual de usuario (PDF)**](docs/manual/manual-de-usuario.pdf) y [**Guía de inducción (PDF)**](docs/manual/guia-de-induccion.pdf) · se regeneran con `npm run manual` |
 
 ## Reglas de negocio implementadas
@@ -105,10 +106,12 @@ Guía completa: [docs/10-despliegue.md](docs/10-despliegue.md).
 ## Pruebas
 
 ```bash
-npm test               # 65 pruebas unitarias (reglas de negocio, limitador, Supabase, SQL, correcciones QA)
+npm test               # 67 pruebas unitarias (reglas de negocio, limitador, Supabase, SQL, correcciones QA)
 npm run verificar      # revisa variables, conexión a la base y almacenamiento antes de desplegar
-npm run qa:local       # 166 casos QA contra la API (CP-01 … CP-229) en localhost
+npm run qa:local       # 169 casos QA contra la API (CP-01 … CP-232) en localhost
 npm run e2e            # flujo completo por la interfaz: cliente, admin y repartidor a la vez
+npm run interfaz       # 18 correcciones de pantalla verificadas en el navegador (Enter, GPS, sin conexión…)
+npm run verificar:casos # cruza cada error corregido con su prueba y escribe docs/19
 npm run carga          # 40 clientes + 15 repartidores simultáneos (0 errores, folios únicos)
 npm run rendimiento    # cada pantalla < 2 s con 4G simulado
 npm run accesibilidad  # WCAG 2.1 AA (axe-core)

@@ -29,6 +29,8 @@
     "manual": "node scripts/manual/generar-manual.mjs",
     "carga": "node scripts/prueba-carga.js",
     "e2e": "node qa/e2e/flujo-completo.js",
+    "interfaz": "node qa/e2e/correcciones-interfaz.js",
+    "verificar:casos": "node qa/verificar-casos.js",
     "rendimiento": "node qa/e2e/rendimiento.js",
     "accesibilidad": "node qa/e2e/accesibilidad.js"
   },

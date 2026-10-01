@@ -44,6 +44,10 @@ jobs:
         run: npm run e2e
       - name: Accesibilidad WCAG 2.1 AA
         run: npm run accesibilidad
+      - name: Correcciones de pantalla verificadas en el navegador (plan QA)
+        run: npm run interfaz
+      - name: Verificación caso por caso de los errores corregidos
+        run: npm run verificar:casos
       - name: Prueba de carga (40 clientes y 15 repartidores a la vez)
         run: |
           kill %1 2>/dev/null || pkill -f "node server/index.js" || true

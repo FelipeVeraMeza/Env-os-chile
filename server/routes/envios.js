@@ -127,14 +127,35 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
       if (rows[0].anonimizado_en) throw falla(409, 'Este destinatario fue anonimizado: crea uno nuevo para enviarle', { destinatario_id: 'Anonimizado' });
     } else {
       const d = b.destinatario;
-      const { rows: [nuevo] } = await db.query(
-        `INSERT INTO destinatario (cliente_id, nombre, telefono, correo, rut, notas) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [clienteId, d.nombre.trim(), normalizarTelefono(d.telefono), d.correo || null, normalizarRut(d.rut), d.notas || null],
-      );
-      destinatarioId = nuevo.id;
+      // Si el cliente ya tiene en su libreta a esta persona (mismo nombre y teléfono), se reutiliza: antes cada envío
+      // creaba otro registro igual y la libreta se llenaba de repetidos.
+      const { rows: [existente] } = await db.query(
+        `SELECT id FROM destinatario WHERE cliente_id = $1 AND telefono = $2 AND lower(btrim(nombre)) = lower($3) AND anonimizado_en IS NULL
+         ORDER BY id LIMIT 1`, [clienteId, normalizarTelefono(d.telefono), d.nombre.trim()]);
+      if (existente) destinatarioId = existente.id;
+      else {
+        const { rows: [nuevo] } = await db.query(
+          `INSERT INTO destinatario (cliente_id, nombre, telefono, correo, rut, notas) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [clienteId, d.nombre.trim(), normalizarTelefono(d.telefono), d.correo || null, normalizarRut(d.rut), d.notas || null],
+        );
+        destinatarioId = nuevo.id;
+      }
     }
 
     let direccionId = b.direccion_id ? Number(b.direccion_id) : null;
+    if (!direccionId) {
+      // La misma dirección (calle, número, depto y comuna) ya guardada para este destinatario se reutiliza.
+      const di = b.direccion;
+      const { rows: [igual] } = await db.query(
+        `SELECT id FROM direccion WHERE destinatario_id = $1 AND activa AND comuna_id = $2 AND lower(btrim(calle)) = lower($3)
+           AND lower(btrim(numero)) = lower($4) AND lower(COALESCE(btrim(depto), '')) = lower($5) ORDER BY id LIMIT 1`,
+        [destinatarioId, Number(di.comuna_id), di.calle.trim(), String(di.numero).trim(), String(di.depto || '').trim()]);
+      if (igual) {
+        direccionId = igual.id;
+        // Si la dirección guardada no tenía coordenadas y ahora vienen, se completan (no se pierde el dato nuevo).
+        if (coords) await db.query('UPDATE direccion SET lat = $1, lon = $2 WHERE id = $3 AND lat IS NULL', [coords.lat, coords.lon, igual.id]);
+      }
+    }
     if (!direccionId) {
       const di = b.direccion;
       const { rows: [{ n }] } = await db.query('SELECT count(*)::int AS n FROM direccion WHERE destinatario_id = $1 AND activa', [destinatarioId]);
@@ -282,9 +303,16 @@ const SIN_ASIGNAR = "e.estado = 'creado' AND e.repartidor_id IS NULL AND e.estad
 envios.get('/disponibles', requiereRol('admin', 'repartidor'), ruta(async (req, res) => {
   const conf = await leerConfig();
   if (req.usuario.rol === 'repartidor' && !conf.operacion.autoasignacion) return res.json({ autoasignacion: false, total: 0, items: [] });
-  const { rows } = await query(`${SELECT_ENVIO} WHERE ${SIN_ASIGNAR} ORDER BY e.horario_especial DESC, e.pagado_en, e.id LIMIT 100`);
+  // Por páginas y con el total real: antes devolvía solo los 100 más antiguos y decía que eran todos, así que con más
+  // de 100 envíos pagados sin asignar, los nuevos no le aparecían a ningún repartidor.
+  const limite = Math.min(Math.max(Math.trunc(Number(req.query.limite)) || 100, 1), 500);
+  const pagina = Math.min(Math.max(Math.trunc(Number(req.query.pagina)) || 1, 1), 100000);
+  const [{ rows }, total] = await Promise.all([
+    query(`${SELECT_ENVIO} WHERE ${SIN_ASIGNAR} ORDER BY e.horario_especial DESC, e.pagado_en, e.id LIMIT ${limite} OFFSET ${(pagina - 1) * limite}`),
+    uno(`SELECT count(*)::int AS n FROM envio e WHERE ${SIN_ASIGNAR}`),
+  ]);
   const vista = req.usuario.rol === 'repartidor' ? (e) => vistaDisponible(presentar(e, req.usuario)) : (e) => presentar(e, req.usuario);
-  res.json({ autoasignacion: conf.operacion.autoasignacion, total: rows.length, items: rows.map(vista) });
+  res.json({ autoasignacion: conf.operacion.autoasignacion, total: total.n, pagina, limite, items: rows.map(vista) });
 }));
 
 // El repartidor toma un envío disponible. La condición va en el UPDATE para que, si dos

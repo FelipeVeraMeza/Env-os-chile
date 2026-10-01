@@ -276,6 +276,10 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, a:focus-visible, 
 }
 .item-envio:hover { background: var(--superficie-2); border-color: rgba(232, 71, 155, .5); }
 .item-envio .folio { font-weight: 800; font-variant-numeric: tabular-nums; }
+/* El folio se lee de una vez: no se corta en "ENV-2026-" / "000983" cuando la tarjeta tiene etiquetas a la derecha. */
+.vista .item-envio .folio { white-space: nowrap; overflow-wrap: normal; }
+/* Textos que pueden ser largos dentro de una tabla (folios en los que se repitió un comprobante) sí pueden cortarse. */
+td .ajustable { white-space: normal; display: inline-block; max-width: 260px; line-height: 1.35; }
 .item-envio .dir { color: var(--texto-2); font-size: .9rem; }
 .item-envio .der { text-align: right; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .item-envio .monto { font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -301,6 +305,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .linea-tiempo li::after { content: ''; position: absolute; left: 0; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--azul-600); border: 3px solid var(--azul-900); box-shadow: 0 0 0 2px var(--azul-400); }
 .linea-tiempo li:last-child::after { background: var(--magenta-500); box-shadow: 0 0 0 2px var(--magenta-400); }
 .linea-tiempo .cuando { color: var(--texto-3); font-size: .8rem; }
+/* Pasos del pago dentro del historial: punto verde para distinguirlos de los cambios de estado. */
+.linea-tiempo li.pago::after { background: #10b981; box-shadow: 0 0 0 2px #6ee7b7; }
+.linea-tiempo li.pago.rechazo::after { background: #f43f5e; box-shadow: 0 0 0 2px #fda4af; }
 
 .progreso-envio { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 16px 0 6px; }
 .progreso-envio div { text-align: center; font-size: .72rem; font-weight: 700; color: var(--texto-3); }
@@ -409,5 +416,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* Orden de la ruta del repartidor: flechas a la izquierda de cada parada */
 .parada { display: flex; gap: 8px; align-items: stretch; }
 .parada > .item-envio { flex: 1; min-width: 0; }
+/* Celular: en la tarjeta de la ruta, el estado va debajo y el folio y la dirección usan todo el ancho. */
+@media (max-width: 640px) {
+  .parada > .item-envio { grid-template-columns: minmax(0, 1fr); }
+  .parada > .item-envio .der { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; text-align: left; }
+}
 .flechas-ruta { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
 .flechas-ruta .btn-icono { width: 36px; height: 36px; font-size: .8rem; }
+/* Flecha de orden de ruta sin efecto (primera o última parada de su sección). */
+.flechas-ruta .btn-icono:disabled { opacity: .3; cursor: default; }

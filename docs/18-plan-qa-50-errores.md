@@ -1,6 +1,6 @@
 # 18 · Plan QA: 100 errores encontrados y corregidos (01-10-2026)
 
-**Rol:** jefatura de proyecto y QA · **Versión revisada:** último commit subido (`30-09-1`) · **Estado:** ✅ dos rondas cerradas: QA-01 a QA-52 (primera ronda, 50 + 2 encontrados por las pruebas) y QA-53 a QA-102 (segunda ronda, 50). **102 errores corregidos en total.**
+**Rol:** jefatura de proyecto y QA · **Versión revisada:** último commit subido (`30-09-1`) · **Estado:** ✅ dos rondas cerradas: QA-01 a QA-52 (primera ronda, 50 + 2 encontrados por las pruebas) y QA-53 a QA-102 (segunda ronda, 50). **102 errores corregidos en total**, más QA-103, QA-104 y 7 mejoras de la página encontrados en la verificación caso por caso ([sección 6](#6-verificación-caso-por-caso-y-mejoras-de-la-página-01-10-2026)).
 
 La segunda ronda está en la [sección 5](#5-segunda-ronda-qa-53-a-qa-102).
 
@@ -133,9 +133,9 @@ Encontrar y corregir 50 errores reales de la plataforma antes de la fecha meta (
 
 | N° | Sev. | Qué pasaba | Corrección | Prueba |
 |---|---|---|---|---|
-| QA-44 | Alta | Si el teléfono no lograba comprimir la foto, se subía un archivo **vacío** como foto de entrega o comprobante. | Se sube la foto original. `web/js/ui.js` | revisión |
-| QA-45 | Media | Una respuesta cortada del servidor mostraba "Unexpected token…" en vez de un mensaje claro. | Mensaje "Respuesta incompleta del servidor…". `web/js/api.js` | revisión |
-| QA-46 | Baja | El estado "Reembolsado" se pintaba con el color de "Pago pendiente". | Color propio. `web/js/ui.js`, `web/css/app.css` | revisión |
+| QA-44 | Alta | Si el teléfono no lograba comprimir la foto, se subía un archivo **vacío** como foto de entrega o comprobante. | Se sube la foto original. `web/js/ui.js` | interfaz |
+| QA-45 | Media | Una respuesta cortada del servidor mostraba "Unexpected token…" en vez de un mensaje claro. | Mensaje "Respuesta incompleta del servidor…". `web/js/api.js` | interfaz |
+| QA-46 | Baja | El estado "Reembolsado" se pintaba con el color de "Pago pendiente". | Color propio. `web/js/ui.js`, `web/css/app.css` | interfaz |
 
 ### Encontrados por las pruebas nuevas
 
@@ -173,25 +173,25 @@ Mismo método. Esta vez el foco fue lo que la primera ronda no cubrió a fondo: 
 
 | N° | Sev. | Qué pasaba | Corrección | Prueba |
 |---|---|---|---|---|
-| QA-53 | Crítica | Al revisar un comprobante, escribir el motivo del rechazo y pulsar **Enter APROBABA el pago** (el formulario se enviaba con el primer botón, "Aprobar"). | Solo decide el botón que se pulsa. `web/js/vistas/envios.js` | navegador: antes "pagado", después sigue "en revisión" |
-| QA-54 | Alta | Lo mismo al resolver un reclamo de seguro: Enter en el monto aprobaba el reclamo. | Solo decide el botón. `web/js/vistas/envios.js` | revisión |
-| QA-55 | Media | El reembolso desde la pantalla enviaba 0 con el monto vacío (anulaba la corrección QA-21). | Vacío = reembolso total. `web/js/vistas/envios.js` | revisión |
-| QA-56 | Baja | El botón "Reclamar seguro" aparecía antes del retiro y el servidor lo rechazaba. | Mismos estados que exige el servidor. `web/js/vistas/envios.js` | revisión |
-| QA-57 | Media | Doble clic en "Pagar" (pago en línea) enviaba dos confirmaciones; la segunda mostraba un error. | Botones bloqueados mientras se procesa. `web/js/vistas/envios.js` | revisión |
-| QA-58 | Baja | El QR y la vista previa de la foto quedaban en memoria en cada refresco automático (cada 30 s): las pantallas abiertas todo el día consumían cada vez más. | Se libera la imagen anterior. `web/js/ui.js` | revisión |
-| QA-59 | Media | Panel de ganancias con "desde" posterior a "hasta": la pantalla quedaba cargando para siempre. | Mensaje claro y botón "Ver el mes actual". `web/js/vistas/admin.js` | navegador |
-| QA-60 | Media | Cobranza: el mismo problema. | Mismo manejo. `web/js/vistas/admin.js` | revisión |
-| QA-61 | Baja | Seguridad: un error al cargar o al abrir la actividad de una IP dejaba la pantalla sin respuesta. | Errores manejados. `web/js/vistas/admin.js` | revisión |
+| QA-53 | Crítica | Al revisar un comprobante, escribir el motivo del rechazo y pulsar **Enter APROBABA el pago** (el formulario se enviaba con el primer botón, "Aprobar"). | Solo decide el botón que se pulsa. `web/js/vistas/envios.js` | navegador: antes "pagado", después sigue "en revisión" · interfaz |
+| QA-54 | Alta | Lo mismo al resolver un reclamo de seguro: Enter en el monto aprobaba el reclamo. | Solo decide el botón. `web/js/vistas/envios.js` | interfaz |
+| QA-55 | Media | El reembolso desde la pantalla enviaba 0 con el monto vacío (anulaba la corrección QA-21). | Vacío = reembolso total. `web/js/vistas/envios.js` | interfaz |
+| QA-56 | Baja | El botón "Reclamar seguro" aparecía antes del retiro y el servidor lo rechazaba. | Mismos estados que exige el servidor. `web/js/vistas/envios.js` | interfaz |
+| QA-57 | Media | Doble clic en "Pagar" (pago en línea) enviaba dos confirmaciones; la segunda mostraba un error. | Botones bloqueados mientras se procesa. `web/js/vistas/envios.js` | interfaz |
+| QA-58 | Baja | El QR y la vista previa de la foto quedaban en memoria en cada refresco automático (cada 30 s): las pantallas abiertas todo el día consumían cada vez más. | Se libera la imagen anterior. `web/js/ui.js` | interfaz |
+| QA-59 | Media | Panel de ganancias con "desde" posterior a "hasta": la pantalla quedaba cargando para siempre. | Mensaje claro y botón "Ver el mes actual". `web/js/vistas/admin.js` | interfaz |
+| QA-60 | Media | Cobranza: el mismo problema. | Mismo manejo. `web/js/vistas/admin.js` | interfaz |
+| QA-61 | Baja | Seguridad: un error al cargar o al abrir la actividad de una IP dejaba la pantalla sin respuesta. | Errores manejados. `web/js/vistas/admin.js` | interfaz |
 | QA-62 | Alta | Las cifras del inicio del cliente (en curso, por pagar, entregados) se calculaban solo con sus **últimos 100 envíos**: con más, eran incorrectas. | El servidor las cuenta todas (`/api/envios/resumen`). `server/routes/envios.js`, `web/js/vistas/cliente.js` | CP-220, navegador |
-| QA-63 | Baja | Libreta: "Dirección quitada" se mostraba aunque la operación fallara. | El aviso solo sale si se guardó. `web/js/vistas/cliente.js` | revisión |
+| QA-63 | Baja | Libreta: "Dirección quitada" se mostraba aunque la operación fallara. | El aviso solo sale si se guardó. `web/js/vistas/cliente.js` | interfaz |
 | QA-64 | Media | La libreta y el asistente de nuevo envío mostraban destinatarios anonimizados ("Titular anonimizado"). | No se listan (administración los ve con `?anonimizados=1`). `server/routes/catalogos.js` | CP-221 |
-| QA-65 | Alta | El service worker no guardaba `cuenta.js`: **la app no abría sin conexión** (era la promesa de la PWA). | Incluido en la caché. `web/sw.js` | revisión |
-| QA-66 | Media | El service worker guardaba respuestas de error (404, 502 durante un despliegue) y las mostraba sin conexión. | Solo se guardan respuestas correctas. `web/sw.js` | revisión |
-| QA-67 | Baja | Ajustes → opciones del envío: un error no marcaba el campo. | Se marca el campo. `web/js/vistas/admin.js` | revisión |
-| QA-68 | Baja | Con la hora del teléfono atrasada, la cuenta regresiva de espera pasaba de 5:00 y el anillo se salía de escala. | Se limita a la espera máxima. `web/js/vistas/repartidor.js` | revisión |
-| QA-69 | Media | "No se pudo entregar": mientras buscaba el GPS (hasta 25 s) no se veía nada y un segundo toque lo enviaba otra vez. | Botón bloqueado con "Obteniendo ubicación…". `web/js/vistas/repartidor.js` | revisión |
+| QA-65 | Alta | El service worker no guardaba `cuenta.js`: **la app no abría sin conexión** (era la promesa de la PWA). | Incluido en la caché. `web/sw.js` | interfaz |
+| QA-66 | Media | El service worker guardaba respuestas de error (404, 502 durante un despliegue) y las mostraba sin conexión. | Solo se guardan respuestas correctas. `web/sw.js` | interfaz |
+| QA-67 | Baja | Ajustes → opciones del envío: un error no marcaba el campo. | Se marca el campo. `web/js/vistas/admin.js`. **Completada en la verificación caso por caso**: el servidor tampoco decía qué lista tenía el error (`server/routes/catalogos.js`). | interfaz |
+| QA-68 | Baja | Con la hora del teléfono atrasada, la cuenta regresiva de espera pasaba de 5:00 y el anillo se salía de escala. | Se limita a la espera máxima. `web/js/vistas/repartidor.js` | interfaz |
+| QA-69 | Media | "No se pudo entregar": mientras buscaba el GPS (hasta 25 s) no se veía nada y un segundo toque lo enviaba otra vez. | Botón bloqueado con "Obteniendo ubicación…". `web/js/vistas/repartidor.js` | interfaz |
 | QA-70 | Media | Si se cambiaba la `DEMO_CLAVE`, quien tenía la anterior veía errores en cada acción sin que se le pidiera la nueva. | Se olvida la clave guardada y se vuelve a pedir. `web/js/api.js` | revisión |
-| QA-71 | Baja | Al cerrar un modal, el foco del teclado se perdía (accesibilidad). | Vuelve al botón que lo abrió. `web/js/ui.js` | accesibilidad ✔ |
+| QA-71 | Baja | Al cerrar un modal, el foco del teclado se perdía (accesibilidad). | Vuelve al botón que lo abrió. `web/js/ui.js` | interfaz |
 
 ### Datos personales y seguridad
 
@@ -228,7 +228,7 @@ Mismo método. Esta vez el foco fue lo que la primera ronda no cubrió a fondo: 
 | QA-89 | Baja | El RUT "0-0" se aceptaba como válido. | Rechazado. `server/lib/reglas.js` | CP-229, unitaria |
 | QA-96 | Media | Administración podía crear envíos a nombre de un cliente **desactivado**. | Solo clientes activos. `server/routes/envios.js` | CP-222 |
 | QA-97 | Media | Administración podía crear destinatarios en la "libreta" de un repartidor o de otro administrador. | Solo clientes. `server/routes/catalogos.js` | CP-222 |
-| QA-101 | Media | Dentro de un edificio el GPS de alta precisión no responde y el repartidor no podía cerrar la entrega. | Si no responde, se usa la ubicación aproximada del teléfono. `web/js/ui.js` | revisión |
+| QA-101 | Media | Dentro de un edificio el GPS de alta precisión no responde y el repartidor no podía cerrar la entrega. | Si no responde, se usa la ubicación aproximada del teléfono. `web/js/ui.js` | interfaz |
 
 ### Servidor y despliegue
 
@@ -239,14 +239,51 @@ Mismo método. Esta vez el foco fue lo que la primera ronda no cubrió a fondo: 
 | QA-92 | Media | La verificación daba por buena una `JWT_SECRET` de ejemplo de las plantillas (tiene 44 caracteres). | Se rechazan las claves de ejemplo. `scripts/verificar-despliegue.js` | ejecutado |
 | QA-93 | Media | `npm run publicar` subía a Railway los valores con sus comillas (`JWT_SECRET="…"` quedaba con comillas). | Lector común que las quita. `scripts/publicar.js`, `qa/entornos.js` | unitaria |
 | QA-94 | Baja | En `entornos.env`, los espacios al final y los comentarios al final de la línea quedaban pegados a las URLs. | Se quitan. `qa/entornos.js` | unitaria |
-| QA-95 | Baja | El SQL para Supabase decía que la verificación debía mostrar 5 claves de configuración; son 7. | Se calcula al generarlo. `scripts/generar-sql-supabase.js` | regenerado |
+| QA-95 | Baja | El SQL para Supabase decía que la verificación debía mostrar 5 claves de configuración; son 7. | Se calcula al generarlo. `scripts/generar-sql-supabase.js` | unitaria |
 | QA-98 | Media | Sin red de seguridad: en Node 22 una promesa rechazada sin manejar termina el proceso y Railway reinicia la app, cortando a todos. | Se registra y el servidor sigue. `server/index.js` | revisión |
-| QA-99 | Media | `CORS_ORIGINS` con barra final (`https://x.vercel.app/`) bloqueaba la interfaz publicada en Vercel. | Se quita la barra. `server/config.js` | revisión |
-| QA-100 | Baja | `web/config.js` estaba desactualizado: el selector de servidor no ofrecía la URL de Railway. | Regenerado con `npm run build:web`. | regenerado |
+| QA-99 | Media | `CORS_ORIGINS` con barra final (`https://x.vercel.app/`) bloqueaba la interfaz publicada en Vercel. | Se quita la barra. `server/config.js` | unitaria |
+| QA-100 | Baja | `web/config.js` estaba desactualizado: el selector de servidor no ofrecía la URL de Railway. | Regenerado con `npm run build:web`. | unitaria |
 
 "revisión" = verificado por revisión de código y por las suites de regresión (flujo completo, accesibilidad, carga).
 
-## 6. Riesgos y pendientes para la próxima iteración
+## 6. Verificación caso por caso y mejoras de la página (01-10-2026)
+
+### 6.1 Verificación
+
+Se revisó uno por uno cada error corregido y cada pantalla de los tres perfiles, en celular (390 px) y en escritorio (1280 px).
+El informe completo, con la evidencia de cada caso, está en **[docs/19](19-verificacion-caso-por-caso.md)** y se regenera con
+`npm run verificar:casos`.
+
+- Nueva suite **`npm run interfaz`** (`qa/e2e/correcciones-interfaz.js`): reproduce en un navegador real 18 correcciones de pantalla que
+  antes solo se habían revisado leyendo el código (Enter en revisiones, reembolso vacío, doble clic en pagar, rangos inválidos,
+  GPS de respaldo, foco de los modales, app sin conexión…). Corre en GitHub Actions.
+- Resultado: de 102 errores, **90 con prueba automática que pasa** y **12 verificados a mano** (necesitan inicio de sesión real,
+  simular una caída de la base o ejecutar un script de despliegue). **Ninguno falla.**
+- La verificación encontró que **QA-67 estaba incompleta**: la pantalla marcaba el campo con error, pero el servidor no decía qué lista
+  fallaba. Corregido.
+
+### 6.2 Errores nuevos encontrados en la verificación
+
+| N° | Sev. | Qué pasaba | Corrección | Prueba |
+|---|---|---|---|---|
+| QA-103 | Media | En Cobranza, desde el celular, un comprobante usado en muchos envíos mostraba **todos** los folios en una sola línea sin corte: la pantalla quedaba de 68.000 px de ancho. | Se muestran 3 folios y "y N más" (la lista completa queda al pasar el cursor). `web/js/ui.js`, `admin.js`, `envios.js` | recorrido de pantallas sin desborde |
+| QA-104 | Alta | "Disponibles para tomar" devolvía solo los **100 envíos más antiguos** y decía que eran todos: con más de 100 envíos pagados sin asignar, los nuevos no le aparecían a ningún repartidor. Lo detectó la regresión final (CP-223). | Total real y lista por páginas; "Ver más" carga el resto. `server/routes/envios.js`, `web/js/vistas/repartidor.js` | CP-232 |
+
+### 6.3 Mejoras de la página
+
+| N° | Mejora | Dónde |
+|---|---|---|
+| M-01 | El folio ya no se corta en dos líneas ("ENV-2026-" / "000983") en las tarjetas de envíos. | `web/css/app.css` |
+| M-02 | El historial del envío muestra los pasos del pago, en verde y en orden: comprobante enviado, pago aprobado o rechazado (con el motivo) y reembolso. | `web/js/vistas/envios.js`, `server/lib/envios.js` |
+| M-03 | "Mi ruta": cada sección (en ruta / por retirar) se numera desde 1 y las flechas mueven dentro de la sección; antes la numeración saltaba (1, 3, 4 arriba y 2 abajo). En el celular el folio y la dirección usan todo el ancho. | `web/js/vistas/repartidor.js`, `web/css/app.css` |
+| M-04 | "Disponibles para tomar" muestra 10 envíos y un botón "Ver los N restantes" (antes la lista de 40 o más tapaba la ruta propia). | `web/js/vistas/repartidor.js` |
+| M-05 | La libreta ya no se llena de repetidos: un envío a la misma persona (mismo nombre y teléfono) y a la misma dirección reutiliza las que ya están guardadas. | `server/routes/envios.js` · CP-230 |
+| M-06 | En el detalle de un envío con un reclamo de seguro pendiente, administración tiene un acceso directo "Gestionar el reclamo en Seguros". | `web/js/vistas/envios.js` |
+| M-07 | `npm run interfaz` y `npm run verificar:casos` quedan en GitHub Actions: cada cambio vuelve a verificar los 102 errores. | `.github/workflows/pruebas.yml` |
+
+**Nota:** la libreta de las cuentas de prueba sigue teniendo los repetidos creados antes de M-05; los envíos nuevos ya no los generan.
+
+## 7. Riesgos y pendientes para la próxima iteración
 
 Resueltos en la segunda ronda: el reembolso ya queda en la bitácora de pagos (QA-74) y los archivos ya no quedan huérfanos (QA-75).
 
@@ -257,12 +294,14 @@ Resueltos en la segunda ronda: el reembolso ya queda en la bitácora de pagos (Q
 | Los límites de intentos de inicio de sesión viven en memoria (un solo servidor). | Pasarlos a la base si se usa más de una instancia en Railway. | Desarrollo |
 | Las comunas con zona propia distinta de Santiago no cambian con la tarifa estándar (por diseño). | Pantalla para editar zonas en *Tarifas y reglas*. | Producto |
 
-## 7. Cómo verificar
+## 8. Cómo verificar
 
 ```bash
 docker compose up -d && cp .env.example .env && npm install
-npm test                 # 65 unitarias
+npm test                 # 67 unitarias
 npm run dev              # en otra terminal
-npm run qa:local         # 166 casos (CP-200 a CP-229 cubren este plan)
+npm run qa:local         # 169 casos (CP-200 a CP-232 cubren este plan)
 npm run e2e && npm run accesibilidad && npm run carga
+npm run interfaz         # correcciones de pantalla en el navegador
+npm run verificar:casos  # informe caso por caso → docs/19
 ```
