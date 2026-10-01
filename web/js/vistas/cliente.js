@@ -277,11 +277,13 @@ export async function nuevo() {
     $('input[name="boleta"]', f)?.addEventListener('change', (ev) => { w.boleta = ev.target.files[0] || null; });
     $('input[name="foto"]', f)?.addEventListener('change', (ev) => { w.foto = ev.target.files[0] || null; });
     if (w.paso === 2) {
-      f.addEventListener('input', () => { clearTimeout(w.t); w.t = setTimeout(() => { guardarPaso(); cotizarAhora().then(pintarTarifa).catch(() => {}); }, 400); });
+      // Si el formulario ya no está en pantalla (se confirmó o se cambió de paso antes de los 400 ms), no se hace nada.
+      f.addEventListener('input', () => { clearTimeout(w.t); w.t = setTimeout(() => { if (form() !== f) return; guardarPaso(); cotizarAhora().then(pintarTarifa).catch(() => {}); }, 400); });
     }
-    $('#atras', f).onclick = () => { guardarPaso(); w.paso -= 1; pintar(); };
+    $('#atras', f).onclick = () => { clearTimeout(w.t); guardarPaso(); w.paso -= 1; pintar(); };
     f.onsubmit = async (ev) => {
       ev.preventDefault();
+      clearTimeout(w.t);
       guardarPaso();
       if (!validarLocal()) return;
       const btn = $('#siguiente', f);

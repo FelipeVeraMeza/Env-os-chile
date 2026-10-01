@@ -187,8 +187,9 @@ export async function tarifas() {
 
   const guardar = (clave) => async (e) => {
     e.preventDefault();
+    marcarErrores(e.target, {});
     try { app.conf[clave] = await put(`/api/config/${clave}`, datosForm(e.target)); toast('Cambios guardados', 'ok'); }
-    catch (err) { errorToast(err); }
+    catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
   };
   $('#f-tarifas').onsubmit = guardar('tarifas');
   $('#f-operacion').onsubmit = guardar('operacion');
@@ -368,6 +369,7 @@ export async function ajustes() {
     </div>`);
   const guardar = (clave) => async (e) => {
     e.preventDefault();
+    marcarErrores(e.target, {});
     try {
       app.conf[clave] = await put(`/api/config/${clave}`, datosForm(e.target));
       toast('Cambios guardados', 'ok');
@@ -376,7 +378,7 @@ export async function ajustes() {
         const marca = document.querySelector('.marca img');
         if (marca) marca.src = app.conf.negocio.logo_url || 'icons/icono.svg';
       }
-    } catch (err) { errorToast(err); }
+    } catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
   };
   $('#f-negocio').onsubmit = guardar('negocio');
   // El logo se achica a 256 px y se convierte a PNG en el teléfono/computador antes de guardarlo.

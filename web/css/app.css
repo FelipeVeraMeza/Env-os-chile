@@ -259,6 +259,7 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, a:focus-visible, 
 .e-pagado { background: rgba(52, 211, 153, .16); color: #a7f3d0; border-color: rgba(52, 211, 153, .45); }
 .e-pendiente { background: rgba(251, 191, 36, .14); color: #fde68a; border-color: rgba(251, 191, 36, .45); }
 .e-en_revision { background: rgba(56, 189, 248, .15); color: #bae6fd; border-color: rgba(56, 189, 248, .45); }
+.e-reembolsado { background: rgba(255, 255, 255, .08); color: var(--texto-3); border-color: var(--borde); }
 
 .kpi { padding: 18px; border-radius: var(--radio); background: var(--superficie); border: 1px solid var(--borde); }
 .kpi .etiqueta { color: var(--texto-3); font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }

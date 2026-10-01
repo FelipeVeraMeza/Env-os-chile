@@ -8,7 +8,8 @@ import { enlacesMapa, ESTADOS } from '../lib/reglas.js';
 export const seguimiento = Router();
 seguimiento.get('/:folio', ruta(async (req, res) => {
   const folio = String(req.params.folio || '').toUpperCase().trim();
-  if (!/^ENV-\d{4}-\d{6}$/.test(folio)) throw falla(400, 'Folio con formato inválido (ej. ENV-2026-000123)');
+  // El correlativo se rellena a 6 dígitos pero puede crecer (sobre 999.999 envíos en un año tiene 7 o más).
+  if (!/^ENV-\d{4}-\d{6,9}$/.test(folio)) throw falla(400, 'Folio con formato inválido (ej. ENV-2026-000123)');
   const e = await uno(
     `SELECT e.id, e.folio, e.estado, e.tipo_destino, e.courier_empresa, e.intentos, e.estado_pago, e.confirmado_en, e.entregado_en,
             e.horario_especial, e.franja_horaria, c.nombre AS comuna
@@ -35,7 +36,9 @@ paginaQr.get('/:token', ruta(async (req, res) => {
   const conf = await leerConfig();
   const mapas = enlacesMapa({ calle: e.calle, numero: e.numero, comuna: e.comuna, region: e.region, lat: e.lat, lon: e.lon });
   // ?ver=pagina muestra siempre la página con ambos botones (útil si el teléfono no tiene Google Maps).
-  if (req.query.ver !== 'pagina') {
+  // Un envío a un punto courier (Blue Express, Starken…) no se entrega en la dirección del destinatario: se muestra
+  // siempre la página, que indica el punto, en vez de llevar al repartidor directo a la casa.
+  if (req.query.ver !== 'pagina' && e.tipo_destino !== 'punto_courier') {
     if (conf.operacion.qr_destino === 'google') return res.redirect(mapas.ver);
     if (conf.operacion.qr_destino === 'waze') return res.redirect(mapas.waze);
   }

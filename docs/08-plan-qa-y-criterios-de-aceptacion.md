@@ -126,6 +126,30 @@ Todo se ejecuta solo en cada cambio con GitHub Actions (`.github/workflows/prueb
 | CP-91 | Exportar y anonimizar un destinatario sin perder envíos | RF-58 |
 | CP-92 | El repartidor ordena su ruta; no toca envíos ajenos | RF-60 |
 
+**Plan QA de 50 errores (01-10-2026, ver [docs/18](18-plan-qa-50-errores.md)):**
+
+| Caso | Descripción | Error que protege |
+|---|---|---|
+| CP-200 | El repartidor no ve recargos ni puede cotizar o consultar pagos | QA-01, QA-49 |
+| CP-201 | Ajustes rechaza claves heredadas (constructor, __proto__) | QA-03 |
+| CP-202 | Número vacío en Ajustes no se guarda como 0; tarifa estándar > $0 | QA-11, QA-12 |
+| CP-203 | La tarifa estándar de Ajustes se aplica a las comunas en cobertura | QA-09 |
+| CP-204 | Datos del negocio y pie del ticket validados | QA-37, QA-38 |
+| CP-205 | Zonas: tarifa y nombre obligatorios, sin error 500 | QA-13, QA-14, QA-15 |
+| CP-206 | Buscar % o _ no devuelve todo | QA-06 |
+| CP-207 | confirmar:"false" no confirma; coordenadas y peso validados | QA-10, QA-23, QA-24 |
+| CP-208 | Entrega: precisión GPS y receptor validados | QA-25, QA-26 |
+| CP-209 | Reasignar limpia el orden de ruta; no se ordenan envíos cerrados | QA-27, QA-28 |
+| CP-210 | Seguro solo tras el retiro; RUT del emisor validado | QA-16, QA-17 |
+| CP-211 | Reembolso con monto vacío = total; referencia de pago acotada | QA-21, QA-22 |
+| CP-212 | Fechas imposibles, rangos invertidos y costos futuros rechazados | QA-18, QA-19, QA-20 |
+| CP-213 | Usuarios: correo normalizado, nombre acotado, activo booleano | QA-31, QA-32, QA-33 |
+| CP-214 | Libreta: dirección principal y titular anonimizado | QA-35, QA-36, QA-47 |
+| CP-215 | Seguimiento de folios de 7 dígitos | QA-29 |
+| CP-216 | QR de punto courier muestra el punto | QA-48 |
+| CP-217 | Máximo de adjuntos y nombres con tildes | QA-07, QA-43, QA-51 |
+| CP-218 | CSV legible y cabeceras CORS expuestas | QA-30, QA-42 |
+
 ## 4. Criterios de aceptación (UAT con el cliente)
 
 La solución se da por aceptada cuando, **con datos reales y en un celular real del repartidor**:

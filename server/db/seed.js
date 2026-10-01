@@ -42,7 +42,7 @@ export async function sembrar() {
       const hash = await bcrypt.hash(config.admin.password, 10);
       await db.query(
         `INSERT INTO usuario (nombre, correo, password_hash, rol) VALUES ('Administración', $1, $2, 'admin')`,
-        [config.admin.correo.toLowerCase(), hash],
+        [config.admin.correo.trim().toLowerCase(), hash], // sin espacios: con " admin@x.cl" nadie podría entrar
       );
       if (config.sembrarDemo) await sembrarDemo(db);
       console.log(`[db] usuarios iniciales creados (admin: ${config.admin.correo})`);

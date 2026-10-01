@@ -130,7 +130,8 @@ export class ErrorNegocio extends Error {
 export function normalizarTelefono(valor) {
   if (!valor) return null;
   let d = String(valor).replace(/[^\d]/g, '');
-  if (d.startsWith('56')) d = d.slice(2);
+  if (d.startsWith('0056')) d = d.slice(2); // prefijo internacional marcado con 00 en vez de +
+  if (d.startsWith('56') && d.length > 9) d = d.slice(2);
   if (d.length === 8) d = '9' + d;
   if (!/^9\d{8}$/.test(d)) return null;
   return `+56 9 ${d.slice(1, 5)} ${d.slice(5)}`;
@@ -345,6 +346,9 @@ export const ESTADOS_RECLAMO = {
   pagado: 'Pagado',
 };
 
+// Estados en que el paquete ya está (o estuvo) en manos del repartidor.
+export const ESTADOS_RETIRADO = ['en_ruta', 'entregado', 'fallido', 'reagendado', 'devuelto'];
+
 export const MIME_BOLETA = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
 
 // La boleta es OBLIGATORIA para cobrar el seguro.
@@ -354,6 +358,10 @@ export function validarReclamo({ envio, boleta, datos, reclamosPrevios = [], aho
   }
   if (['borrador', 'anulado'].includes(envio.estado)) {
     throw new ErrorNegocio(409, 'No se puede reclamar el seguro de un envío en borrador o anulado');
+  }
+  // Pérdida, daño o robo solo pueden ocurrir cuando el repartidor ya retiró el paquete.
+  if (!ESTADOS_RETIRADO.includes(envio.estado)) {
+    throw new ErrorNegocio(409, 'El seguro se reclama cuando el envío ya fue retirado por el repartidor');
   }
   if (reclamosPrevios.some((r) => r.estado !== 'rechazado')) {
     throw new ErrorNegocio(409, 'Ya existe un reclamo activo para este envío');
@@ -406,7 +414,9 @@ export function enlacesMapa(d) {
 
 // ---------- Visibilidad de montos ----------
 
-const CAMPOS_MONTO = ['tarifa_base', 'recargo_bultos', 'recargo_horario', 'tarifa_total', 'valor_declarado'];
+// Todo campo con dinero del envío: el repartidor no ve ninguno (incluido el recargo por sobredimensión).
+const CAMPOS_MONTO = ['tarifa_base', 'recargo_bultos', 'recargo_sobredimension', 'recargo_horario', 'tarifa_total', 'valor_declarado',
+  'reembolso_monto', 'reembolso_medio', 'reembolso_nota', 'pago_referencia'];
 
 export function ocultarMontos(envio) {
   const copia = { ...envio };

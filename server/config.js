@@ -45,6 +45,13 @@ export function configBaseDatos(env) {
 // Clave secreta de Supabase (nueva "sb_secret_…" o la antigua "service_role"). Nunca va al navegador.
 const claveSupabase = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
+// Número desde una variable de entorno: vacía o inválida usa el valor por defecto (nunca NaN ni 0 por accidente).
+export function numeroEnv(valor, porDefecto, { min = 0 } = {}) {
+  if (valor === undefined || valor === null || String(valor).trim() === '') return porDefecto;
+  const n = Number(valor);
+  return Number.isFinite(n) && n >= min ? n : porDefecto;
+}
+
 function lista(valor, porDefecto) {
   return (valor || porDefecto).split(',').map((s) => s.trim()).filter(Boolean);
 }
@@ -76,9 +83,9 @@ export const config = {
   // demo = sin inicio de sesión, se elige el rol desde la interfaz. jwt = inicio de sesión real.
   authMode: process.env.AUTH_MODE || 'demo',
   jwtSecret: process.env.JWT_SECRET || 'solo-para-desarrollo-cambiar',
-  jwtDias: Number(process.env.JWT_DIAS || 30),
+  jwtDias: numeroEnv(process.env.JWT_DIAS, 30, { min: 1 }),
   uploadDir: path.resolve(process.env.UPLOAD_DIR || './uploads'),
-  maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 10),
+  maxUploadMb: numeroEnv(process.env.MAX_UPLOAD_MB, 10, { min: 1 }),
   // Solo para crear el primer administrador cuando la base no tiene usuarios. Después las cuentas viven en la base
   // (contraseña cifrada) y estas variables se pueden borrar. En producción no hay valores de respaldo.
   admin: {
@@ -88,8 +95,8 @@ export const config = {
   sembrarDemo: process.env.SEED_DEMO !== 'false',
   // Solicitudes por minuto y por IP (RNF-16). 0 desactiva el límite (no recomendado).
   limites: {
-    api: Number(process.env.LIMITE_API_POR_MINUTO ?? 600),
-    publico: Number(process.env.LIMITE_PUBLICO_POR_MINUTO ?? 60),
+    api: numeroEnv(process.env.LIMITE_API_POR_MINUTO, 600),
+    publico: numeroEnv(process.env.LIMITE_PUBLICO_POR_MINUTO, 60),
   },
   servirWeb: process.env.SERVE_WEB !== 'false',
 };
@@ -98,7 +105,10 @@ export const config = {
 // (con una clave conocida cualquiera podría fabricar una sesión de administrador). Aplica aunque falte NODE_ENV.
 const CLAVES_CONOCIDAS = ['solo-para-desarrollo-cambiar', 'cambia-esto-por-una-cadena-larga-y-aleatoria', 'CAMBIAR_POR_UNA_CADENA_LARGA_ALEATORIA'];
 export function validarSecreto(env) {
-  const local = /localhost|127\.0\.0\.1/.test(env.PUBLIC_BASE_URL || 'http://localhost') && !env.RAILWAY_PUBLIC_DOMAIN;
+  // Se mira el nombre del servidor (no el texto completo): "https://localhost.atacante.cl" no es este equipo.
+  let host = '';
+  try { host = new URL(env.PUBLIC_BASE_URL || 'http://localhost').hostname; } catch { host = ''; }
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(host) && !env.RAILWAY_PUBLIC_DOMAIN;
   if ((env.AUTH_MODE || 'demo') !== 'jwt' || local) return null;
   const s = env.JWT_SECRET || '';
   if (s.length < 32 || CLAVES_CONOCIDAS.includes(s)) return 'JWT_SECRET: con AUTH_MODE=jwt fuera de este equipo se necesita una clave propia de 32 caracteres o más (npm run secreto)';

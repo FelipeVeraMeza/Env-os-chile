@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
-import { auditar, falla, idNumerico, ruta } from '../lib/http.js';
+import { auditar, falla, idNumerico, rangoFechas, ruta } from '../lib/http.js';
 import { compararProveedores, PROVEEDORES_PAGO, validarConciliacion } from '../lib/cobranza.js';
 import { leerConfig } from '../lib/configuracion.js';
 import { firmarEnlace } from '../lib/archivos.js';
@@ -13,15 +13,10 @@ import { autenticar, requiereRol } from '../middleware/auth.js';
 export const cobranza = Router();
 cobranza.use(autenticar, requiereRol('admin'));
 
-const FECHA = /^\d{4}-\d{2}-\d{2}$/;
-function rango(q) {
-  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
-  return { desde: FECHA.test(q.desde || '') ? q.desde : `${hoy.slice(0, 8)}01`, hasta: FECHA.test(q.hasta || '') ? q.hasta : hoy };
-}
 const TZ = "AT TIME ZONE 'America/Santiago'";
 
 cobranza.get('/resumen', ruta(async (req, res) => {
-  const { desde, hasta } = rango(req.query);
+  const { desde, hasta } = rangoFechas(req.query);
   const p = [desde, hasta];
   const [cobrado, porProveedor, porCobrar, porConciliar, iniciados, enRevision] = await Promise.all([
     uno(`SELECT count(*)::int AS pagos, COALESCE(sum(monto), 0)::int AS bruto, COALESCE(sum(comision_estimada), 0)::int AS comision_estimada,

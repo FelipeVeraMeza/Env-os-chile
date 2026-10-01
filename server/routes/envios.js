@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { config } from '../config.js';
 import { query, transaccion, uno } from '../db/pool.js';
-import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, ruta } from '../lib/http.js';
+import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, patronBusqueda, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
 import {
   calcularTarifa, normalizarRut, normalizarTelefono, rolPuedeTransicionar, validarDestinatario, validarDestino,
@@ -21,6 +21,11 @@ import { requiereRol } from '../middleware/auth.js';
 export const envios = Router();
 
 const MIME_IMAGEN = ['image/jpeg', 'image/png', 'image/webp'];
+const ESTADOS_PAGO = { pendiente: 'Pendiente', en_revision: 'En revisión', pagado: 'Pagado', reembolsado: 'Reembolsado' };
+// Fotos y boletas que un envío puede acumular (evita llenar el almacenamiento subiendo archivos sin fin).
+const MAX_ADJUNTOS = 20;
+// Estados en que el envío sigue en la ruta de un repartidor.
+const EN_RUTA_REPARTIDOR = ['asignado', 'en_ruta', 'fallido', 'reagendado'];
 
 function datosPaquete(b) {
   return {
@@ -30,7 +35,9 @@ function datosPaquete(b) {
     courier_codigo: b.tipo_destino === 'punto_courier' ? String(b.courier_codigo || '').trim() || null : null,
     descripcion_producto: String(b.descripcion_producto || '').trim(),
     bultos: Number(b.bultos ?? 1),
-    peso_kg: Number(b.peso_kg),
+    // La base guarda el peso con 2 decimales: se redondea antes de cotizar para cobrar por el mismo peso que queda guardado
+    // (10,004 kg se guardaba como 10,00 kg pero se cobraba como sobredimensionado).
+    peso_kg: b.peso_kg === '' || b.peso_kg === null || b.peso_kg === undefined ? NaN : Math.round(Number(b.peso_kg) * 100) / 100,
     largo_cm: Number(b.largo_cm),
     ancho_cm: Number(b.ancho_cm),
     alto_cm: Number(b.alto_cm),
@@ -65,7 +72,8 @@ async function cotizar(body, usuario, conf) {
   return { paquete, tarifa, errores, comuna };
 }
 
-envios.post('/cotizar', ruta(async (req, res) => {
+// El repartidor no ve montos: cotizar es solo para quien crea envíos.
+envios.post('/cotizar', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const conf = await leerConfig();
   const { tarifa, errores } = await cotizar(req.body, req.usuario, conf);
   res.json({ ...tarifa, errores });
@@ -89,6 +97,11 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   }
   if (!b.destinatario_id) Object.assign(errores, prefijar('destinatario', validarDestinatario(b.destinatario)));
   if (!b.direccion_id) Object.assign(errores, prefijar('direccion', validarDireccion(b.direccion)));
+  // Coordenadas opcionales de la dirección nueva: si vienen, deben ser números dentro de rango.
+  let coords = null;
+  if (!b.direccion_id && b.direccion) {
+    try { coords = validarUbicacion({ lat: b.direccion.lat, lon: b.direccion.lon }, false); } catch { errores['direccion.lat'] = 'Coordenadas GPS inválidas'; }
+  }
 
   let comunaId = b.direccion?.comuna_id;
   if (b.direccion_id) {
@@ -126,7 +139,7 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
         `INSERT INTO direccion (destinatario_id, alias, calle, numero, depto, referencia, comuna_id, lat, lon, es_principal)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
         [destinatarioId, di.alias || null, di.calle.trim(), String(di.numero).trim(), di.depto || null, di.referencia || null,
-          Number(di.comuna_id), di.lat ?? null, di.lon ?? null, n === 0],
+          Number(di.comuna_id), coords?.lat ?? null, coords?.lon ?? null, n === 0],
       );
       direccionId = nueva.id;
     }
@@ -143,7 +156,8 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
         tarifa.tarifa_total, paquete.observaciones, req.usuario.id, tarifa.recargo_sobredimension],
     );
     await registrarEstado(db, { envioId: e.id, anterior: null, nuevo: 'borrador', usuarioId: req.usuario.id });
-    if (b.confirmar) await confirmar(db, e.id, req.usuario.id);
+    // Solo true confirma: el texto "false" (formularios) no debe confirmar el envío ni gastar un folio.
+    if (b.confirmar === true || b.confirmar === 'true') await confirmar(db, e.id, req.usuario.id);
     return cargarEnvio(e.id, db);
   });
 
@@ -190,7 +204,7 @@ function filtrosListado(req) {
   // Envíos cerrados (entregados o devueltos) hoy, sin importar cuándo se crearon.
   if (q.cerrados === 'hoy') cond.push(`(COALESCE(e.entregado_en, e.actualizado_en) ${TZ})::date = ${p(hoyChile())}::date`);
   if (q.q) {
-    const t = p(`%${String(q.q).trim()}%`);
+    const t = p(patronBusqueda(q.q));
     cond.push(`(e.folio ILIKE ${t} OR d.nombre ILIKE ${t} OR d.telefono ILIKE ${t} OR di.calle ILIKE ${t} OR c.nombre ILIKE ${t})`);
   }
   return { where: cond.length ? `WHERE ${cond.join(' AND ')}` : '', params };
@@ -215,7 +229,7 @@ envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, re
   const { where, params } = filtrosListado(req);
   const { rows } = await query(`${SELECT_ENVIO} ${where} ORDER BY e.creado_en DESC LIMIT 20000`, params);
   const cols = [
-    ['Folio', 'folio'], ['Estado', (e) => ESTADOS[e.estado]], ['Pago', 'estado_pago'], ['Creado', (e) => new Date(e.creado_en).toLocaleString('es-CL', { timeZone: 'America/Santiago' })],
+    ['Folio', 'folio'], ['Estado', (e) => ESTADOS[e.estado]], ['Pago', (e) => ESTADOS_PAGO[e.estado_pago] || e.estado_pago], ['Creado', (e) => new Date(e.creado_en).toLocaleString('es-CL', { timeZone: 'America/Santiago' })],
     ['Cliente', 'cliente_nombre'], ['Destinatario', 'destinatario_nombre'], ['Teléfono', 'destinatario_telefono'],
     ['Dirección', (e) => `${e.calle} ${e.numero}${e.depto ? ' ' + e.depto : ''}`], ['Comuna', 'comuna_nombre'],
     ['Tipo destino', 'tipo_destino'], ['Courier', 'courier_empresa'], ['Producto', 'descripcion_producto'], ['Bultos', 'bultos'],
@@ -284,8 +298,8 @@ envios.put('/ruta/orden', requiereRol('repartidor', 'admin'), ruta(async (req, r
   const n = await transaccion(async (db) => {
     const r = await db.query(
       `UPDATE envio e SET orden_ruta = o.pos FROM unnest($1::int[]) WITH ORDINALITY AS o(id, pos)
-       WHERE e.id = o.id AND e.repartidor_id = $2`, [ids, repartidorId]);
-    if (r.rowCount !== ids.length) throw falla(403, 'Solo puedes ordenar envíos asignados a ti');
+       WHERE e.id = o.id AND e.repartidor_id = $2 AND e.estado = ANY($3)`, [ids, repartidorId, EN_RUTA_REPARTIDOR]);
+    if (r.rowCount !== ids.length) throw falla(403, 'Solo puedes ordenar envíos asignados a ti que siguen en tu ruta');
     return r.rowCount;
   });
   res.json({ ok: true, ordenados: n });
@@ -330,7 +344,8 @@ envios.post('/:id/asignar', requiereRol('admin'), ruta(async (req, res) => {
   const nuevo = envio.estado === 'reagendado' ? 'reagendado' : repartidorId ? 'asignado' : 'creado';
   await transaccion(async (db) => {
     exigirSinConflicto(await db.query(
-      `UPDATE envio SET repartidor_id = $1, estado = $2, actualizado_en = now()
+      `UPDATE envio SET repartidor_id = $1, estado = $2, actualizado_en = now(),
+         orden_ruta = CASE WHEN repartidor_id IS NOT DISTINCT FROM $1 THEN orden_ruta END
        WHERE id = $3 AND estado = $4 AND repartidor_id IS NOT DISTINCT FROM $5`,
       [repartidorId, nuevo, envio.id, envio.estado, envio.repartidor_id]));
     if (nuevo !== envio.estado || repartidorId !== envio.repartidor_id) {
@@ -362,7 +377,7 @@ envios.post('/:id/estado', ruta(async (req, res) => {
     const sets = ['estado = $1', 'actualizado_en = now()'];
     if (nuevo === 'fallido') sets.push('intentos = intentos + 1', 'llegada_en = NULL');
     if (nuevo === 'reagendado') sets.push('llegada_en = NULL');
-    if (nuevo === 'creado') sets.push('repartidor_id = NULL');
+    if (nuevo === 'creado') sets.push('repartidor_id = NULL', 'orden_ruta = NULL');
     exigirSinConflicto(await db.query(`UPDATE envio SET ${sets.join(', ')} WHERE id = $2 AND estado = $3 AND intentos = $4`,
       [nuevo, envio.id, envio.estado, envio.intentos]));
     await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo, motivo: textoMotivo, usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon });
@@ -390,6 +405,10 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
   if (!req.file) throw falla(422, 'La foto de la entrega es obligatoria para cerrar el envío', { foto: 'Obligatoria' });
   if (!MIME_IMAGEN.includes(req.file.mimetype)) throw falla(422, 'La foto debe ser JPG, PNG o WebP', { foto: 'Formato inválido' });
   const ubic = validarUbicacion(req.body, conf.operacion.gps_obligatorio);
+  // Precisión del GPS en metros: número positivo o nada (Postgres aceptaría "NaN" y lo guardaría).
+  const precision = req.body.precision === undefined || req.body.precision === '' ? null : Number(req.body.precision);
+  if (precision !== null && (!Number.isFinite(precision) || precision < 0 || precision > 100_000)) throw falla(422, 'Precisión GPS inválida', { precision: 'Inválida' });
+  const receptor = String(req.body.receptor ?? '').trim().slice(0, 120) || null;
 
   const archivo = await guardarArchivo(quitarExif(req.file.buffer), req.file.mimetype);
   await transaccion(async (db) => {
@@ -401,9 +420,9 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
     exigirSinConflicto(await db.query(
       `UPDATE envio SET estado = 'entregado', entregado_en = now(), entrega_lat = $1, entrega_lon = $2, entrega_precision_m = $3,
          entrega_receptor = $4, actualizado_en = now() WHERE id = $5 AND estado = $6`,
-      [ubic?.lat ?? null, ubic?.lon ?? null, req.body.precision ? Number(req.body.precision) : null, req.body.receptor || null, envio.id, envio.estado],
+      [ubic?.lat ?? null, ubic?.lon ?? null, precision, receptor, envio.id, envio.estado],
     ));
-    await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: req.body.receptor ? `Recibe: ${req.body.receptor}` : null });
+    await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: receptor ? `Recibe: ${receptor}` : null });
   });
   await auditar(req, 'entregar', 'envio', envio.id, { lat: ubic?.lat, lon: ubic?.lon });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
@@ -417,6 +436,8 @@ envios.post('/:id/adjuntos', requiereRol('admin', 'cliente'), subida.single('arc
   if (!req.file) throw falla(422, 'Adjunta un archivo');
   const permitidos = tipo === 'boleta' ? [...MIME_IMAGEN, 'application/pdf'] : MIME_IMAGEN;
   if (!permitidos.includes(req.file.mimetype)) throw falla(422, 'Formato de archivo no permitido');
+  const { n } = await uno("SELECT count(*)::int AS n FROM adjunto WHERE envio_id = $1 AND tipo IN ('foto_paquete', 'boleta')", [envio.id]);
+  if (n >= MAX_ADJUNTOS) throw falla(409, `El envío ya tiene ${MAX_ADJUNTOS} archivos adjuntos (máximo)`);
   const buffer = req.file.mimetype === 'image/jpeg' ? quitarExif(req.file.buffer) : req.file.buffer;
   const archivo = await guardarArchivo(buffer, req.file.mimetype);
   const adj = await uno(
@@ -466,7 +487,7 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
   if (envio.estado_pago === 'pagado') throw falla(409, 'El envío ya está pagado');
   if (envio.estado_pago === 'en_revision') throw falla(409, 'Hay un comprobante de transferencia en revisión: apruébalo o recházalo en Cobranza');
   if (['borrador', 'anulado'].includes(envio.estado)) throw falla(409, 'No se puede registrar pago en este estado');
-  const referencia = String(req.body.referencia || '').trim() || null;
+  const referencia = String(req.body.referencia || '').trim().slice(0, 60) || null;
   await transaccion(async (db) => {
     // Se bloquea la fila del envío: si otra persona lo pagó o anuló recién, 409 y no se registra nada.
     const { rows: [vigente] } = await db.query(
@@ -483,7 +504,7 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
       `UPDATE envio SET estado_pago = 'pagado', pago_medio = $1, pago_referencia = $2, pagado_en = now(), actualizado_en = now() WHERE id = $3`,
       [medio, referencia, envio.id]);
   });
-  await auditar(req, 'pago_manual', 'envio', envio.id, { medio, referencia: req.body.referencia });
+  await auditar(req, 'pago_manual', 'envio', envio.id, { medio, referencia });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));
 
@@ -505,7 +526,8 @@ envios.post('/:id/comprobante', requiereRol('admin', 'cliente'), subida.single('
 // Reembolso del pago de un envío anulado o devuelto (RF-57). La política (total o parcial) la define el cliente (C-7).
 envios.post('/:id/reembolso', requiereRol('admin'), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
-  const monto = Number(req.body?.monto ?? envio.tarifa_total);
+  // Sin monto (o con el campo vacío) se reembolsa el total pagado.
+  const monto = req.body?.monto === undefined || req.body?.monto === null || req.body?.monto === '' ? envio.tarifa_total : Number(req.body.monto);
   const medio = req.body?.medio;
   if (!['anulado', 'devuelto'].includes(envio.estado)) throw falla(409, 'Solo se reembolsa un envío anulado o devuelto');
   if (envio.estado_pago !== 'pagado') throw falla(409, envio.estado_pago === 'reembolsado' ? 'El envío ya fue reembolsado' : 'El envío no está pagado');
@@ -515,7 +537,7 @@ envios.post('/:id/reembolso', requiereRol('admin'), ruta(async (req, res) => {
   exigirSinErrores(errores);
   exigirSinConflicto(await query(
     `UPDATE envio SET estado_pago = 'reembolsado', reembolso_monto = $1, reembolso_medio = $2, reembolso_nota = $3, reembolsado_en = now(), actualizado_en = now()
-     WHERE id = $4 AND estado_pago = 'pagado'`, [monto, medio, String(req.body?.nota || '').trim() || null, envio.id]));
+     WHERE id = $4 AND estado_pago = 'pagado'`, [monto, medio, String(req.body?.nota || '').trim().slice(0, 300) || null, envio.id]));
   await auditar(req, 'reembolsar', 'envio', envio.id, { monto, medio });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));

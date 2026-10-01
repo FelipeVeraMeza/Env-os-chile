@@ -6,6 +6,9 @@ import { config } from '../config.js';
 
 export const subida = multer({
   storage: multer.memoryStorage(),
+  // Los navegadores envían el nombre del archivo en UTF-8: leído como latin1 (el valor por defecto) "cañón.jpg"
+  // quedaba guardado como "caÃ±Ã³n.jpg" en la ficha del envío y en la descarga.
+  defParamCharset: 'utf8',
   // Límites también para los campos de texto: evita formularios gigantes que agoten la memoria.
   limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1, fields: 40, fieldSize: 64 * 1024, parts: 45 },
 });

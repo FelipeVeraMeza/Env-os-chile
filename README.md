@@ -53,6 +53,7 @@ Crea la base en Supabase (tablas, RLS, comunas, configuración, usuarios y bucke
 | 15 | [Diagnóstico de envíos, cobranza y verificación de pagos](docs/15-diagnostico-envios-y-cobranza.md) |
 | 16 | [Inicio de sesión: cómo activarlo](docs/16-inicio-de-sesion.md) |
 | 17 | [**Seguridad**: vulnerabilidades corregidas, monitoreo y qué hacer ante un hackeo](docs/17-seguridad.md) |
+| 18 | [**Plan QA: 50 errores encontrados y corregidos** (01-10-2026)](docs/18-plan-qa-50-errores.md) |
 | 📘 | [**Manual de usuario (PDF)**](docs/manual/manual-de-usuario.pdf) y [**Guía de inducción (PDF)**](docs/manual/guia-de-induccion.pdf) · se regeneran con `npm run manual` |
 
 ## Reglas de negocio implementadas
@@ -104,9 +105,9 @@ Guía completa: [docs/10-despliegue.md](docs/10-despliegue.md).
 ## Pruebas
 
 ```bash
-npm test               # 40 pruebas unitarias (reglas de negocio, limitador, Supabase, SQL)
+npm test               # 59 pruebas unitarias (reglas de negocio, limitador, Supabase, SQL, correcciones QA)
 npm run verificar      # revisa variables, conexión a la base y almacenamiento antes de desplegar
-npm run qa:local       # 78 casos QA contra la API (CP-01 … CP-92) en localhost
+npm run qa:local       # 156 casos QA contra la API (CP-01 … CP-218) en localhost
 npm run e2e            # flujo completo por la interfaz: cliente, admin y repartidor a la vez
 npm run carga          # 40 clientes + 15 repartidores simultáneos (0 errores, folios únicos)
 npm run rendimiento    # cada pantalla < 2 s con 4G simulado

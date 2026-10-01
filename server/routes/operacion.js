@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
-import { auditar, falla, idNumerico, ruta } from '../lib/http.js';
+import { auditar, falla, fechaFiltro, idNumerico, rangoFechas, ruta } from '../lib/http.js';
 import { cargarEnvio, exigirAcceso, exigirSinConflicto, siguienteFolio } from '../lib/envios.js';
 import { guardarArchivo, leerArchivo, subida, verificarFirma, firmarEnlace } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
-import { MIME_BOLETA, validarReclamo } from '../lib/reglas.js';
+import { normalizarRut, validarReclamo } from '../lib/reglas.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { leerConfig } from '../lib/configuracion.js';
 import { confirmarPago, iniciarPago, registrarEventoPago } from '../lib/pagos.js';
@@ -29,14 +29,19 @@ adjuntos.get('/:id/archivo', ruta(async (req, res) => {
   // se descargan en vez de abrirse dentro del dominio de la plataforma (un PDF manipulado no puede actuar en ella).
   res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:");
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  const nombre = encodeURIComponent(a.nombre_original || `adjunto-${a.id}`);
-  res.setHeader('Content-Disposition', `${a.mime === 'application/pdf' ? 'attachment' : 'inline'}; filename="${nombre}"`);
+  // Nombre del archivo según RFC 6266: una versión ASCII segura (sin comillas ni saltos) y la original en UTF-8 (filename*).
+  const original = String(a.nombre_original || `adjunto-${a.id}`).slice(0, 150);
+  const ascii = original.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.\- ]/g, '_') || `adjunto-${a.id}`;
+  res.setHeader('Content-Disposition', `${a.mime === 'application/pdf' ? 'attachment' : 'inline'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(original)}`);
   res.send(contenido);
 }));
 
 // ---------- Pagos (proveedor simulado; Webpay / Mercado Pago / Flow en la etapa de desarrollo) ----------
 export const pagos = Router();
 pagos.use(autenticar);
+
+// El repartidor no ve montos ni paga envíos: los pagos son del cliente dueño y de administración.
+pagos.use(requiereRol('admin', 'cliente'));
 
 pagos.get('/:token', ruta(async (req, res) => {
   const p = await uno('SELECT p.*, e.folio, e.cliente_id, e.repartidor_id FROM pago p JOIN envio e ON e.id = p.envio_id WHERE p.token = $1', [req.params.token]);
@@ -114,6 +119,11 @@ reclamos.post('/envio/:id', requiereRol('admin', 'cliente'), subida.single('bole
   }
   const boleta = req.file ? { mime: req.file.mimetype } : boletaExistente ? { mime: boletaExistente.mime } : null;
   validarReclamo({ envio, boleta, datos: req.body, reclamosPrevios: previos });
+  // RUT del emisor de la boleta (opcional): si viene, debe ser válido y se guarda normalizado.
+  const rutEmisor = String(req.body.boleta_emisor_rut || '').trim();
+  if (rutEmisor && !normalizarRut(rutEmisor)) throw falla(422, 'Revisa los datos del reclamo', { boleta_emisor_rut: 'RUT inválido' });
+  const descripcion = String(req.body.descripcion || '').trim();
+  if (descripcion.length > 1000) throw falla(422, 'Revisa los datos del reclamo', { descripcion: 'Máximo 1000 caracteres' });
 
   const reclamo = await transaccion(async (db) => {
     let adjuntoId = boletaExistente?.id;
@@ -132,8 +142,8 @@ reclamos.post('/envio/:id', requiereRol('admin', 'cliente'), subida.single('bole
       `INSERT INTO reclamo_seguro (numero, envio_id, motivo, descripcion, monto_reclamado, boleta_adjunto_id, boleta_numero,
          boleta_fecha, boleta_monto, boleta_emisor_rut, creado_por)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [numero, envio.id, b.motivo, b.descripcion || null, Number(b.monto_reclamado), adjuntoId, String(b.boleta_numero).trim(),
-        b.boleta_fecha, Number(b.boleta_monto), b.boleta_emisor_rut || null, req.usuario.id]);
+      [numero, envio.id, b.motivo, descripcion || null, Number(b.monto_reclamado), adjuntoId, String(b.boleta_numero).trim().slice(0, 40),
+        b.boleta_fecha, Number(b.boleta_monto), rutEmisor ? normalizarRut(rutEmisor) : null, req.usuario.id]);
     return r;
   });
   await auditar(req, 'crear', 'reclamo_seguro', reclamo.id, { envio_id: envio.id, monto: reclamo.monto_reclamado });
@@ -150,7 +160,7 @@ reclamos.get('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   if (req.usuario.rol === 'cliente') { params.push(req.usuario.id); cond.push(`e.cliente_id = $${params.length}`); }
   if (req.query.estado) { params.push(req.query.estado); cond.push(`r.estado = $${params.length}`); }
   const { rows } = await query(`${SELECT_RECLAMO} ${cond.length ? `WHERE ${cond.join(' AND ')}` : ''} ORDER BY r.creado_en DESC`, params);
-  res.json(rows.map((r) => ({ ...r, boleta_url: firmarEnlace(r.boleta_adjunto_id, req.usuario.id) })));
+  res.json(rows.map((r) => ({ ...r, boleta_url: r.boleta_adjunto_id ? firmarEnlace(r.boleta_adjunto_id, req.usuario.id) : null })));
 }));
 
 async function reclamoAccesible(req) {
@@ -162,7 +172,7 @@ async function reclamoAccesible(req) {
 
 reclamos.get('/:id', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const r = await reclamoAccesible(req);
-  res.json({ ...r, boleta_url: firmarEnlace(r.boleta_adjunto_id, req.usuario.id) });
+  res.json({ ...r, boleta_url: r.boleta_adjunto_id ? firmarEnlace(r.boleta_adjunto_id, req.usuario.id) : null });
 }));
 
 // Flujo: solicitado → en_revision → aprobado | rechazado → pagado (solo administración).
@@ -215,7 +225,7 @@ export const costos = Router();
 costos.use(autenticar, requiereRol('admin'));
 
 costos.get('/', ruta(async (req, res) => {
-  const { desde, hasta } = rango(req.query);
+  const { desde, hasta } = rangoFechas(req.query);
   const { rows } = await query('SELECT * FROM costo WHERE fecha BETWEEN $1 AND $2 ORDER BY fecha DESC, id DESC', [desde, hasta]);
   res.json(rows);
 }));
@@ -224,29 +234,28 @@ costos.post('/', ruta(async (req, res) => {
   const { tipo, monto, fecha, nota, envio_id: envioId } = req.body || {};
   if (!['bencina', 'comision', 'peaje', 'mantencion', 'otro'].includes(tipo)) throw falla(422, 'Tipo de costo inválido', { tipo: 'Inválido' });
   if (!Number.isInteger(Number(monto)) || Number(monto) <= 0 || Number(monto) > 100_000_000) throw falla(422, 'Monto inválido', { monto: 'Inválido' });
-  if (fecha && !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw falla(422, 'Fecha inválida', { fecha: 'Usa AAAA-MM-DD' });
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+  let valida = typeof fecha === 'string';
+  try { if (valida) fechaFiltro(fecha, 'fecha'); } catch { valida = false; }
+  if (fecha && !valida) throw falla(422, 'Fecha inválida', { fecha: 'Usa una fecha válida AAAA-MM-DD' });
+  // Un costo es un gasto que ya ocurrió: con fecha futura inflaría el mes siguiente sin que nadie lo note.
+  if (fecha && fecha > hoy) throw falla(422, 'La fecha del costo no puede ser futura', { fecha: 'No puede ser futura' });
+  if (nota && String(nota).length > 300) throw falla(422, 'La nota puede tener hasta 300 caracteres', { nota: 'Máximo 300 caracteres' });
   if (envioId && !(await uno('SELECT 1 FROM envio WHERE id = $1', [idNumerico(envioId, 'envio_id')]))) throw falla(422, 'El envío indicado no existe', { envio_id: 'Inexistente' });
   const c = await uno(
     `INSERT INTO costo (tipo, monto, fecha, nota, envio_id, creado_por)
      VALUES ($1, $2, COALESCE($3::date, (now() AT TIME ZONE 'America/Santiago')::date), $4, $5, $6) RETURNING *`,
-    [tipo, Number(monto), fecha || null, nota || null, envioId || null, req.usuario.id]);
+    [tipo, Number(monto), fecha || null, String(nota || '').trim() || null, envioId || null, req.usuario.id]);
   await auditar(req, 'crear', 'costo', c.id, { tipo, monto });
   res.status(201).json(c);
 }));
-
-function rango(q) {
-  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
-  const desde = /^\d{4}-\d{2}-\d{2}$/.test(q.desde || '') ? q.desde : `${hoy.slice(0, 8)}01`;
-  const hasta = /^\d{4}-\d{2}-\d{2}$/.test(q.hasta || '') ? q.hasta : hoy;
-  return { desde, hasta };
-}
 
 export const reportes = Router();
 reportes.use(autenticar, requiereRol('admin'));
 
 // Ganancia neta = tarifas de envíos ENTREGADOS en el período − costos del período (incluye seguros pagados).
 reportes.get('/ganancias', ruta(async (req, res) => {
-  const { desde, hasta } = rango(req.query);
+  const { desde, hasta } = rangoFechas(req.query);
   const tz = "AT TIME ZONE 'America/Santiago'";
   const p = [desde, hasta];
   const [tot, cobrado, proyectado, costosTot, porDia, porComuna, porRepartidor, porEstado, costosTipo] = await Promise.all([
@@ -262,10 +271,11 @@ reportes.get('/ganancias', ruta(async (req, res) => {
     query(`SELECT c.nombre AS comuna, count(*)::int AS envios, sum(e.tarifa_total)::int AS ingreso
            FROM envio e JOIN comuna c ON c.id = e.comuna_id
            WHERE e.estado = 'entregado' AND (e.entregado_en ${tz})::date BETWEEN $1 AND $2 GROUP BY c.nombre ORDER BY ingreso DESC LIMIT 10`, p),
-    query(`SELECT u.nombre AS repartidor, count(*) FILTER (WHERE e.estado = 'entregado')::int AS entregados,
+    // Se agrupa por persona (id), no por nombre: dos repartidores con el mismo nombre no se suman.
+    query(`SELECT u.id AS repartidor_id, u.nombre AS repartidor, count(*) FILTER (WHERE e.estado = 'entregado')::int AS entregados,
              sum(e.intentos)::int AS intentos_fallidos, COALESCE(sum(e.tarifa_total) FILTER (WHERE e.estado = 'entregado'), 0)::int AS ingreso
            FROM envio e JOIN usuario u ON u.id = e.repartidor_id
-           WHERE (e.creado_en ${tz})::date BETWEEN $1 AND $2 GROUP BY u.nombre ORDER BY entregados DESC`, p),
+           WHERE (e.creado_en ${tz})::date BETWEEN $1 AND $2 GROUP BY u.id, u.nombre ORDER BY entregados DESC`, p),
     query(`SELECT estado, count(*)::int AS n FROM envio WHERE (creado_en ${tz})::date BETWEEN $1 AND $2 GROUP BY estado`, p),
     query('SELECT tipo, sum(monto)::int AS total FROM costo WHERE fecha BETWEEN $1 AND $2 GROUP BY tipo ORDER BY total DESC', p),
   ]);

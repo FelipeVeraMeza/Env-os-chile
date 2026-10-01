@@ -22,9 +22,17 @@ function contar(clave) {
   const reg = fallidos.get(clave);
   return reg && ahora - reg.desde < VENTANA ? reg : null;
 }
+// Tope de memoria: alguien que prueba miles de correos inventados no puede hacer crecer el registro sin límite.
+const MAX_FALLIDOS = 20_000;
 function registrarFallo(clave) {
   const reg = contar(clave) || { n: 0, desde: Date.now() };
   reg.n += 1;
+  if (!fallidos.has(clave) && fallidos.size >= MAX_FALLIDOS) {
+    const ahora = Date.now();
+    for (const [k, r] of fallidos) if (ahora - r.desde >= VENTANA) fallidos.delete(k);
+    // Si sigue lleno, se descartan los más antiguos (las claves por IP siguen limitando a quien ataca).
+    for (const k of fallidos.keys()) { if (fallidos.size < MAX_FALLIDOS) break; fallidos.delete(k); }
+  }
   fallidos.set(clave, reg);
 }
 setInterval(() => { for (const [k, r] of fallidos) if (Date.now() - r.desde > VENTANA) fallidos.delete(k); }, VENTANA).unref();
@@ -194,14 +202,25 @@ usuarios.get('/repartidores', requiereRol('admin'), ruta(async (_req, res) => {
   res.json(rows);
 }));
 
+// Correo para guardar y comparar: siempre texto, sin espacios en los extremos y en minúsculas.
+const correoNormal = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
+
 function validarUsuario(b, nuevo) {
   const e = {};
-  if (nuevo || b.nombre !== undefined) if (!String(b.nombre || '').trim()) e.nombre = 'Obligatorio';
-  if (nuevo || b.correo !== undefined) if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.correo || '')) e.correo = 'Correo inválido';
+  if (nuevo || b.nombre !== undefined) {
+    const nombre = typeof b.nombre === 'string' ? b.nombre.trim() : '';
+    if (!nombre) e.nombre = 'Obligatorio';
+    else if (nombre.length > 120) e.nombre = 'Máximo 120 caracteres';
+  }
+  if (nuevo || b.correo !== undefined) {
+    const correo = correoNormal(b.correo);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo) || correo.length > 200) e.correo = 'Correo inválido';
+  }
   if (nuevo || b.rol !== undefined) if (!ROLES.includes(b.rol)) e.rol = 'Rol inválido';
   if (b.telefono && !normalizarTelefono(b.telefono)) e.telefono = 'Teléfono inválido';
   if (b.rut && !normalizarRut(b.rut)) e.rut = 'RUT inválido';
   if (b.password !== undefined && String(b.password).length < 8) e.password = 'Mínimo 8 caracteres';
+  if (b.activo !== undefined && typeof b.activo !== 'boolean') e.activo = 'Debe ser verdadero o falso';
   return e;
 }
 
@@ -210,14 +229,16 @@ usuarios.post('/', requiereRol('admin'), ruta(async (req, res) => {
   const errores = validarUsuario(b, true);
   if (config.authMode === 'jwt' && !b.password) errores.password = 'Obligatoria: sin contraseña no podrá iniciar sesión';
   exigirSinErrores(errores);
-  if (b.password) exigirClaveSegura(b.password, b);
-  const existe = await uno('SELECT id FROM usuario WHERE correo = $1', [b.correo.toLowerCase()]);
+  const correo = correoNormal(b.correo);
+  if (b.password) exigirClaveSegura(b.password, { ...b, correo });
+  // Se compara el mismo correo que se guardará (sin espacios y en minúsculas): " Ana@X.cl" es "ana@x.cl".
+  const existe = await uno('SELECT id FROM usuario WHERE correo = $1', [correo]);
   if (existe) throw falla(409, 'Ya existe un usuario con ese correo', { correo: 'Duplicado' });
-  const hash = b.password ? await bcrypt.hash(b.password, 10) : null;
+  const hash = b.password ? await bcrypt.hash(String(b.password), 10) : null;
   const u = await uno(
     `INSERT INTO usuario (nombre, correo, password_hash, rol, telefono, rut, debe_cambiar_clave) VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id, nombre, correo, rol, telefono, rut, activo, creado_en`,
-    [String(b.nombre).trim(), String(b.correo).toLowerCase().trim(), hash, b.rol, normalizarTelefono(b.telefono), normalizarRut(b.rut), Boolean(hash) && b.cambiar_al_entrar !== false],
+    [b.nombre.trim(), correo, hash, b.rol, normalizarTelefono(b.telefono), normalizarRut(b.rut), Boolean(hash) && b.cambiar_al_entrar !== false],
   );
   await auditar(req, 'crear', 'usuario', u.id, { rol: u.rol });
   await registrarEvento(req, 'usuario_creado', { nivel: u.rol === 'admin' ? 'alerta' : 'info', detalle: { usuario: u.id, correo: u.correo, rol: u.rol } });

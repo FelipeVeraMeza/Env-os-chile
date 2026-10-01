@@ -28,7 +28,7 @@ export const ESTADOS = {
 };
 export const badge = (estado, texto) => html`<span class="badge e-${estado}">${texto || ESTADOS[estado] || estado}</span>`;
 export const PAGO_TXT = { pendiente: 'Pago pendiente', en_revision: 'Pago en revisión', pagado: 'Pagado', reembolsado: 'Reembolsado' };
-export const badgePago = (e) => badge(e === 'pagado' ? 'pagado' : e === 'en_revision' ? 'en_revision' : 'pendiente', PAGO_TXT[e] || PAGO_TXT.pendiente);
+export const badgePago = (e) => badge(['pagado', 'en_revision', 'reembolsado'].includes(e) ? e : 'pendiente', PAGO_TXT[e] || PAGO_TXT.pendiente);
 
 export function toast(mensaje, tipo = '') {
   const t = document.createElement('div');
@@ -109,6 +109,8 @@ export async function comprimirFoto(file, lado = 1600, calidad = 0.8) {
   canvas.height = Math.round(bitmap.height * escala);
   canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', calidad));
+  // Algunos navegadores (memoria baja, imagen enorme) no generan el JPEG: se sube la foto original, nunca un archivo vacío.
+  if (!blob || !blob.size) return file;
   return new File([blob], (file.name || 'foto').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
 }
 

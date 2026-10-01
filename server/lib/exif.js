@@ -6,6 +6,8 @@ export function quitarExif(buffer) {
   let i = 2;
   while (i + 4 <= buffer.length) {
     if (buffer[i] !== 0xff) break;
+    // Bytes de relleno (0xFF repetidos) antes de un marcador: se saltan; si no, se leía mal el largo del segmento.
+    if (buffer[i + 1] === 0xff) { i += 1; continue; }
     const marcador = buffer[i + 1];
     if (marcador === 0xda) {
       // Inicio de datos de imagen: copiar el resto tal cual.
@@ -25,6 +27,7 @@ export function tieneExif(buffer) {
   if (!buffer || buffer[0] !== 0xff || buffer[1] !== 0xd8) return false;
   let i = 2;
   while (i + 4 <= buffer.length && buffer[i] === 0xff) {
+    if (buffer[i + 1] === 0xff) { i += 1; continue; }
     const marcador = buffer[i + 1];
     if (marcador === 0xda) return false;
     if (marcador === 0xe1) return true;
