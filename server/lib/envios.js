@@ -9,13 +9,15 @@ export const SELECT_ENVIO = `
     d.nombre AS destinatario_nombre, d.telefono AS destinatario_telefono, d.correo AS destinatario_correo,
     di.calle, di.numero, di.depto, di.referencia, di.lat, di.lon, di.alias AS direccion_alias,
     c.nombre AS comuna_nombre, c.region, c.provincia,
-    cli.nombre AS cliente_nombre, cli.telefono AS cliente_telefono, cli.rut AS cliente_rut, rep.nombre AS repartidor_nombre
+    cli.nombre AS cliente_nombre, cli.telefono AS cliente_telefono, cli.rut AS cliente_rut, rep.nombre AS repartidor_nombre,
+    rc.nombre AS retiro_comuna_nombre, rc.region AS retiro_region
   FROM envio e
   JOIN destinatario d ON d.id = e.destinatario_id
   JOIN direccion di ON di.id = e.direccion_id
   JOIN comuna c ON c.id = e.comuna_id
   JOIN usuario cli ON cli.id = e.cliente_id
-  LEFT JOIN usuario rep ON rep.id = e.repartidor_id`;
+  LEFT JOIN usuario rep ON rep.id = e.repartidor_id
+  LEFT JOIN comuna rc ON rc.id = e.retiro_comuna_id`;
 
 export async function cargarEnvio(id, db = { query }) {
   const { rows } = await db.query(`${SELECT_ENVIO} WHERE e.id = $1`, [id]);
@@ -41,6 +43,10 @@ export function presentar(envio, usuario) {
     ...envio,
     mapas: enlacesMapa({ calle: envio.calle, numero: envio.numero, comuna: envio.comuna_nombre, region: envio.region, lat: envio.lat, lon: envio.lon }),
     qr_url: envio.folio ? urlQr(envio) : null,
+    // Dónde retirar el paquete (dirección del remitente).
+    mapas_retiro: envio.retiro_calle
+      ? enlacesMapa({ calle: envio.retiro_calle, numero: envio.retiro_numero, comuna: envio.retiro_comuna_nombre, region: envio.retiro_region })
+      : null,
   };
   if (usuario?.rol === 'repartidor') return ocultarMontos(salida);
   return salida;
@@ -53,13 +59,20 @@ export async function detalleCompleto(envio, usuario) {
     query('SELECT id, tipo, nombre_original, mime, tamano, subido_en FROM adjunto WHERE envio_id = $1 ORDER BY id', [envio.id]),
     usuario.rol === 'repartidor' ? { rows: [] } : query('SELECT * FROM reclamo_seguro WHERE envio_id = $1 ORDER BY id DESC', [envio.id]),
     usuario.rol === 'repartidor' ? { rows: [] } : query(
-      `SELECT id, proveedor, medio, monto, estado, referencia, creado_en, comprobante_adjunto_id, motivo_rechazo, revisado_en, verificado_en
-       FROM pago WHERE envio_id = $1 ORDER BY id DESC`, [envio.id]),
+      `SELECT p.id, p.proveedor, p.medio, p.monto, p.estado, p.referencia, p.creado_en, p.comprobante_adjunto_id, p.motivo_rechazo, p.revisado_en,
+         p.verificado_en, p.lote, (SELECT array_agg(e2.folio ORDER BY e2.id) FROM pago p2 JOIN envio e2 ON e2.id = p2.envio_id WHERE p2.lote = p.lote) AS lote_folios
+       FROM pago p WHERE p.envio_id = $1 ORDER BY p.id DESC`, [envio.id]),
   ]);
   // El repartidor no ve montos: ni la boleta de compra ni el comprobante de pago.
   const visibles = usuario.rol === 'repartidor' ? adjuntos.rows.filter((a) => !['boleta', 'comprobante_pago'].includes(a.tipo)) : adjuntos.rows;
   const urls = new Map(visibles.map((a) => [a.id, firmarEnlace(a.id, usuario.id)]));
   const comprobantes = adjuntos.rows.filter((a) => a.tipo === 'comprobante_pago');
+  // Un comprobante del carrito queda guardado en el primer envío del lote: los demás también lo muestran.
+  const ajenos = pagos.rows.map((p) => p.comprobante_adjunto_id).filter((id) => id && !comprobantes.some((a) => a.id === id));
+  if (ajenos.length) {
+    const { rows } = await query("SELECT id, tipo, nombre_original, mime FROM adjunto WHERE id = ANY($1) AND tipo = 'comprobante_pago'", [ajenos]);
+    for (const a of rows) { comprobantes.push(a); urls.set(a.id, firmarEnlace(a.id, usuario.id)); }
+  }
   return {
     ...presentar(envio, usuario),
     historial: historial.rows,

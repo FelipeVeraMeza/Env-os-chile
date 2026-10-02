@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import { config } from '../config.js';
-import { ESTADOS } from './reglas.js';
+import { ESTADOS, textoPaquete } from './reglas.js';
 
 export function urlQr(envio) {
   return `${config.publicBaseUrl}/q/${envio.token_qr}`;
@@ -74,6 +74,10 @@ function dibujarEtiqueta(doc, { envio, conf, qr, bulto, termico, ancho, margen }
   doc.font('Helvetica').fontSize(9 * t);
   const contactoRemitente = [envio.cliente_telefono && `Tel. ${envio.cliente_telefono}`, envio.cliente_rut && `RUT ${envio.cliente_rut}`].filter(Boolean).join(' · ');
   if (contactoRemitente) doc.text(contactoRemitente, { width: util });
+  if (envio.retiro_calle) {
+    doc.text(`Retiro: ${envio.retiro_calle} ${envio.retiro_numero}${envio.retiro_depto ? `, ${envio.retiro_depto}` : ''} · ${envio.retiro_comuna_nombre || ''}`, { width: util });
+    if (envio.retiro_referencia) doc.text(`Ref.: ${envio.retiro_referencia}`, { width: util });
+  }
   linea();
 
   // Destinatario y dirección
@@ -95,7 +99,7 @@ function dibujarEtiqueta(doc, { envio, conf, qr, bulto, termico, ancho, margen }
 
   // Paquete (sin describir el producto: pedido del cliente 30-09)
   seccion('Paquete');
-  par('Bultos', `${envio.bultos} · ${Number(envio.peso_kg).toLocaleString('es-CL')} kg · ${envio.largo_cm}×${envio.ancho_cm}×${envio.alto_cm} cm`);
+  par('Bultos', textoPaquete(envio, conf.tarifas));
   // Sin montos en la etiqueta: el valor declarado solo lo ve administración (para el seguro) y un valor impreso
   // en el paquete invita al robo. Tampoco se imprime el link de pago.
   if (envio.valor_declarado) par('Seguro', 'Asegurado');

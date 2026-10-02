@@ -3,7 +3,7 @@ import { enviarForm, get, post, patch, api } from '../api.js';
 import {
   $, $$, abrirBlob, badgePago, clp, comprimirFoto, datosForm, errorToast, esqueleto, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio,
 } from '../ui.js';
-import { comunasCobertura, direccionTexto, itemEnvio, opcionesComunas } from './comun.js';
+import { comunasCobertura, direccionTexto, itemEnvio, mapaGoogle, opcionesComunas, textoPaquete, urlMapaGoogle } from './comun.js';
 import { pagar, subirComprobante } from './envios.js';
 
 // ================= Inicio del cliente =================
@@ -28,7 +28,8 @@ export async function inicio() {
       <div class="kpi"><div class="etiqueta">Entregados</div><div class="valor">${r.entregados}</div><div class="nota">con foto y GPS</div></div>
       <div class="kpi destacado"><div class="etiqueta">Total</div><div class="valor">${r.total}</div><div class="nota">envíos registrados</div></div>
     </div>
-    ${r.por_pagar ? html`<div class="aviso magenta" style="margin-bottom:16px"><b>Tienes ${r.por_pagar} envío(s) pendientes de pago.</b> El repartidor solo puede retirar envíos pagados.</div>` : ''}
+    ${r.por_pagar ? html`<div class="aviso magenta fila entre" style="margin-bottom:16px"><span><b>Tienes ${r.por_pagar} envío(s) pendientes de pago (${clp(r.monto_por_pagar)}).</b> El repartidor solo puede retirar envíos pagados.</span>
+      <a class="btn chico" href="#/carrito">Pagar todos con una transferencia</a></div>` : ''}
     ${r.en_revision ? html`<div class="aviso" style="margin-bottom:16px"><b>${r.en_revision} comprobante(s) de transferencia en revisión.</b> Te entregamos el ticket cuando administración apruebe el pago.</div>` : ''}
     <div class="card">
       <div class="card-titulo"><h2>Envíos recientes</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
@@ -36,8 +37,77 @@ export async function inicio() {
     </div>`);
 }
 
-// ================= Nuevo envío (asistente en 4 pasos) =================
-const PASOS = ['Destinatario', 'Destino', 'Paquete', 'Confirmar'];
+// ================= Carrito: varios envíos se pagan con UNA transferencia y un solo comprobante =================
+export async function carrito() {
+  const vista = $('#vista');
+  montar(vista, esqueleto(3));
+  const [pendientes, enRevision] = await Promise.all([
+    get('/api/envios?estado_pago=pendiente&estado=creado&limite=100'),
+    get('/api/envios?estado_pago=en_revision&limite=100'),
+  ]);
+  const items = pendientes.items;
+  const t = app.conf.transferencia || {};
+  montar(vista, html`
+    <div class="encabezado"><div><h1>Por pagar</h1><p>Marca los envíos que quieres pagar: haces <b>una sola transferencia</b> por el total y subes <b>un solo comprobante</b>.</p></div>
+      <a class="btn sec" href="#/nuevo">${icono('nuevo')} Agregar otro envío</a></div>
+    ${items.length ? html`
+      <form class="card" id="f-carrito" novalidate>
+        <div class="lista-envios">${items.map((e) => html`<label class="item-envio" style="cursor:pointer">
+          <div><div class="folio">${e.folio}</div><div class="dir">${e.destinatario_nombre} · ${direccionTexto(e)}</div><div class="sub">${textoPaquete(e)}</div></div>
+          <div class="der"><span class="monto">${clp(e.tarifa_total)}</span><input type="checkbox" name="envio" value="${e.id}" data-monto="${e.tarifa_total}" checked style="width:22px;min-height:22px"></div>
+        </label>`)}</div>
+        <div class="fila entre" style="margin:16px 0 8px"><span class="sub" id="cuenta-carrito"></span><div class="monto-grande" id="total-carrito"></div></div>
+        ${t.banco && t.numero_cuenta ? html`<div class="desglose" style="margin-bottom:12px">
+            <div><span>Banco</span><b>${t.banco}</b></div>
+            ${t.tipo_cuenta ? html`<div><span>Tipo de cuenta</span><b>${t.tipo_cuenta}</b></div>` : ''}
+            <div><span>N° de cuenta</span><b class="mono">${t.numero_cuenta}</b></div>
+            ${t.titular ? html`<div><span>Titular</span><b>${t.titular}</b></div>` : ''}
+            ${t.rut ? html`<div><span>RUT</span><b>${t.rut}</b></div>` : ''}
+            ${t.correo ? html`<div><span>Correo</span><b>${t.correo}</b></div>` : ''}
+          </div>` : html`<div class="aviso" style="margin-bottom:12px">Pide a la empresa los datos de la cuenta para transferir.</div>`}
+        <label class="campo">Comprobante de la transferencia * <small>(imagen o PDF)</small><input type="file" name="archivo" accept="image/*,application/pdf"></label>
+        <label class="campo" style="margin-top:10px">N° de operación <small>(opcional)</small><input name="referencia" maxlength="60" placeholder="Aparece en el comprobante"></label>
+        <button class="btn grande ancho" id="pagar-carrito" style="margin-top:14px">Enviar comprobante</button>
+        <p class="muted" style="margin-top:8px">Administración revisa el comprobante: al aprobarlo, todos los envíos marcados quedan pagados y listos para retirar.</p>
+      </form>` : html`<div class="card">${vacio('No tienes envíos pendientes de pago.', html`<a class="btn" href="#/nuevo">Crear un envío</a>`)}</div>`}
+    ${enRevision.items.length ? html`<div class="card"><h2>En revisión</h2><p class="sub">Ya enviaste el comprobante de estos envíos: administración lo está revisando.</p>
+      <div class="lista-envios">${enRevision.items.map((e) => itemEnvio(e))}</div></div>` : ''}`);
+
+  const f = $('#f-carrito');
+  if (!f) return;
+  const marcados = () => $$('input[name="envio"]:checked', f);
+  const actualizar = () => {
+    const sel = marcados();
+    $('#total-carrito').textContent = clp(sel.reduce((s, x) => s + Number(x.dataset.monto), 0));
+    $('#cuenta-carrito').textContent = `${sel.length} de ${items.length} envío(s) marcados · total a transferir`;
+    $('#pagar-carrito').disabled = !sel.length;
+  };
+  f.addEventListener('change', actualizar);
+  actualizar();
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const sel = marcados();
+    const archivo = f.archivo.files[0];
+    if (!sel.length) return toast('Marca al menos un envío', 'error');
+    if (!archivo) return marcarErrores(f, { archivo: 'Adjunta la imagen del comprobante' });
+    const btn = $('#pagar-carrito');
+    btn.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append('envio_ids', sel.map((x) => x.value).join(','));
+      fd.append('archivo', archivo.type.startsWith('image/') ? await comprimirFoto(archivo, 2000, 0.85) : archivo);
+      if (f.referencia.value.trim()) fd.append('referencia', f.referencia.value.trim());
+      await enviarForm('/api/envios/comprobante-lote', fd);
+      toast(`Comprobante enviado por ${sel.length} envío(s): queda pendiente de revisión`, 'ok');
+      carrito();
+    } catch (err) { marcarErrores(f, err.detalles); errorToast(err); btn.disabled = false; }
+  };
+}
+
+// ================= Nuevo envío (asistente en 5 pasos) =================
+// Pasos del asistente. Retiro (pedido 01-10): dónde el repartidor recoge el paquete.
+const PASOS = ['Retiro', 'Destinatario', 'Destino', 'Paquete', 'Confirmar'];
+const P = { retiro: 0, destinatario: 1, destino: 2, paquete: 3, resumen: 4 };
 
 export async function nuevo() {
   const vista = $('#vista');
@@ -47,25 +117,49 @@ export async function nuevo() {
   const w = {
     paso: 0, clienteId: esAdmin ? clientes[0]?.id : app.usuario.id, modoDest: 'libreta', destinatario: null, nuevoDest: {},
     tipo_destino: 'domicilio', direccionId: null, nuevaDir: {}, courier: {}, paquete: { bultos: 1 }, boleta: null, foto: null, cotizacion: null,
+    retiro: {}, guardarRetiro: true,
   };
   let libreta = [];
   const cargarLibreta = async () => {
     libreta = w.clienteId ? await get(`/api/destinatarios${esAdmin ? `?cliente_id=${w.clienteId}` : ''}`) : [];
     if (!libreta.length) w.modoDest = 'nuevo';
   };
-  await cargarLibreta();
+  // La dirección de retiro guardada del cliente (la última que usó) viene lista.
+  const cargarRetiro = async () => {
+    const r = w.clienteId ? await get(`/api/envios/retiro-guardado${esAdmin ? `?cliente_id=${w.clienteId}` : ''}`).catch(() => null) : null;
+    w.retiro = r ? { calle: r.calle, numero: r.numero, depto: r.depto || '', referencia: r.referencia || '', comuna_id: r.comuna_id } : {};
+  };
+  await Promise.all([cargarLibreta(), cargarRetiro()]);
+  const nombreComuna = (id) => comunas.find((x) => String(x.id) === String(id))?.nombre || '';
 
   const cuerpo = () => {
-    if (w.paso === 0) return pasoDestinatario();
-    if (w.paso === 1) return pasoDestino();
-    if (w.paso === 2) return pasoPaquete();
+    if (w.paso === P.retiro) return pasoRetiro();
+    if (w.paso === P.destinatario) return pasoDestinatario();
+    if (w.paso === P.destino) return pasoDestino();
+    if (w.paso === P.paquete) return pasoPaquete();
     return pasoResumen();
   };
 
-  function pasoDestinatario() {
+  // Paso 1: dónde retiramos el paquete (dirección del remitente). Queda guardada para el próximo envío.
+  function pasoRetiro() {
+    const r = w.retiro;
     return html`
       ${esAdmin ? html`<label class="campo" style="margin-bottom:16px">Cliente dueño del envío
         <select name="cliente_id" id="sel-cliente">${clientes.map((c) => html`<option value="${c.id}" ${c.id === w.clienteId ? html`selected` : ''}>${c.nombre}</option>`)}</select></label>` : ''}
+      <p class="sub" style="margin-bottom:12px">¿Dónde pasamos a <b>retirar</b> el paquete? El repartidor irá a esta dirección.</p>
+      <div class="grid g2">
+        <label class="campo">Calle *<input name="calle" value="${r.calle || ''}" autocomplete="address-line1" data-mapa="mapa-retiro"></label>
+        <div class="grid g2"><label class="campo">Número *<input name="numero" value="${r.numero || ''}" inputmode="numeric" data-mapa="mapa-retiro"></label>
+          <label class="campo">Depto / oficina<input name="depto" value="${r.depto || ''}"></label></div>
+        <label class="campo">Comuna *<select name="comuna_id" data-mapa="mapa-retiro">${opcionesComunas(comunas, r.comuna_id)}</select></label>
+        <label class="campo">Referencia<input name="referencia" value="${r.referencia || ''}" placeholder="Local 3, tocar timbre, horario de retiro…"></label>
+      </div>
+      <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="guardar_retiro" ${w.guardarRetiro ? html`checked` : ''}> Recordar esta dirección para mis próximos envíos</label>
+      ${mapaGoogle('mapa-retiro', urlMapaGoogle(r.calle, r.numero, nombreComuna(r.comuna_id)))}`;
+  }
+
+  function pasoDestinatario() {
+    return html`
       <div class="segmentos" style="margin-bottom:16px">
         <button type="button" data-modo="libreta" class="${w.modoDest === 'libreta' ? 'activo' : ''}" ${libreta.length ? '' : html`disabled`}>De mi libreta (${libreta.length})</button>
         <button type="button" data-modo="nuevo" class="${w.modoDest === 'nuevo' ? 'activo' : ''}">Nuevo destinatario</button>
@@ -111,32 +205,37 @@ export async function nuevo() {
         <label class="item-envio" style="cursor:pointer"><div><div class="folio">+ Nueva dirección</div><div class="dir">¿Se cambió de casa? Agrega la nueva dirección</div></div>
           <input type="radio" name="dir" value="nueva" ${w.direccionId === 'nueva' ? html`checked` : ''} style="width:22px;min-height:22px"></label></div>` : ''}
       ${nueva ? html`<div class="grid g2">
-        <label class="campo">Calle *<input name="calle" value="${w.nuevaDir.calle || ''}" autocomplete="address-line1"></label>
-        <div class="grid g2"><label class="campo">Número *<input name="numero" value="${w.nuevaDir.numero || ''}" inputmode="numeric"></label>
+        <label class="campo">Calle *<input name="calle" value="${w.nuevaDir.calle || ''}" autocomplete="address-line1" data-mapa="mapa-destino"></label>
+        <div class="grid g2"><label class="campo">Número *<input name="numero" value="${w.nuevaDir.numero || ''}" inputmode="numeric" data-mapa="mapa-destino"></label>
           <label class="campo">Depto / casa<input name="depto" value="${w.nuevaDir.depto || ''}"></label></div>
-        <label class="campo">Comuna *<select name="comuna_id">${opcionesComunas(comunas, w.nuevaDir.comuna_id)}</select><small>Solo comunas dentro de la cobertura</small></label>
+        <label class="campo">Comuna *<select name="comuna_id" data-mapa="mapa-destino">${opcionesComunas(comunas, w.nuevaDir.comuna_id)}</select><small>Solo comunas dentro de la cobertura</small></label>
         <label class="campo">Nombre de la dirección <small>(opcional)</small><input name="alias" value="${w.nuevaDir.alias || ''}" placeholder="Casa, oficina…"></label>
         <label class="campo" style="grid-column:1/-1">Referencia<input name="referencia" value="${w.nuevaDir.referencia || ''}" placeholder="Portón verde, conserje recibe hasta las 20:00"></label>
-      </div>` : ''}`;
+      </div>${mapaGoogle('mapa-destino', urlMapaGoogle(w.nuevaDir.calle, w.nuevaDir.numero, nombreComuna(w.nuevaDir.comuna_id)))}`
+      : (() => { const d = dirs.find((x) => String(x.id) === String(w.direccionId)); return d ? mapaGoogle('mapa-destino', urlMapaGoogle(d.calle, d.numero, d.comuna_nombre)) : ''; })()}`;
   }
 
   function pasoPaquete() {
     const p = w.paquete;
     const t = app.conf.tarifas;
     return html`
+      <h3 style="margin-top:0">¿De qué tamaño es cada bulto? *</h3>
+      <div class="grid g2" style="margin-bottom:8px">
+        <label class="item-envio" style="cursor:pointer;align-items:flex-start"><div>
+          <div class="folio">Estándar · ${clp(t.base)}</div>
+          <div class="dir">Más pequeño que ${t.dim_estandar_cm}×${t.dim_estandar_cm}×${t.dim_estandar_cm} cm y hasta ${t.peso_estandar_kg} kg</div></div>
+          <input type="radio" name="tamano" value="estandar" ${p.tamano === 'estandar' ? html`checked` : ''} style="width:22px;min-height:22px"></label>
+        <label class="item-envio" style="cursor:pointer;align-items:flex-start"><div>
+          <div class="folio">Sobredimensionado · ${clp(t.base + t.recargo_sobredimension)}</div>
+          <div class="dir">Más grande que el estándar, hasta ${t.dim_max_cm}×${t.dim_max_cm}×${t.dim_max_cm} cm y ${t.peso_max_kg} kg</div></div>
+          <input type="radio" name="tamano" value="sobredimensionado" ${p.tamano === 'sobredimensionado' ? html`checked` : ''} style="width:22px;min-height:22px"></label>
+      </div>
+      <p class="muted" style="margin-bottom:16px">Paquetes de más de ${t.dim_max_cm}×${t.dim_max_cm}×${t.dim_max_cm} cm o ${t.peso_max_kg} kg no se reciben.</p>
       <div class="grid g2">
-        <label class="campo" style="grid-column:1/-1">Descripción del producto *<input name="descripcion_producto" value="${p.descripcion_producto || ''}" placeholder="Ej. Zapatillas talla 42"></label>
         <label class="campo">Bultos *<input name="bultos" type="number" step="1" inputmode="numeric" min="1" max="100" value="${p.bultos || 1}">
           <small>La cantidad de bultos no cambia el precio</small></label>
-        <label class="campo">Peso por bulto (kg) *<input name="peso_kg" type="number" inputmode="decimal" step="0.1" min="0" max="${t.peso_max_kg}" value="${p.peso_kg || ''}"><small>Máximo ${t.peso_max_kg} kg</small></label>
+        <label class="campo">¿Qué envías? <small>(opcional)</small><input name="descripcion_producto" value="${p.descripcion_producto || ''}" placeholder="Ej. Zapatillas, documentos"></label>
       </div>
-      <div class="grid g3" style="margin-top:14px">
-        <label class="campo">Largo (cm) *<input name="largo_cm" type="number" step="1" inputmode="numeric" min="1" max="${t.dim_max_cm}" value="${p.largo_cm || ''}"></label>
-        <label class="campo">Ancho (cm) *<input name="ancho_cm" type="number" step="1" inputmode="numeric" min="1" max="${t.dim_max_cm}" value="${p.ancho_cm || ''}"></label>
-        <label class="campo">Alto (cm) *<input name="alto_cm" type="number" step="1" inputmode="numeric" min="1" max="${t.dim_max_cm}" value="${p.alto_cm || ''}"></label>
-      </div>
-      <p class="muted" style="margin:6px 0 16px">Estándar hasta ${t.peso_estandar_kg} kg y ${t.dim_estandar_cm}×${t.dim_estandar_cm}×${t.dim_estandar_cm} cm por bulto: ${clp(t.base)}.
-        Sobredimensionado hasta ${t.peso_max_kg} kg y ${t.dim_max_cm}×${t.dim_max_cm}×${t.dim_max_cm} cm: +${clp(t.recargo_sobredimension)}. Sobre eso no se recibe el paquete.</p>
       <div class="card" style="box-shadow:none;background:rgba(224,33,138,.08);border-color:rgba(224,33,138,.35)">
         <h3>Seguro del envío</h3>
         <div class="grid g2">
@@ -166,7 +265,8 @@ export async function nuevo() {
         <div><div class="muted">Destinatario</div><b>${d?.nombre}</b> · ${d?.telefono}</div>
         <div><div class="muted">${w.tipo_destino === 'punto_courier' ? `Punto ${w.courier.courier_empresa}` : 'Dirección'}</div>
           ${w.tipo_destino === 'punto_courier' ? html`<b>${w.courier.courier_punto}</b><br>` : ''}${dir.calle} ${dir.numero}${dir.depto ? ', ' + dir.depto : ''} · <b>${dir.comuna_nombre}</b></div>
-        <div><div class="muted">Paquete</div>${p.descripcion_producto} · ${p.bultos} bulto(s) · ${p.peso_kg} kg · ${p.largo_cm}×${p.ancho_cm}×${p.alto_cm} cm</div>
+        <div><div class="muted">Retiro</div>${w.retiro.calle} ${w.retiro.numero}${w.retiro.depto ? ', ' + w.retiro.depto : ''} · <b>${nombreComuna(w.retiro.comuna_id)}</b></div>
+        <div><div class="muted">Paquete</div>${p.descripcion_producto ? `${p.descripcion_producto} · ` : ''}${textoPaquete({ ...p, bultos: p.bultos || 1 })}</div>
         <div><div class="muted">Seguro</div>${Number(p.valor_declarado) > 0 ? html`Valor declarado ${clp(p.valor_declarado)} · ${w.boleta ? html`boleta adjunta ✔` : html`<span style="color:var(--alerta)">sin boleta (la necesitarás para cobrar el seguro)</span>`}` : 'Sin valor declarado'}</div>
         ${p.horario_especial ? html`<div><div class="muted">Horario especial</div>${p.franja_horaria}</div>` : ''}
       </div>
@@ -185,14 +285,14 @@ export async function nuevo() {
 
   const pintar = () => {
     montar(vista, html`
-      <div class="encabezado"><div><h1>Nuevo envío</h1><p>Paso ${w.paso + 1} de 4 · ${PASOS[w.paso]}</p></div></div>
+      <div class="encabezado"><div><h1>Nuevo envío</h1><p>Paso ${w.paso + 1} de ${PASOS.length} · ${PASOS[w.paso]}</p></div></div>
       <div class="pasos">${PASOS.map((p, i) => html`<div class="paso ${i < w.paso ? 'hecho' : i === w.paso ? 'actual' : ''}">${p}</div>`)}</div>
       <form class="card" id="form-envio" novalidate>
         ${cuerpo()}
         <div class="fila entre acciones-fijas" style="margin-top:22px">
           <button type="button" class="btn sec" id="atras" ${w.paso === 0 ? html`disabled` : ''}>Atrás</button>
-          <div class="fila">${w.cotizacion && w.paso === 2 ? html`<span class="sub">Tarifa: <b>${clp(w.cotizacion.tarifa_total)}</b></span>` : ''}
-          <button type="submit" class="btn grande" id="siguiente">${w.paso === 3 ? 'Confirmar envío' : 'Continuar'}</button></div>
+          <div class="fila">${w.cotizacion && w.paso === P.paquete ? html`<span class="sub">Tarifa: <b>${clp(w.cotizacion.tarifa_total)}</b></span>` : ''}
+          <button type="submit" class="btn grande" id="siguiente">${w.paso === P.resumen ? 'Confirmar envío' : 'Continuar'}</button></div>
         </div>
       </form>`);
     enlazar();
@@ -202,8 +302,11 @@ export async function nuevo() {
 
   function guardarPaso() {
     const d = datosForm(form());
-    if (w.paso === 0) {
+    if (w.paso === P.retiro) {
       if (esAdmin && d.cliente_id) w.clienteId = Number(d.cliente_id);
+      w.retiro = { calle: d.calle, numero: d.numero, depto: d.depto, referencia: d.referencia, comuna_id: d.comuna_id };
+      w.guardarRetiro = Boolean(d.guardar_retiro);
+    } else if (w.paso === P.destinatario) {
       if (w.modoDest === 'nuevo') w.nuevoDest = { nombre: d.nombre, telefono: d.telefono, correo: d.correo, rut: d.rut };
       else {
         const elegido = libreta.find((x) => String(x.id) === d.dest) || null;
@@ -211,11 +314,11 @@ export async function nuevo() {
         if (elegido?.id !== w.destinatario?.id) w.direccionId = elegido?.direcciones[0]?.id ?? null;
         w.destinatario = elegido;
       }
-    } else if (w.paso === 1) {
+    } else if (w.paso === P.destino) {
       if (d.dir) w.direccionId = d.dir === 'nueva' ? 'nueva' : Number(d.dir);
       if ('calle' in d) w.nuevaDir = { calle: d.calle, numero: d.numero, depto: d.depto, comuna_id: d.comuna_id, alias: d.alias, referencia: d.referencia };
       if (w.tipo_destino === 'punto_courier') w.courier = { courier_empresa: d.courier_empresa, courier_punto: d.courier_punto, courier_codigo: d.courier_codigo };
-    } else if (w.paso === 2) {
+    } else if (w.paso === P.paquete) {
       w.paquete = { ...w.paquete, ...d };
     }
   }
@@ -223,6 +326,8 @@ export async function nuevo() {
   function payload() {
     const b = { tipo_destino: w.tipo_destino, ...(w.tipo_destino === 'punto_courier' ? w.courier : {}), ...w.paquete, cliente_id: w.clienteId };
     b.horario_especial = Boolean(w.paquete.horario_especial);
+    b.retiro = w.retiro;
+    b.guardar_retiro = w.guardarRetiro;
     if (w.modoDest === 'libreta' && w.destinatario) b.destinatario_id = w.destinatario.id;
     else b.destinatario = w.nuevoDest;
     const usaNueva = !(w.modoDest === 'libreta' && w.destinatario?.direcciones.length) || w.direccionId === 'nueva';
@@ -233,14 +338,19 @@ export async function nuevo() {
 
   function validarLocal() {
     const e = {};
-    if (w.paso === 0) {
+    if (w.paso === P.retiro) {
+      if (!w.retiro.calle?.trim()) e.calle = 'Obligatorio';
+      if (!String(w.retiro.numero || '').trim()) e.numero = 'Obligatorio';
+      if (!w.retiro.comuna_id) e.comuna_id = 'Selecciona la comuna';
+    }
+    if (w.paso === P.destinatario) {
       if (w.modoDest === 'libreta' && !w.destinatario) { toast('Selecciona un destinatario de tu libreta', 'error'); return false; }
       if (w.modoDest === 'nuevo') {
         if (!w.nuevoDest.nombre?.trim()) e.nombre = 'Nombre obligatorio';
         if (!/^(\+?56)?\s*9?\s*\d{4}\s*\d{4}$/.test((w.nuevoDest.telefono || '').replace(/\s+/g, ' ').trim())) e.telefono = 'Formato +56 9 XXXX XXXX';
       }
     }
-    if (w.paso === 1) {
+    if (w.paso === P.destino) {
       const usaNueva = !(w.modoDest === 'libreta' && w.destinatario?.direcciones.length) || w.direccionId === 'nueva';
       if (!usaNueva && !w.direccionId) { toast('Elige una dirección', 'error'); return false; }
       if (usaNueva) {
@@ -250,6 +360,7 @@ export async function nuevo() {
       }
       if (w.tipo_destino === 'punto_courier' && !w.courier.courier_punto?.trim()) e.courier_punto = 'Indica el punto';
     }
+    if (w.paso === P.paquete && !w.paquete.tamano) { toast('Marca si tu paquete es estándar o sobredimensionado', 'error'); return false; }
     return !marcarErrores(form(), e);
   }
 
@@ -264,7 +375,19 @@ export async function nuevo() {
     const f = form();
     $$('[data-modo]', f).forEach((b) => { b.onclick = () => { guardarPaso(); w.modoDest = b.dataset.modo; pintar(); }; });
     $$('[data-tipo]', f).forEach((b) => { b.onclick = () => { guardarPaso(); w.tipo_destino = b.dataset.tipo; pintar(); }; });
-    $('#sel-cliente', f)?.addEventListener('change', async (ev) => { w.clienteId = Number(ev.target.value); w.destinatario = null; w.modoDest = 'libreta'; await cargarLibreta(); pintar(); });
+    $('#sel-cliente', f)?.addEventListener('change', async (ev) => { w.clienteId = Number(ev.target.value); w.destinatario = null; w.modoDest = 'libreta'; await Promise.all([cargarLibreta(), cargarRetiro()]); pintar(); });
+    // El mapa de Google se actualiza solo mientras se escribe la dirección (para corroborarla).
+    $$('[data-mapa]', f).forEach((el) => {
+      el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
+        clearTimeout(w.tm);
+        w.tm = setTimeout(() => {
+          const mapa = $(`#${el.dataset.mapa}`);
+          if (!mapa) return;
+          const url = urlMapaGoogle(f.calle?.value, f.numero?.value, nombreComuna(f.comuna_id?.value));
+          if (url && mapa.src !== url) mapa.src = url;
+        }, 800);
+      });
+    });
     $('#buscar-dest', f)?.addEventListener('input', (ev) => {
       const q = ev.target.value.toLowerCase();
       $$('#lista-dest [data-nombre]', f).forEach((el) => { el.style.display = el.dataset.nombre.includes(q) ? '' : 'none'; });
@@ -273,7 +396,7 @@ export async function nuevo() {
     $('input[name="horario_especial"]', f)?.addEventListener('change', () => { guardarPaso(); pintar(); cotizarAhora().then(pintarTarifa).catch(() => {}); });
     $('input[name="boleta"]', f)?.addEventListener('change', (ev) => { w.boleta = ev.target.files[0] || null; });
     $('input[name="foto"]', f)?.addEventListener('change', (ev) => { w.foto = ev.target.files[0] || null; });
-    if (w.paso === 2) {
+    if (w.paso === P.paquete) {
       // Si el formulario ya no está en pantalla (se confirmó o se cambió de paso antes de los 400 ms), no se hace nada.
       f.addEventListener('input', () => { clearTimeout(w.t); w.t = setTimeout(() => { if (form() !== f) return; guardarPaso(); cotizarAhora().then(pintarTarifa).catch(() => {}); }, 400); });
     }
@@ -286,11 +409,11 @@ export async function nuevo() {
       const btn = $('#siguiente', f);
       btn.disabled = true;
       try {
-        if (w.paso === 2) {
+        if (w.paso === P.paquete) {
           const c = await cotizarAhora();
           if (Object.keys(c.errores).length) { marcarErrores(f, c.errores); toast(Object.values(c.errores)[0], 'error'); return; }
         }
-        if (w.paso < 3) { w.paso += 1; pintar(); return; }
+        if (w.paso < P.resumen) { w.paso += 1; pintar(); return; }
         await crear();
       } catch (err) {
         errorToast(err);
@@ -308,7 +431,7 @@ export async function nuevo() {
     const claves = Object.keys(detalles);
     if (!claves.length) return;
     const k = claves[0];
-    w.paso = k.startsWith('destinatario') ? 0 : /^(direccion|tipo_destino|courier|comuna)/.test(k) ? 1 : 2;
+    w.paso = k.startsWith('retiro') ? P.retiro : k.startsWith('destinatario') ? P.destinatario : /^(direccion|tipo_destino|courier|comuna)/.test(k) ? P.destino : P.paquete;
     pintar();
     const limpio = Object.fromEntries(Object.entries(detalles).map(([c, v]) => [c.split('.').pop(), v]));
     marcarErrores(form(), limpio);
@@ -346,6 +469,7 @@ export async function nuevo() {
           ${esAdmin ? html`<div class="grid g2"><button class="btn sec" id="t80">Ticket 80 mm</button><button class="btn sec" id="ta4">Ticket A4</button></div>` : ''}
           <a class="btn sec" href="${wa}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
           <div class="fila"><a class="btn azul" href="#/envio/${envio.id}">Ver detalle</a><a class="btn sec" href="#/nuevo" id="otro">Crear otro envío</a></div>
+          <a class="btn sec" href="#/carrito">Pagar varios envíos juntos (carrito)</a>
         </div>
       </div>`);
     api(`/api/envios/${envio.id}/qr.png`, { blob: true }).then((b) => mostrarBlob($('#qr'), b)).catch(() => {});

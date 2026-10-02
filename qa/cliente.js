@@ -64,6 +64,7 @@ export function datosEnvio(comunaId, extra = {}) {
   return {
     destinatario: { nombre: 'Destinatario QA', telefono: '+56 9 8765 4321' },
     direccion: { calle: 'Av. Providencia', numero: '1234', depto: 'Of. 5', referencia: 'Conserje recibe', comuna_id: comunaId },
+    retiro: { calle: 'Los Leones', numero: '500', depto: 'Local 2', referencia: 'Tienda QA', comuna_id: comunaId },
     descripcion_producto: 'Zapatillas talla 42',
     bultos: 1, peso_kg: 2.5, largo_cm: 35, ancho_cm: 25, alto_cm: 15,
     valor_declarado: 50000,

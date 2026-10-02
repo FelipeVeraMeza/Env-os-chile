@@ -63,7 +63,7 @@ export const CONFIG_POR_DEFECTO = {
   operacion: {
     intentos_max: 3,
     espera_max_min: 5,
-    gps_obligatorio: true,
+    gps_obligatorio: false, // Opcional (pedido 01-10): sin señal el repartidor igual cierra la entrega con la foto
     registro_clientes: true, // RF-56: los clientes crean su cuenta solos (pedido del cliente 30-09; se puede cerrar en Tarifas y reglas)
     qr_destino: 'google', // google (abre el mapa con la dirección, pedido del cliente 26-09) | pagina | waze
     // Los repartidores ven los envíos pagados sin asignar y pueden tomarlos ellos mismos (DEC-15).
@@ -174,10 +174,17 @@ const excede = (v, max) => v !== undefined && v !== null && String(v).trim().len
 // Límites absolutos (también para cotización especial): evitan valores que no caben en la base.
 export const LIMITES = { bultos: 100, peso_kg: 1000, dim_cm: 500, valor_declarado: 50_000_000, monto: 100_000_000 };
 
+// Tamaño que declara el cliente (pedido 01-10): solo marca una de las dos opciones, sin pesar ni medir.
+export const TAMANOS = { estandar: 'Estándar', sobredimensionado: 'Sobredimensionado' };
+
 // Valida el paquete contra el máximo que se recibe (20 kg y 60×60×60 cm por bulto). Sobre eso no se toma el despacho.
+// Con tamaño declarado, el peso y las medidas son opcionales (si vienen, se validan igual).
 export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
   const errores = {};
-  if (!p.descripcion_producto || !String(p.descripcion_producto).trim()) {
+  const conTamano = p.tamano !== undefined && p.tamano !== null && p.tamano !== '';
+  if (conTamano && !TAMANOS[p.tamano]) errores.tamano = 'Elige estándar o sobredimensionado';
+  const vacio = (v) => v === undefined || v === null || v === '' || (typeof v === 'number' && Number.isNaN(v));
+  if (!conTamano && (!p.descripcion_producto || !String(p.descripcion_producto).trim())) {
     errores.descripcion_producto = 'Describe el producto';
   } else if (excede(p.descripcion_producto, LARGOS.descripcion_producto)) errores.descripcion_producto = `Máximo ${LARGOS.descripcion_producto} caracteres`;
   if (excede(p.observaciones, LARGOS.observaciones)) errores.observaciones = `Máximo ${LARGOS.observaciones} caracteres`;
@@ -186,12 +193,14 @@ export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
   else if (bultos > LIMITES.bultos) errores.bultos = `Fuera de rango: hasta ${LIMITES.bultos} bultos por envío`;
 
   const peso = entero(p.peso_kg);
-  if (peso === null || Number.isNaN(peso) || peso <= 0) errores.peso_kg = 'Indica el peso por bulto (kg)';
+  if (conTamano && vacio(p.peso_kg)) { /* opcional con tamaño declarado */ }
+  else if (peso === null || Number.isNaN(peso) || peso <= 0) errores.peso_kg = 'Indica el peso por bulto (kg)';
   else if (peso > LIMITES.peso_kg) errores.peso_kg = `Fuera de rango: hasta ${LIMITES.peso_kg} kg`;
   else if (peso > tarifas.peso_max_kg) errores.peso_kg = `No se reciben bultos de más de ${tarifas.peso_max_kg} kg`;
 
   for (const dim of ['largo_cm', 'ancho_cm', 'alto_cm']) {
     const v = entero(p[dim]);
+    if (conTamano && vacio(p[dim])) continue;
     if (v === null || Number.isNaN(v) || v <= 0) errores[dim] = 'Obligatorio';
     else if (!Number.isInteger(v)) errores[dim] = 'Usa centímetros enteros';
     else if (v > LIMITES.dim_cm) errores[dim] = `Fuera de rango: hasta ${LIMITES.dim_cm} cm`;
@@ -224,6 +233,20 @@ export function validarDireccion(d) {
     if (!errores[k] && excede(d?.[k], LARGOS[k])) errores[k] = `Máximo ${LARGOS[k]} caracteres`;
   }
   return errores;
+}
+
+// Dirección de retiro (dónde el repartidor recoge el paquete): mismas reglas que una dirección de entrega.
+export function validarRetiro(r) {
+  const { alias, ...errores } = validarDireccion(r);
+  return errores;
+}
+
+// Texto del tamaño o de las medidas de un envío (para la etiqueta y las pantallas).
+export function textoPaquete(e, tarifas = CONFIG_POR_DEFECTO.tarifas) {
+  const bultos = `${e.bultos} ${Number(e.bultos) === 1 ? 'bulto' : 'bultos'}`;
+  if (e.tamano === 'estandar') return `${bultos} · Estándar (hasta ${tarifas.dim_estandar_cm}×${tarifas.dim_estandar_cm}×${tarifas.dim_estandar_cm} cm y ${tarifas.peso_estandar_kg} kg)`;
+  if (e.tamano === 'sobredimensionado') return `${bultos} · Sobredimensionado (hasta ${tarifas.dim_max_cm}×${tarifas.dim_max_cm}×${tarifas.dim_max_cm} cm y ${tarifas.peso_max_kg} kg)`;
+  return `${bultos} · ${Number(e.peso_kg).toLocaleString('es-CL')} kg · ${e.largo_cm}×${e.ancho_cm}×${e.alto_cm} cm`;
 }
 
 // Compara franjas sin importar espacios ni el tipo de guion ("19:00 - 21:00" = "19:00 – 21:00").
@@ -261,7 +284,8 @@ export function validarDestino(e, listas = CONFIG_POR_DEFECTO.listas, puntoCouri
 // ---------- Tarifa ----------
 
 // Sobredimensionado: algún bulto pasa de 10 kg o de 40 cm por lado (sin superar el máximo que se recibe).
-export function esSobredimensionado({ peso_kg, largo_cm, ancho_cm, alto_cm }, tarifas = CONFIG_POR_DEFECTO.tarifas) {
+export function esSobredimensionado({ tamano, peso_kg, largo_cm, ancho_cm, alto_cm }, tarifas = CONFIG_POR_DEFECTO.tarifas) {
+  if (TAMANOS[tamano]) return tamano === 'sobredimensionado';
   return Number(peso_kg) > tarifas.peso_estandar_kg || [largo_cm, ancho_cm, alto_cm].some((d) => Number(d) > tarifas.dim_estandar_cm);
 }
 

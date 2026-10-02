@@ -119,23 +119,46 @@ export const PAGO_EN_LINEA_APAGADO = 'El pago se hace por transferencia: transfi
 export const COMPROBANTE_EN_REVISION = 'Hay un comprobante de transferencia en revisión: espera a que administración lo apruebe o lo rechace';
 
 export async function registrarComprobante(envio, archivo, { referencia, usuarioId }) {
+  const { pagos: [p], comprobante_adjunto_id: adjunto } = await registrarComprobanteLote([envio], archivo, { referencia, usuarioId });
+  return { ...p, comprobante_adjunto_id: adjunto };
+}
+
+// Carrito (pedido 01-10): un solo comprobante paga varios envíos. Se crea un pago por envío, todos con el mismo
+// comprobante y el mismo "lote", y administración los aprueba o rechaza juntos.
+export async function registrarComprobanteLote(envios, archivo, { referencia, usuarioId }) {
   return transaccion(async (db) => {
-    // Se bloquea el envío: dos subidas simultáneas no dejan dos comprobantes en revisión.
-    const { rows: [vigente] } = await db.query(
-      `SELECT id FROM envio WHERE id = $1 AND estado_pago = 'pendiente' AND estado NOT IN ('borrador', 'anulado') FOR UPDATE`, [envio.id]);
-    if (!vigente) throw falla(409, 'El pago de este envío ya no está pendiente. Recarga para ver su estado actual.');
+    // Se bloquean los envíos (en orden, para no trabarse con otra subida simultánea): ninguno queda con dos comprobantes.
+    const ids = envios.map((e) => e.id).sort((a, b) => a - b);
+    const { rows: vigentes } = await db.query(
+      `SELECT id, folio FROM envio WHERE id = ANY($1) AND estado_pago = 'pendiente' AND estado NOT IN ('borrador', 'anulado') ORDER BY id FOR UPDATE`, [ids]);
+    if (vigentes.length !== ids.length) {
+      throw falla(409, 'Algún envío ya no está pendiente de pago. Recarga para ver su estado actual.', { envios_no_pendientes: ids.filter((id) => !vigentes.some((v) => v.id === id)) });
+    }
     const { rows: [adj] } = await db.query(
       `INSERT INTO adjunto (envio_id, tipo, nombre_original, mime, tamano, ruta, sha256, subido_por)
        VALUES ($1, 'comprobante_pago', $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [envio.id, archivo.nombre, archivo.mime, archivo.tamano, archivo.ruta, archivo.sha256, usuarioId]);
-    const { rows: [p] } = await db.query(
-      `INSERT INTO pago (envio_id, proveedor, medio, monto, estado, token, referencia, comprobante_adjunto_id, comision_estimada, neto_estimado, creado_por)
-       VALUES ($1, 'transferencia', 'transferencia', $2, 'en_revision', $3, $4, $5, 0, $2, $6) RETURNING id, monto, estado, referencia, creado_en`,
-      [envio.id, envio.tarifa_total, crypto.randomBytes(18).toString('base64url'), referencia, adj.id, usuarioId]);
-    await registrarEventoPago(db, { pagoId: p.id, tipo: 'inicio', estado: 'en_revision', monto: p.monto, datos: { comprobante: adj.id, referencia }, usuarioId });
-    await db.query("UPDATE envio SET estado_pago = 'en_revision', actualizado_en = now() WHERE id = $1", [envio.id]);
-    return { ...p, comprobante_adjunto_id: adj.id };
+      [envios[0].id, archivo.nombre, archivo.mime, archivo.tamano, archivo.ruta, archivo.sha256, usuarioId]);
+    const lote = envios.length > 1 ? crypto.randomUUID() : null;
+    const pagos = [];
+    for (const envio of envios) {
+      const { rows: [p] } = await db.query(
+        `INSERT INTO pago (envio_id, proveedor, medio, monto, estado, token, referencia, comprobante_adjunto_id, comision_estimada, neto_estimado, creado_por, lote)
+         VALUES ($1, 'transferencia', 'transferencia', $2, 'en_revision', $3, $4, $5, 0, $2, $6, $7) RETURNING id, envio_id, monto, estado, referencia, creado_en, lote`,
+        [envio.id, envio.tarifa_total, crypto.randomBytes(18).toString('base64url'), referencia, adj.id, usuarioId, lote]);
+      await registrarEventoPago(db, { pagoId: p.id, tipo: 'inicio', estado: 'en_revision', monto: p.monto, datos: { comprobante: adj.id, referencia, lote }, usuarioId });
+      pagos.push(p);
+    }
+    await db.query("UPDATE envio SET estado_pago = 'en_revision', actualizado_en = now() WHERE id = ANY($1)", [ids]);
+    return { pagos, lote, comprobante_adjunto_id: adj.id, total: pagos.reduce((t, x) => t + x.monto, 0) };
   });
+}
+
+// Pagos que se revisan juntos: los del mismo lote (carrito) o solo el indicado.
+async function pagosDelLote(db, pagoId) {
+  const { rows } = await db.query(
+    `SELECT p.id FROM pago p WHERE p.id = $1 OR (p.lote IS NOT NULL AND p.estado = 'en_revision' AND p.lote = (SELECT lote FROM pago WHERE id = $1))
+     ORDER BY p.envio_id`, [pagoId]);
+  return rows.map((r) => r.id);
 }
 
 // Lee y bloquea el pago en revisión junto a su envío. Si ya lo revisó otra persona, 409.
@@ -150,8 +173,16 @@ async function pagoEnRevision(db, pagoId) {
 
 export async function aprobarComprobante(pagoId, { referencia, usuarioId }) {
   return transaccion(async (db) => {
+    const envioIds = [];
+    for (const id of await pagosDelLote(db, pagoId)) envioIds.push(await aprobarUno(db, id, { referencia, usuarioId }));
+    return envioIds;
+  });
+}
+
+async function aprobarUno(db, pagoId, { referencia, usuarioId }) {
+  {
     const p = await pagoEnRevision(db, pagoId);
-    if (['borrador', 'anulado'].includes(p.envio_estado)) throw falla(409, 'El envío fue anulado: rechaza el comprobante en vez de aprobarlo');
+    if (['borrador', 'anulado'].includes(p.envio_estado)) throw falla(409, `El envío ${p.folio || ''} fue anulado: rechaza el comprobante en vez de aprobarlo`);
     if (p.estado_pago !== 'en_revision') throw falla(409, 'El envío ya no espera este pago. Recarga para ver su estado actual.');
     if (p.monto !== p.tarifa_total) throw falla(409, 'El monto del envío cambió: rechaza el comprobante y pide uno por el monto correcto');
     const ref = referencia || p.referencia;
@@ -165,11 +196,19 @@ export async function aprobarComprobante(pagoId, { referencia, usuarioId }) {
     await cerrarCobrosAbiertos(db, p.envio_id);
     // Pendiente a futuro (D-13): emitir aquí la boleta electrónica en el SII por este pago.
     return p.envio_id;
-  });
+  }
 }
 
 export async function rechazarComprobante(pagoId, { motivo, usuarioId }) {
   return transaccion(async (db) => {
+    const envioIds = [];
+    for (const id of await pagosDelLote(db, pagoId)) envioIds.push(await rechazarUno(db, id, { motivo, usuarioId }));
+    return envioIds;
+  });
+}
+
+async function rechazarUno(db, pagoId, { motivo, usuarioId }) {
+  {
     const p = await pagoEnRevision(db, pagoId);
     await db.query(
       `UPDATE pago SET estado = 'rechazado', motivo_rechazo = $1, revisado_en = now(), revisado_por = $2, actualizado_en = now() WHERE id = $3`,
@@ -178,5 +217,5 @@ export async function rechazarComprobante(pagoId, { motivo, usuarioId }) {
     // El envío vuelve a "pendiente": el cliente ve el motivo y sube un comprobante nuevo.
     await db.query("UPDATE envio SET estado_pago = 'pendiente', actualizado_en = now() WHERE id = $1 AND estado_pago = 'en_revision'", [p.envio_id]);
     return p.envio_id;
-  });
+  }
 }

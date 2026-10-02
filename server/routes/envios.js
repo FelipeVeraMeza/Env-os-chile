@@ -6,7 +6,7 @@ import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, patronBusque
 import { leerConfig } from '../lib/configuracion.js';
 import {
   calcularTarifa, normalizarRut, normalizarTelefono, rolPuedeTransicionar, validarDestinatario, validarDestino, vistaDisponible,
-  validarDireccion, validarPaquete, validarSubidaComprobante, validarTransicion, validarUbicacion, ESTADOS, LIMITES, MIME_COMPROBANTE,
+  validarDireccion, validarPaquete, validarRetiro, validarSubidaComprobante, validarTransicion, validarUbicacion, ESTADOS, LIMITES, MIME_COMPROBANTE, TAMANOS,
 } from '../lib/reglas.js';
 import {
   cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
@@ -14,7 +14,7 @@ import {
 import { conArchivo, subida } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
-import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, cerrarCobrosAbiertos, iniciarPago, registrarComprobante, registrarEventoPago } from '../lib/pagos.js';
+import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, cerrarCobrosAbiertos, iniciarPago, registrarComprobante, registrarComprobanteLote, registrarEventoPago } from '../lib/pagos.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
 
@@ -27,6 +27,9 @@ const MAX_ADJUNTOS = 20;
 // Estados en que el envío sigue en la ruta de un repartidor.
 const EN_RUTA_REPARTIDOR = ['asignado', 'en_ruta', 'fallido', 'reagendado'];
 
+// Medida opcional (con tamaño declarado puede venir vacía): vacío → null, si no, número.
+const medida = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
+
 function datosPaquete(b) {
   return {
     tipo_destino: b.tipo_destino || 'domicilio',
@@ -34,13 +37,14 @@ function datosPaquete(b) {
     courier_punto: b.tipo_destino === 'punto_courier' ? String(b.courier_punto || '').trim() : null,
     courier_codigo: b.tipo_destino === 'punto_courier' ? String(b.courier_codigo || '').trim() || null : null,
     descripcion_producto: String(b.descripcion_producto || '').trim(),
+    tamano: b.tamano || null, // estandar | sobredimensionado (el cliente solo marca una opción)
     bultos: Number(b.bultos ?? 1),
     // La base guarda el peso con 2 decimales: se redondea antes de cotizar para cobrar por el mismo peso que queda guardado
     // (10,004 kg se guardaba como 10,00 kg pero se cobraba como sobredimensionado).
-    peso_kg: b.peso_kg === '' || b.peso_kg === null || b.peso_kg === undefined ? NaN : Math.round(Number(b.peso_kg) * 100) / 100,
-    largo_cm: Number(b.largo_cm),
-    ancho_cm: Number(b.ancho_cm),
-    alto_cm: Number(b.alto_cm),
+    peso_kg: b.peso_kg === '' || b.peso_kg === null || b.peso_kg === undefined ? null : Math.round(Number(b.peso_kg) * 100) / 100,
+    largo_cm: medida(b.largo_cm),
+    ancho_cm: medida(b.ancho_cm),
+    alto_cm: medida(b.alto_cm),
     valor_declarado: Number(b.valor_declarado || 0),
     horario_especial: b.horario_especial === true || b.horario_especial === 'true',
     franja_horaria: String(b.franja_horaria || '').trim() || null,
@@ -73,6 +77,16 @@ async function cotizar(body, usuario, conf) {
 }
 
 // El repartidor no ve montos: cotizar es solo para quien crea envíos.
+// Dirección de retiro guardada del cliente (la última que usó), para precargarla en un envío nuevo.
+envios.get('/retiro-guardado', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
+  const clienteId = req.usuario.rol === 'cliente' ? req.usuario.id : idNumerico(req.query.cliente_id);
+  const r = await uno(
+    `SELECT u.retiro_calle AS calle, u.retiro_numero AS numero, u.retiro_depto AS depto, u.retiro_referencia AS referencia,
+       u.retiro_comuna_id AS comuna_id, c.nombre AS comuna_nombre
+     FROM usuario u LEFT JOIN comuna c ON c.id = u.retiro_comuna_id WHERE u.id = $1`, [clienteId]);
+  res.json(r?.calle ? r : null);
+}));
+
 envios.post('/cotizar', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const conf = await leerConfig();
   const { tarifa, errores } = await cotizar(req.body, req.usuario, conf);
@@ -97,6 +111,18 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
     if (dueno) b.destinatario_id = dueno.destinatario_id;
   }
   if (!b.destinatario_id) Object.assign(errores, prefijar('destinatario', validarDestinatario(b.destinatario)));
+  // Dirección de RETIRO (dónde el repartidor recoge el paquete). Si no viene, se usa la guardada del cliente.
+  let retiro = b.retiro && typeof b.retiro === 'object' ? b.retiro : null;
+  if (!retiro) {
+    const g = await uno('SELECT retiro_calle AS calle, retiro_numero AS numero, retiro_depto AS depto, retiro_referencia AS referencia, retiro_comuna_id AS comuna_id FROM usuario WHERE id = $1', [clienteId]);
+    if (g?.calle) retiro = g;
+  }
+  Object.assign(errores, prefijar('retiro', validarRetiro(retiro || {})));
+  if (retiro?.comuna_id) {
+    const rc = await tarifaDeComuna(Number(retiro.comuna_id));
+    if (!rc) errores['retiro.comuna_id'] = 'Comuna inexistente';
+    else if (!rc.en_cobertura) errores['retiro.comuna_id'] = `${rc.nombre} está fuera de la zona de cobertura: no retiramos ahí`;
+  }
   if (!b.direccion_id) Object.assign(errores, prefijar('direccion', validarDireccion(b.direccion)));
   // Coordenadas opcionales de la dirección nueva: si vienen, deben ser números dentro de rango.
   let coords = null;
@@ -171,15 +197,25 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
     const { rows: [e] } = await db.query(
       `INSERT INTO envio (token_qr, cliente_id, destinatario_id, direccion_id, comuna_id, tipo_destino, courier_empresa, courier_punto,
          courier_codigo, descripcion_producto, bultos, peso_kg, largo_cm, ancho_cm, alto_cm, valor_declarado, horario_especial,
-         franja_horaria, tarifa_base, recargo_bultos, recargo_horario, tarifa_total, observaciones, creado_por, recargo_sobredimension)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING id`,
+         franja_horaria, tarifa_base, recargo_bultos, recargo_horario, tarifa_total, observaciones, creado_por, recargo_sobredimension,
+         tamano, retiro_calle, retiro_numero, retiro_depto, retiro_referencia, retiro_comuna_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) RETURNING id`,
       [crypto.randomBytes(18).toString('base64url'), clienteId, destinatarioId, direccionId, Number(comunaId), paquete.tipo_destino,
         paquete.courier_empresa, paquete.courier_punto, paquete.courier_codigo, paquete.descripcion_producto, paquete.bultos,
         paquete.peso_kg, paquete.largo_cm, paquete.ancho_cm, paquete.alto_cm, paquete.valor_declarado, paquete.horario_especial,
         paquete.horario_especial ? paquete.franja_horaria : null, tarifa.tarifa_base, tarifa.recargo_bultos, tarifa.recargo_horario,
-        tarifa.tarifa_total, paquete.observaciones, req.usuario.id, tarifa.recargo_sobredimension],
+        tarifa.tarifa_total, paquete.observaciones, req.usuario.id, tarifa.recargo_sobredimension,
+        paquete.tamano, retiro.calle.trim(), String(retiro.numero).trim(), String(retiro.depto || '').trim() || null,
+        String(retiro.referencia || '').trim() || null, Number(retiro.comuna_id)],
     );
     await registrarEstado(db, { envioId: e.id, anterior: null, nuevo: 'borrador', usuarioId: req.usuario.id });
+    // La dirección de retiro queda guardada en el cliente: el próximo envío la trae lista.
+    if (b.retiro && b.guardar_retiro !== false) {
+      await db.query(
+        `UPDATE usuario SET retiro_calle = $1, retiro_numero = $2, retiro_depto = $3, retiro_referencia = $4, retiro_comuna_id = $5 WHERE id = $6`,
+        [retiro.calle.trim(), String(retiro.numero).trim(), String(retiro.depto || '').trim() || null, String(retiro.referencia || '').trim() || null,
+          Number(retiro.comuna_id), clienteId]);
+    }
     // Solo true confirma: el texto "false" (formularios) no debe confirmar el envío ni gastar un folio.
     if (b.confirmar === true || b.confirmar === 'true') await confirmar(db, e.id, req.usuario.id);
     return cargarEnvio(e.id, db);
@@ -278,7 +314,7 @@ envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, re
     ['Dirección', (e) => `${e.calle} ${e.numero}${e.depto ? ' ' + e.depto : ''}`], ['Comuna', 'comuna_nombre'],
     ['Tipo destino', 'tipo_destino'], ['Courier', 'courier_empresa'], ['Producto', 'descripcion_producto'], ['Bultos', 'bultos'],
     // Excel en español (Chile) usa coma decimal: "2.5" se leería como 25 o como texto.
-    ['Peso kg', (e) => String(e.peso_kg).replace('.', ',')], ...(req.usuario.rol === 'admin' ? [['Valor declarado', 'valor_declarado']] : []), ['Horario especial', (e) => (e.horario_especial ? 'Sí' : 'No')],
+    ['Tamaño', (e) => TAMANOS[e.tamano] || ''], ['Peso kg', (e) => (e.peso_kg == null ? '' : String(e.peso_kg).replace('.', ','))], ...(req.usuario.rol === 'admin' ? [['Valor declarado', 'valor_declarado']] : []), ['Horario especial', (e) => (e.horario_especial ? 'Sí' : 'No')],
     ['Tarifa total', 'tarifa_total'], ['Repartidor', 'repartidor_nombre'], ['Intentos', 'intentos'],
     ['Entregado', (e) => (e.entregado_en ? new Date(e.entregado_en).toLocaleString('es-CL', { timeZone: 'America/Santiago' }) : '')],
   ];
@@ -462,6 +498,9 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
   const precision = req.body.precision === undefined || req.body.precision === '' ? null : Number(req.body.precision);
   if (precision !== null && (!Number.isFinite(precision) || precision < 0 || precision > 100_000)) throw falla(422, 'Precisión GPS inválida', { precision: 'Inválida' });
   const receptor = String(req.body.receptor ?? '').trim().slice(0, 120) || null;
+  // Entrega guardada sin señal y enviada después: se respeta la hora real en que se entregó (últimas 72 h, no futura).
+  const hora = req.body.hora_entrega ? new Date(req.body.hora_entrega) : null;
+  const horaReal = hora && !Number.isNaN(hora.getTime()) && hora.getTime() <= Date.now() + 5 * 60_000 && hora.getTime() >= Date.now() - 72 * 3600_000 ? hora : null;
 
   await conArchivo(quitarExif(req.file.buffer), req.file.mimetype, (archivo) => transaccion(async (db) => {
     await db.query(
@@ -470,11 +509,12 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
       [envio.id, req.file.originalname, req.file.mimetype, archivo.tamano, archivo.ruta, archivo.sha256, req.usuario.id],
     );
     exigirSinConflicto(await db.query(
-      `UPDATE envio SET estado = 'entregado', entregado_en = now(), entrega_lat = $1, entrega_lon = $2, entrega_precision_m = $3,
+      `UPDATE envio SET estado = 'entregado', entregado_en = COALESCE($7, now()), entrega_lat = $1, entrega_lon = $2, entrega_precision_m = $3,
          entrega_receptor = $4, actualizado_en = now() WHERE id = $5 AND estado = $6`,
-      [ubic?.lat ?? null, ubic?.lon ?? null, precision, receptor, envio.id, envio.estado],
+      [ubic?.lat ?? null, ubic?.lon ?? null, precision, receptor, envio.id, envio.estado, horaReal],
     ));
-    await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: receptor ? `Recibe: ${receptor}` : null });
+    const notas = [receptor && `Recibe: ${receptor}`, horaReal && 'registrada sin conexión', !ubic && 'sin GPS'].filter(Boolean).join(' · ') || null;
+    await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: notas });
   }));
   await auditar(req, 'entregar', 'envio', envio.id, { lat: ubic?.lat, lon: ubic?.lon });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
@@ -562,6 +602,30 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
 
 // Pago por transferencia: el cliente sube la imagen (o PDF) del comprobante y el pago queda "en revisión"
 // hasta que administración lo apruebe o lo rechace (ver /api/cobranza/comprobantes).
+// Carrito (pedido 01-10): una sola transferencia y un solo comprobante pagan varios envíos del mismo cliente.
+// Campo envio_ids: "12,13,14". Administración los revisa juntos (aprobar o rechazar el lote completo).
+envios.post('/comprobante-lote', requiereRol('admin', 'cliente'), subida.single('archivo'), ruta(async (req, res) => {
+  const ids = [...new Set(String(req.body.envio_ids || '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw falla(422, 'Elige al menos un envío para pagar', { envio_ids: 'Obligatorio' });
+  if (ids.length > 50) throw falla(422, 'Máximo 50 envíos por pago', { envio_ids: 'Demasiados' });
+  const lista = [];
+  for (const id of ids) {
+    const envio = await cargarEnvio(id);
+    exigirAcceso(req.usuario, envio);
+    validarSubidaComprobante(envio);
+    lista.push(envio);
+  }
+  if (new Set(lista.map((e) => e.cliente_id)).size > 1) throw falla(422, 'Un pago solo puede incluir envíos de un mismo cliente');
+  if (!req.file) throw falla(422, 'Adjunta la imagen del comprobante de la transferencia', { archivo: 'Obligatorio' });
+  if (!MIME_COMPROBANTE.includes(req.file.mimetype)) throw falla(422, 'El comprobante debe ser una imagen (JPG, PNG, WebP) o un PDF', { archivo: 'Formato inválido' });
+  const referencia = String(req.body.referencia || '').trim().slice(0, 60) || null;
+  const buffer = req.file.mimetype === 'image/jpeg' ? quitarExif(req.file.buffer) : req.file.buffer;
+  const r = await conArchivo(buffer, req.file.mimetype, (guardado) => registrarComprobanteLote(
+    lista, { ...guardado, nombre: req.file.originalname, mime: req.file.mimetype }, { referencia, usuarioId: req.usuario.id }));
+  for (const e of lista) await auditar(req, 'comprobante_pago', 'envio', e.id, { lote: r.lote, referencia, envios: ids.length });
+  res.status(201).json(r);
+}));
+
 envios.post('/:id/comprobante', requiereRol('admin', 'cliente'), subida.single('archivo'), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
   validarSubidaComprobante(envio);

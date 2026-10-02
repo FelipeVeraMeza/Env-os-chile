@@ -54,9 +54,16 @@ try {
   let folio;
   let envioId;
 
-  await paso('Cliente crea un envío de 2 bultos con el formulario (4 pasos)', async () => {
+  await paso('Cliente crea un envío de 2 bultos con el formulario (5 pasos: retiro, destinatario, destino, paquete, confirmar)', async () => {
     const t0 = Date.now();
     await c.goto(`${URL_APP}/#/nuevo`, { waitUntil: 'networkidle' });
+    // Retiro: si el cliente ya tiene una guardada viene lista; si no, se completa.
+    if (!(await c.inputValue('[name=calle]'))) {
+      await c.fill('[name=calle]', 'Los Leones');
+      await c.fill('[name=numero]', '1180');
+      await c.selectOption('[name=comuna_id]', { label: 'Providencia' });
+    }
+    await c.click('#siguiente');
     if (await c.locator('[data-modo="nuevo"]').count()) await c.click('[data-modo="nuevo"]');
     await c.fill('[name=nombre]', 'Paula Fernández');
     await c.fill('[name=telefono]', '+56 9 6123 4567');
@@ -67,12 +74,9 @@ try {
     await c.selectOption('[name=comuna_id]', { label: 'Providencia' });
     await c.fill('[name=referencia]', 'Recepción del edificio');
     await c.click('#siguiente');
+    await c.check('[name=tamano][value=estandar]');
     await c.fill('[name=descripcion_producto]', 'Libros y cuadernos');
     await c.fill('[name=bultos]', '2');
-    await c.fill('[name=peso_kg]', '4');
-    await c.fill('[name=largo_cm]', '40');
-    await c.fill('[name=ancho_cm]', '30');
-    await c.fill('[name=alto_cm]', '20');
     await c.click('#siguiente');
     await foto(c, 'cliente-resumen');
     await c.click('#siguiente');

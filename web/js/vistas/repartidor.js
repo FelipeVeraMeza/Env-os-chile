@@ -3,7 +3,12 @@ import { api, archivo, enviarForm, get, post, put } from '../api.js';
 import {
   $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, html, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { avisoWhatsapp, direccionTexto } from './comun.js';
+import { avisoWhatsapp, direccionTexto, retiroTexto, textoPaquete } from './comun.js';
+import { enviarPendientes, entregaPendiente, guardarCopia, guardarEntrega, leerCopia } from '../sin-conexion.js';
+
+// Sin señal se muestra lo último que se vio con conexión (y se avisa).
+const sinSenal = (err) => err?.status === 0;
+const avisoSinSenal = () => html`<div class="aviso alerta" style="margin-bottom:12px"><b>Sin conexión.</b> Ves lo último que se cargó con señal. Las entregas que hagas se guardan en el teléfono y se envían solas al volver internet.</div>`;
 
 // ================= Ruta del día =================
 export async function ruta() {
@@ -13,11 +18,22 @@ export async function ruta() {
   const esAdmin = app.usuario.rol === 'admin';
   const propios = esAdmin ? `&repartidor_id=${app.usuario.id}` : '';
   const enlace = (e) => (esAdmin ? `#/entrega/${e.id}` : `#/envio/${e.id}`);
-  const [activos, hechos, disponibles] = await Promise.all([
-    get(`/api/envios?estado=asignado,en_ruta,reagendado,fallido&limite=100&orden=ruta${propios}`),
-    get(`/api/envios?estado=entregado,devuelto&cerrados=hoy&limite=1${propios}`),
-    get('/api/envios/disponibles'),
-  ]);
+  enviarPendientes();
+  let datos;
+  let offline = false;
+  try {
+    datos = await Promise.all([
+      get(`/api/envios?estado=asignado,en_ruta,reagendado,fallido&limite=100&orden=ruta${propios}`),
+      get(`/api/envios?estado=entregado,devuelto&cerrados=hoy&limite=1${propios}`),
+      get('/api/envios/disponibles'),
+    ]);
+    guardarCopia('ruta', datos);
+  } catch (err) {
+    datos = sinSenal(err) && leerCopia('ruta');
+    if (!datos) throw err;
+    offline = true;
+  }
+  const [activos, hechos, disponibles] = datos;
   const enRuta = activos.items.filter((e) => e.estado === 'en_ruta');
   const porRetirar = activos.items.filter((e) => e.estado !== 'en_ruta');
   // Orden de la ruta (RF-60): flechas para subir o bajar cada parada dentro de su sección (en ruta / por retirar);
@@ -41,6 +57,7 @@ export async function ruta() {
   const tarjeta = (e) => html`<div class="parada">${flechas(e)}<a class="item-envio" href="${enlace(e)}">
     <div><div class="fila"><span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
       ${e.tipo_destino === 'punto_courier' ? html`<span class="badge e-asignado">${e.courier_empresa}</span>` : ''}</div>
+      ${e.estado !== 'en_ruta' && e.retiro_calle ? html`<div class="sub">Retirar en: <b>${retiroTexto(e)}</b></div>` : ''}
       <div style="font-size:1.05rem;font-weight:700">${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}</div>
       <div class="dir">${e.comuna_nombre.toUpperCase()} · ${e.destinatario_nombre}</div></div>
     <div class="der">${badge(e.estado)}${e.estado_pago !== 'pagado' ? html`<span class="badge e-pendiente">Sin pagar</span>` : ''}${e.intentos ? html`<span class="sub">Intento ${e.intentos + 1}/${app.conf.operacion.intentos_max}</span>` : ''}</div>
@@ -50,10 +67,11 @@ export async function ruta() {
     <div><div class="fila"><span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
       ${e.tipo_destino === 'punto_courier' ? html`<span class="badge e-asignado">${e.courier_empresa}</span>` : ''}</div>
       <div style="font-size:1.05rem;font-weight:700">${e.comuna_nombre.toUpperCase()}</div>
-      <div class="dir">${e.calle} ${e.numero} · ${e.bultos} bulto(s) · ${e.peso_kg} kg</div></div>
+      <div class="dir">${e.retiro_comuna_nombre ? `Retiro en ${e.retiro_comuna_nombre} · ` : ''}${e.calle} ${e.numero} · ${textoPaquete(e)}</div></div>
     <div class="der"><button class="btn chico" data-tomar="${e.id}">Tomar</button></div>
   </div>`;
   montar(vista, html`
+    ${offline ? avisoSinSenal() : ''}
     <section class="hero"><p>${new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Santiago' })}</p>
       <h1>Mi ruta</h1>
       <div class="fila"><span class="badge" style="background:rgba(255,255,255,.2)">${enRuta.length} en ruta</span><span class="badge" style="background:rgba(255,255,255,.2)">${porRetirar.length} por retirar</span><span class="badge" style="background:rgba(255,255,255,.2)">${hechos.total} cerrados hoy</span>${disponibles.total ? html`<span class="badge" style="background:rgba(255,255,255,.2)">${disponibles.total} disponibles</span>` : ''}</div></section>
@@ -94,17 +112,40 @@ export async function detalleRepartidor(id) {
   clearInterval(temporizador);
   const vista = $('#vista');
   montar(vista, esqueleto(3));
-  const e = await get(`/api/envios/${id}`);
+  let e;
+  let offline = false;
+  try {
+    e = await get(`/api/envios/${id}`);
+    guardarCopia(`envio.${id}`, e);
+  } catch (err) {
+    e = sinSenal(err) && leerCopia(`envio.${id}`);
+    if (!e) throw err;
+    offline = true;
+  }
+  const guardada = await entregaPendiente(e.id);
   const op = app.conf.operacion;
+  const antesDeRetirar = ['asignado', 'reagendado'].includes(e.estado);
   const espera = op.espera_max_min * 60;
   const segundosDesdeLlegada = () => (e.llegada_en ? Math.floor((Date.now() - new Date(e.llegada_en).getTime()) / 1000) : null);
 
   montar(vista, html`
     <a href="#/ruta" class="sub" style="text-decoration:none">← Mi ruta</a>
+    ${offline ? avisoSinSenal() : ''}
     <div class="encabezado" style="margin-top:6px"><div><h1 class="mono">${e.folio}</h1>
       <div class="fila">${badge(e.estado)} ${e.estado_pago === 'pagado' ? html`<span class="badge e-pagado">Pagado</span>` : html`<span class="badge e-pendiente">Pago pendiente</span>`}
         <span class="sub">Intentos ${e.intentos}/${op.intentos_max}</span></div></div></div>
+    ${e.retiro_calle ? html`<div class="card"${antesDeRetirar ? '' : html` style="opacity:.75"`}>
+      <div class="card-titulo"><h2>1 · Retirar en</h2>${antesDeRetirar ? '' : html`<span class="badge e-entregado">Retirado</span>`}</div>
+      <div style="font-size:1.2rem;font-weight:800">${e.retiro_calle} ${e.retiro_numero}${e.retiro_depto ? ', ' + e.retiro_depto : ''}</div>
+      <div style="font-size:1.3rem;font-weight:900">${String(e.retiro_comuna_nombre || '').toUpperCase()}</div>
+      ${e.retiro_referencia ? html`<p class="sub">Ref.: ${e.retiro_referencia}</p>` : ''}
+      <p>Remitente: <b>${e.cliente_nombre}</b>${e.cliente_telefono ? html` · <a href="tel:${e.cliente_telefono.replace(/\s/g, '')}">${e.cliente_telefono}</a>` : ''}</p>
+      ${antesDeRetirar && e.mapas_retiro ? html`<div class="grid g2" style="margin-top:10px">
+        <a class="btn blanco" href="${e.mapas_retiro.google}" target="_blank" rel="noopener">Ir a retirar (Google Maps)</a>
+        <a class="btn azul" href="${e.mapas_retiro.waze}" target="_blank" rel="noopener">Ir a retirar (Waze)</a></div>` : ''}
+    </div>` : ''}
     <div class="card">
+      ${e.retiro_calle ? html`<h2>2 · Entregar en</h2>` : ''}
       ${e.tipo_destino === 'punto_courier' ? html`<div class="aviso magenta" style="margin-bottom:10px">Dejar en punto <b>${e.courier_empresa}</b>: ${e.courier_punto}${e.courier_codigo ? ` · código ${e.courier_codigo}` : ''}</div>` : ''}
       ${e.horario_especial ? html`<div class="aviso alerta" style="margin-bottom:10px">Horario especial: <b>${e.franja_horaria}</b></div>` : ''}
       <div style="font-size:1.35rem;font-weight:800">${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}</div>
@@ -112,7 +153,7 @@ export async function detalleRepartidor(id) {
       ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}
       <p><b>${e.destinatario_nombre}</b> · <a href="tel:${e.destinatario_telefono.replace(/\s/g, '')}">${e.destinatario_telefono}</a></p>
       ${e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar por WhatsApp</a>` : ''}
-      <p class="sub">${e.descripcion_producto} · ${e.bultos} bulto(s) · ${e.peso_kg} kg</p>
+      <p class="sub">${e.descripcion_producto ? `${e.descripcion_producto} · ` : ''}${textoPaquete(e)}</p>
       <div class="grid g2" style="margin-top:12px">
         <a class="btn blanco grande" href="${e.mapas.google}" target="_blank" rel="noopener">Ir con Google Maps</a>
         <a class="btn azul grande" href="${e.mapas.waze}" target="_blank" rel="noopener">Ir con Waze</a>
@@ -124,7 +165,12 @@ export async function detalleRepartidor(id) {
   const acciones = $('#acciones');
   const recargar = () => detalleRepartidor(id);
 
-  if (['asignado', 'reagendado'].includes(e.estado)) {
+  if (guardada && e.estado !== 'entregado') {
+    montar(acciones, html`<div class="card"><h2>Entrega guardada en el teléfono ✔</h2>
+      <p>La registraste sin conexión el ${fechaHora(guardada.hora)}. Se enviará sola apenas vuelva internet; no tienes que hacer nada más.</p>
+      <button class="btn sec" id="reintentar">Enviar ahora</button></div>`);
+    $('#reintentar').onclick = async () => { await enviarPendientes(); recargar(); };
+  } else if (['asignado', 'reagendado'].includes(e.estado)) {
     const pagado = e.estado_pago === 'pagado';
     montar(acciones, html`<div class="card">
       ${pagado ? '' : html`<div class="aviso alerta" style="margin-bottom:12px">Este envío <b>no está pagado</b>: no se puede retirar hasta que el cliente pague.</div>`}
@@ -175,7 +221,8 @@ export async function detalleRepartidor(id) {
   }
 }
 
-// Cierre de entrega: foto OBLIGATORIA + GPS.
+// Cierre de entrega: foto OBLIGATORIA; GPS si se puede (opcional salvo que administración lo exija).
+// Sin señal, la entrega queda guardada en el teléfono y se envía sola al volver internet.
 function entregar(e, recargar) {
   const esDemo = app.conf.auth_mode === 'demo';
   const cont = document.createElement('div');
@@ -200,7 +247,11 @@ function entregar(e, recargar) {
     $('#gps', cont).className = 'aviso ok';
     listo();
   };
-  obtenerGps().then((u) => fijarUbic(u)).catch((err) => { $('#gps', cont).className = 'aviso alerta'; $('#gps', cont).textContent = err.message; });
+  obtenerGps().then((u) => fijarUbic(u)).catch((err) => {
+    const gps = $('#gps', cont);
+    gps.className = app.conf.operacion.gps_obligatorio ? 'aviso alerta' : 'aviso';
+    gps.textContent = app.conf.operacion.gps_obligatorio ? err.message : `Sin ubicación GPS (${err.message.toLowerCase()}). Puedes confirmar la entrega igual: la foto es lo obligatorio.`;
+  });
   $('#gps-demo', cont)?.addEventListener('click', () => fijarUbic({ lat: -33.4263, lon: -70.6170, precision: 25 }, true));
   $('input[name="foto"]', cont).onchange = async (ev) => {
     const f = ev.target.files[0];
@@ -221,8 +272,23 @@ function entregar(e, recargar) {
     if (ev.target.receptor.value) fd.append('receptor', ev.target.receptor.value);
     const btn = $('#confirmar-ent', cont);
     btn.disabled = true;
-    try { await enviarForm(`/api/envios/${e.id}/entregar`, fd); cont.remove(); toast('¡Entrega registrada con foto y GPS!', 'ok'); recargar(); }
-    catch (err) { errorToast(err); btn.disabled = false; }
+    const guardarSinSenal = async () => {
+      await guardarEntrega({ envioId: e.id, foto, lat: ubic?.lat, lon: ubic?.lon, precision: ubic?.precision, receptor: ev.target.receptor.value || null });
+      cont.remove();
+      toast('Sin señal: la entrega quedó guardada en el teléfono y se enviará sola al volver internet', 'ok');
+      recargar();
+    };
+    try {
+      if (!navigator.onLine) return await guardarSinSenal();
+      await enviarForm(`/api/envios/${e.id}/entregar`, fd);
+      cont.remove();
+      toast(ubic ? '¡Entrega registrada con foto y GPS!' : '¡Entrega registrada con foto!', 'ok');
+      recargar();
+    } catch (err) {
+      if (err.status === 0) { try { return await guardarSinSenal(); } catch { /* sin almacenamiento en el teléfono */ } }
+      errorToast(err);
+      btn.disabled = false;
+    }
   };
 }
 

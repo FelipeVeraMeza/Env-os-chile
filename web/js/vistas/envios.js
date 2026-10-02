@@ -3,7 +3,7 @@ import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
   $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { avisoWhatsapp, itemEnvio } from './comun.js';
+import { avisoWhatsapp, itemEnvio, retiroTexto, textoPaquete } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
 
 // ================= Registro de envíos (búsqueda, filtros, exportación) =================
@@ -113,6 +113,10 @@ export async function detalle(id) {
     ${!['anulado', 'devuelto'].includes(e.estado) ? html`<div class="progreso-envio">${PROGRESO.map(([, t], i) => html`<div class="${i < nivel ? 'on' : ''}">${t}</div>`)}</div>` : ''}
     <div class="grid g2" style="margin-top:18px;align-items:start">
       <div>
+        ${e.retiro_calle ? html`<div class="card">
+          <div class="card-titulo"><h2>Retiro</h2>${e.mapas_retiro ? html`<div class="fila"><a class="btn sec chico" href="${e.mapas_retiro.google}" target="_blank" rel="noopener">Google Maps</a><a class="btn sec chico" href="${e.mapas_retiro.waze}" target="_blank" rel="noopener">Waze</a></div>` : ''}</div>
+          <p>${retiroTexto(e)}</p>${e.retiro_referencia ? html`<p class="sub">Ref.: ${e.retiro_referencia}</p>` : ''}
+        </div>` : ''}
         <div class="card">
           <div class="card-titulo"><h2>Destino</h2><div class="fila"><a class="btn sec chico" href="${e.mapas.google}" target="_blank" rel="noopener">Google Maps</a><a class="btn sec chico" href="${e.mapas.waze}" target="_blank" rel="noopener">Waze</a></div></div>
           ${e.tipo_destino === 'punto_courier' ? html`<div class="aviso" style="margin-bottom:10px">Entrega en punto <b>${e.courier_empresa}</b>: ${e.courier_punto}${e.courier_codigo ? ` · código ${e.courier_codigo}` : ''}</div>` : ''}
@@ -124,8 +128,8 @@ export async function detalle(id) {
         </div>
         <div class="card">
           <h2>Paquete y tarifa</h2>
-          <p>${e.descripcion_producto}</p>
-          <p class="sub">${e.bultos} bulto(s) · ${e.peso_kg} kg · ${e.largo_cm}×${e.ancho_cm}×${e.alto_cm} cm${e.observaciones ? ` · ${e.observaciones}` : ''}</p>
+          ${e.descripcion_producto ? html`<p>${e.descripcion_producto}</p>` : ''}
+          <p class="sub">${textoPaquete(e)}${e.observaciones ? ` · ${e.observaciones}` : ''}</p>
           <div class="desglose">
             <div><span>Tarifa base</span><span>${clp(e.tarifa_base)}</span></div>
             ${e.recargo_bultos ? html`<div><span>Bultos adicionales</span><span>${clp(e.recargo_bultos)}</span></div>` : ''}
@@ -351,7 +355,8 @@ export function subirComprobante(envio, alTerminar) {
 // Administración mira el comprobante y lo aprueba (el envío queda pagado) o lo rechaza con motivo.
 export function revisarComprobante(c, alTerminar) {
   const m = modal(html`<h2>Comprobante de ${c.folio}</h2>
-    <p class="sub">${c.cliente_nombre} · debe transferir <b>${clp(c.monto)}</b> · enviado ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}</p>
+    <p class="sub">${c.cliente_nombre} · debe transferir <b>${clp(c.monto)}</b>${c.envios?.length > 1 ? ' en total' : ''} · enviado ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}</p>
+    ${c.envios?.length > 1 || c.lote_folios?.length > 1 ? html`<div class="aviso" style="margin:10px 0">Este comprobante paga <b>${(c.envios?.map((x) => x.folio) || c.lote_folios).length} envíos</b> (carrito): ${(c.envios?.map((x) => x.folio) || c.lote_folios).join(', ')}. Al aprobar o rechazar, se aplica a todos.</div>` : ''}
     ${c.usado_en?.length ? html`<div class="aviso alerta" style="margin:10px 0"><b>Atención:</b> este mismo comprobante o N° de operación ya se usó en ${listaCorta(c.usado_en, 5)}.</div>` : ''}
     <div style="margin:12px 0;text-align:center">${c.mime === 'application/pdf'
       ? html`<a class="btn sec" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Descargar comprobante (PDF)</a>`

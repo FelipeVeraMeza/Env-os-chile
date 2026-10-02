@@ -57,6 +57,7 @@ async function crear(cliente, i, extra = {}) {
   const [descripcion, peso, l, a, h, valor] = productos[i % productos.length];
   return llamar('POST', '/api/envios', { usuario: cliente, json: {
     destinatario: { nombre, telefono }, direccion: { calle, numero, depto, referencia, comuna_id: comuna(com) },
+    retiro: { calle: 'Av. Irarrázaval', numero: '3401', referencia: 'Bodega', comuna_id: comuna('Ñuñoa') },
     descripcion_producto: descripcion, bultos: 1, peso_kg: peso, largo_cm: l, ancho_cm: a, alto_cm: h, valor_declarado: valor, confirmar: true, ...extra,
   } });
 }

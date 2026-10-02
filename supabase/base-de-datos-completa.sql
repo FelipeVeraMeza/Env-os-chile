@@ -5,7 +5,7 @@
 --  CÓMO USARLO: Supabase → SQL Editor → New query → pegar TODO este archivo → Run.
 --  Se puede ejecutar más de una vez: si la base ya existe, no hace nada.
 --
---  Crea: 13 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
+--  Crea: 14 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
 --  dentro de Santiago), tarifas ($3.500 base, +$1.000 horario especial, 20 kg / 60 cm),
 --  reglas de operación (3 intentos, 5 min de espera) y el bucket privado de fotos y boletas.
 --  Los usuarios los crea la app en su primer arranque (ADMIN_EMAIL / ADMIN_PASSWORD en Railway).
@@ -691,6 +691,50 @@ END
 $migracion$;
 
 -- ---------------------------------------------------------------------------
+-- Migración 013_retiro_tamano_carrito.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '013_retiro_tamano_carrito.sql') THEN
+    -- Pedidos del cliente del 01-10-2026:
+    --  1) Dirección de RETIRO: el repartidor necesita saber dónde retirar el paquete (no solo dónde entregarlo).
+    --  2) Paquete simplificado: el cliente solo marca "estándar" o "sobredimensionado" (sin pesar ni medir).
+    --  3) Carrito: varios envíos se pagan con UNA transferencia y un solo comprobante (un "lote").
+    --  4) GPS opcional al entregar: sin señal también se puede cerrar la entrega.
+
+    -- 1) Dirección de retiro de cada envío y la predeterminada de cada cliente.
+    ALTER TABLE envio
+      ADD COLUMN retiro_calle      TEXT,
+      ADD COLUMN retiro_numero     TEXT,
+      ADD COLUMN retiro_depto      TEXT,
+      ADD COLUMN retiro_referencia TEXT,
+      ADD COLUMN retiro_comuna_id  INTEGER REFERENCES comuna(id);
+    ALTER TABLE usuario
+      ADD COLUMN retiro_calle      TEXT,
+      ADD COLUMN retiro_numero     TEXT,
+      ADD COLUMN retiro_depto      TEXT,
+      ADD COLUMN retiro_referencia TEXT,
+      ADD COLUMN retiro_comuna_id  INTEGER REFERENCES comuna(id);
+
+    -- 2) Tamaño declarado. Con tamaño, el peso y las medidas pasan a ser opcionales.
+    ALTER TABLE envio ADD COLUMN tamano TEXT CHECK (tamano IN ('estandar', 'sobredimensionado'));
+    ALTER TABLE envio ALTER COLUMN peso_kg DROP NOT NULL, ALTER COLUMN largo_cm DROP NOT NULL,
+      ALTER COLUMN ancho_cm DROP NOT NULL, ALTER COLUMN alto_cm DROP NOT NULL;
+    ALTER TABLE envio ADD CONSTRAINT envio_tamano_o_medidas
+      CHECK (tamano IS NOT NULL OR (peso_kg IS NOT NULL AND largo_cm IS NOT NULL AND ancho_cm IS NOT NULL AND alto_cm IS NOT NULL)) NOT VALID;
+
+    -- 3) Lote de pago: todos los pagos de un mismo comprobante comparten el lote y se aprueban o rechazan juntos.
+    ALTER TABLE pago ADD COLUMN lote TEXT;
+    CREATE INDEX pago_lote_idx ON pago (lote) WHERE lote IS NOT NULL;
+
+    -- 4) GPS opcional (se puede volver a exigir en Tarifas y reglas).
+    UPDATE config SET valor = jsonb_set(valor, '{gps_obligatorio}', 'false'::jsonb) WHERE clave = 'operacion';
+    INSERT INTO schema_migracion (nombre) VALUES ('013_retiro_tamano_carrito.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
 -- Zona "Santiago" y 346 comunas (solo si la tabla está vacía)
 -- ---------------------------------------------------------------------------
 INSERT INTO zona (nombre, tarifa, color, orden) VALUES ('Santiago', 3500, '#1d4ed8', 1)
@@ -1059,7 +1103,7 @@ $comunas$;
 INSERT INTO config (clave, valor) VALUES
   ('negocio', '{"nombre":"Tu Empresa de Envíos","rut":"","telefono":"","correo":"","logo_url":""}'::jsonb),
   ('tarifas', '{"base":3500,"peso_estandar_kg":10,"dim_estandar_cm":40,"recargo_sobredimension":2000,"peso_max_kg":20,"dim_max_cm":60,"recargo_horario_especial":1000}'::jsonb),
-  ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":true,"registro_clientes":true,"qr_destino":"google","autoasignacion":true,"punto_courier":false}'::jsonb),
+  ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":false,"registro_clientes":true,"qr_destino":"google","autoasignacion":true,"punto_courier":false}'::jsonb),
   ('ticket', '{"pie":"Conserve este ticket. Consultas y reclamos indicando el folio."}'::jsonb),
   ('listas', '{"couriers":["Blue Express","Starken","Chilexpress","Correos de Chile","Otra"],"franjas":["08:00 – 10:00","10:00 – 13:00","13:00 – 16:00","16:00 – 19:00","19:00 – 21:00","21:00 – 23:00"]}'::jsonb),
   ('pagos', '{"proveedor":"simulado","en_linea":false}'::jsonb),

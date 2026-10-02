@@ -103,10 +103,16 @@ test('CP-29 · Cerrar la entrega SIN foto es rechazado', async () => {
   assert.match(r.datos.error, /foto/i);
 });
 
-test('CP-30 · Cerrar la entrega SIN ubicación GPS es rechazado', async () => {
-  const r = await peticion('POST', `/api/envios/${envio.id}/entregar`, { sesion: esc.repartidor, form: formulario({}, { foto: [jpegPrueba(), 'entrega.jpg'] }) });
-  assert.equal(r.status, 422);
-  assert.match(r.datos.error, /GPS/);
+test('CP-30 · El GPS es opcional (pedido 01-10); si administración lo exige, sin ubicación se rechaza', async () => {
+  const antes = (await peticion('GET', '/api/config/publica')).datos.operacion.gps_obligatorio;
+  try {
+    assert.equal((await peticion('PUT', '/api/config/operacion', { sesion: esc.admin, json: { gps_obligatorio: true } })).status, 200);
+    const r = await peticion('POST', `/api/envios/${envio.id}/entregar`, { sesion: esc.repartidor, form: formulario({}, { foto: [jpegPrueba(), 'entrega.jpg'] }) });
+    assert.equal(r.status, 422);
+    assert.match(r.datos.error, /GPS/);
+  } finally {
+    await peticion('PUT', '/api/config/operacion', { sesion: esc.admin, json: { gps_obligatorio: antes } });
+  }
 });
 
 test('CP-31 · Entrega con foto + GPS: queda entregado con coordenadas', async () => {

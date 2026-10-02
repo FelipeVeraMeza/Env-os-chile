@@ -160,3 +160,18 @@ test('rechazar un comprobante exige un motivo que el cliente pueda leer', () => 
   for (const vacio of [undefined, null, '', '   ']) assert.throws(() => validarMotivoRechazo(vacio), (e) => e.status === 422 && Boolean(e.detalles.motivo));
   assert.throws(() => validarMotivoRechazo('x'.repeat(301)), /300/);
 });
+
+test('paquete con tamaño declarado (estándar / sobredimensionado): sin peso ni medidas, y precio según la opción', async () => {
+  const { calcularTarifa: tarifa, validarPaquete: validar, validarRetiro, textoPaquete, CONFIG_POR_DEFECTO: conf } = await import('../../server/lib/reglas.js');
+  const t = conf.tarifas;
+  assert.deepEqual(validar({ tamano: 'estandar', bultos: 3 }), {}, 'con tamaño no se pide peso, medidas ni descripción');
+  assert.ok(validar({ tamano: 'enorme', bultos: 1 }).tamano);
+  assert.ok(validar({ bultos: 1 }).peso_kg, 'sin tamaño, se siguen pidiendo peso y medidas');
+  assert.ok(validar({ tamano: 'estandar', bultos: 1, peso_kg: 25 }).peso_kg, 'si viene un peso sobre el máximo, igual se rechaza');
+  assert.equal(tarifa({ tamano: 'estandar', bultos: 5 }, t).tarifa_total, 3500);
+  assert.equal(tarifa({ tamano: 'sobredimensionado' }, t).tarifa_total, 5500);
+  assert.match(textoPaquete({ tamano: 'estandar', bultos: 2 }, t), /2 bultos · Estándar/);
+  assert.match(textoPaquete({ bultos: 1, peso_kg: 3, largo_cm: 10, ancho_cm: 10, alto_cm: 10 }, t), /1 bulto · 3 kg/);
+  assert.deepEqual(validarRetiro({ calle: 'Los Leones', numero: '100', comuna_id: 5 }), {});
+  assert.ok(validarRetiro({}).calle && validarRetiro({}).comuna_id);
+});

@@ -1,3 +1,4 @@
+import { app } from '../app.js';
 import { get } from '../api.js';
 import { badgePago, html } from '../ui.js';
 
@@ -31,6 +32,32 @@ export function avisoWhatsapp(e, negocio) {
 
 export function direccionTexto(e) {
   return `${e.calle} ${e.numero}${e.depto ? `, ${e.depto}` : ''} · ${e.comuna_nombre}`;
+}
+
+// Dirección de retiro (dónde el repartidor recoge el paquete).
+export function retiroTexto(e) {
+  return `${e.retiro_calle} ${e.retiro_numero}${e.retiro_depto ? `, ${e.retiro_depto}` : ''} · ${e.retiro_comuna_nombre || ''}`;
+}
+
+// Tamaño declarado ("Estándar" / "Sobredimensionado") o, en envíos antiguos, peso y medidas.
+export function textoPaquete(e) {
+  const t = app.conf.tarifas;
+  const bultos = `${e.bultos} ${Number(e.bultos) === 1 ? 'bulto' : 'bultos'}`;
+  if (e.tamano === 'estandar') return `${bultos} · Estándar (hasta ${t.dim_estandar_cm}×${t.dim_estandar_cm}×${t.dim_estandar_cm} cm y ${t.peso_estandar_kg} kg)`;
+  if (e.tamano === 'sobredimensionado') return `${bultos} · Sobredimensionado (hasta ${t.dim_max_cm}×${t.dim_max_cm}×${t.dim_max_cm} cm y ${t.peso_max_kg} kg)`;
+  return `${bultos} · ${e.peso_kg} kg · ${e.largo_cm}×${e.ancho_cm}×${e.alto_cm} cm`;
+}
+
+// Mapa de Google para corroborar una dirección (sin clave de API: vista embebida de Google Maps).
+export function urlMapaGoogle(calle, numero, comuna) {
+  if (!String(calle || '').trim() || !comuna) return '';
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${calle} ${numero || ''}, ${comuna}, Chile`)}&output=embed`;
+}
+export function mapaGoogle(id, url) {
+  return html`<div class="mapa-dir" style="margin-top:12px">
+    <iframe id="${id}" title="Mapa de Google con la dirección" src="${url || 'about:blank'}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"
+      style="width:100%;height:240px;border:0;border-radius:14px;background:rgba(255,255,255,.06)"></iframe>
+    <p class="muted" style="margin-top:6px">Revisa en el mapa que el punto sea la dirección correcta. Si no lo es, corrige la calle, el número o la comuna.</p></div>`;
 }
 
 export function itemEnvio(e, { montos = true } = {}) {

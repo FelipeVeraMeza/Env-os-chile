@@ -56,33 +56,47 @@ cobranza.get('/resumen', ruta(async (req, res) => {
 cobranza.get('/comprobantes', ruta(async (req, res) => {
   const todos = req.query.estado === 'todos';
   const { rows } = await query(
-    `SELECT pg.id, pg.envio_id, pg.monto, pg.estado, pg.referencia, pg.motivo_rechazo, pg.creado_en, pg.revisado_en,
+    `SELECT pg.id, pg.envio_id, pg.monto, pg.estado, pg.referencia, pg.motivo_rechazo, pg.creado_en, pg.revisado_en, pg.lote,
        e.folio, e.estado AS envio_estado, e.tarifa_total, u.nombre AS cliente_nombre, s.nombre AS subido_por_nombre, r.nombre AS revisado_por_nombre,
        a.id AS adjunto_id, a.mime, a.nombre_original,
        (SELECT array_agg(DISTINCT e2.folio) FROM pago p2 JOIN adjunto a2 ON a2.id = p2.comprobante_adjunto_id JOIN envio e2 ON e2.id = p2.envio_id
-         WHERE p2.envio_id <> pg.envio_id AND p2.estado IN ('en_revision', 'aprobado')
+         WHERE p2.envio_id <> pg.envio_id AND p2.estado IN ('en_revision', 'aprobado') AND (pg.lote IS NULL OR p2.lote IS DISTINCT FROM pg.lote)
            AND (a2.sha256 = a.sha256 OR (pg.referencia IS NOT NULL AND p2.referencia = pg.referencia))) AS usado_en
      FROM pago pg JOIN adjunto a ON a.id = pg.comprobante_adjunto_id JOIN envio e ON e.id = pg.envio_id
      JOIN usuario u ON u.id = e.cliente_id LEFT JOIN usuario s ON s.id = pg.creado_por LEFT JOIN usuario r ON r.id = pg.revisado_por
      ${todos ? '' : "WHERE pg.estado = 'en_revision'"}
      ORDER BY ${todos ? 'pg.creado_en DESC' : 'pg.creado_en'}, pg.id LIMIT 200`);
-  res.json(rows.map(({ adjunto_id: adjuntoId, ...c }) => ({ ...c, usado_en: c.usado_en || [], comprobante_url: firmarEnlace(adjuntoId, req.usuario.id) })));
+  // Un comprobante del carrito (lote) paga varios envíos: se muestra como una sola fila con todos sus folios y el total.
+  const grupos = new Map();
+  for (const { adjunto_id: adjuntoId, ...c } of rows) {
+    const clave = c.lote || `pago-${c.id}`;
+    const g = grupos.get(clave);
+    if (g) {
+      g.envios.push({ envio_id: c.envio_id, folio: c.folio, monto: c.monto });
+      g.monto += c.monto;
+      g.folio = g.envios.map((x) => x.folio).join(', ');
+      g.usado_en = [...new Set([...g.usado_en, ...(c.usado_en || [])])];
+    } else {
+      grupos.set(clave, { ...c, usado_en: c.usado_en || [], envios: [{ envio_id: c.envio_id, folio: c.folio, monto: c.monto }], comprobante_url: firmarEnlace(adjuntoId, req.usuario.id) });
+    }
+  }
+  res.json([...grupos.values()]);
 }));
 
 cobranza.post('/comprobantes/:id/aprobar', ruta(async (req, res) => {
   const id = idNumerico(req.params.id);
   const referencia = String(req.body?.referencia || '').trim().slice(0, 60) || null;
-  const envioId = await aprobarComprobante(id, { referencia, usuarioId: req.usuario.id });
-  await auditar(req, 'aprobar_comprobante', 'envio', envioId, { pago_id: id, referencia });
-  res.json({ estado: 'aprobado', envio_id: envioId });
+  const envioIds = await aprobarComprobante(id, { referencia, usuarioId: req.usuario.id });
+  for (const envioId of envioIds) await auditar(req, 'aprobar_comprobante', 'envio', envioId, { pago_id: id, referencia });
+  res.json({ estado: 'aprobado', envio_id: envioIds[0], envio_ids: envioIds });
 }));
 
 cobranza.post('/comprobantes/:id/rechazar', ruta(async (req, res) => {
   const id = idNumerico(req.params.id);
   const motivo = validarMotivoRechazo(req.body?.motivo);
-  const envioId = await rechazarComprobante(id, { motivo, usuarioId: req.usuario.id });
-  await auditar(req, 'rechazar_comprobante', 'envio', envioId, { pago_id: id, motivo });
-  res.json({ estado: 'rechazado', envio_id: envioId });
+  const envioIds = await rechazarComprobante(id, { motivo, usuarioId: req.usuario.id });
+  for (const envioId of envioIds) await auditar(req, 'rechazar_comprobante', 'envio', envioId, { pago_id: id, motivo });
+  res.json({ estado: 'rechazado', envio_id: envioIds[0], envio_ids: envioIds });
 }));
 
 cobranza.get('/pagos', ruta(async (req, res) => {

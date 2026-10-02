@@ -38,7 +38,7 @@ export function crearApp() {
         styleSrc: ["'self'", "'unsafe-inline'"],
         fontSrc: ["'self'"],
         mediaSrc: ["'self'", 'blob:'],
-        frameSrc: ["'self'", 'blob:'],
+        frameSrc: ["'self'", 'blob:', 'https://www.google.com', 'https://maps.google.com'], // mapa de Google para corroborar direcciones
         objectSrc: ["'self'", 'blob:'],
       },
     },
