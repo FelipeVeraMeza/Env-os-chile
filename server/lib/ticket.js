@@ -55,19 +55,27 @@ function dibujarEtiqueta(doc, { envio, conf, qr, bulto, termico, ancho, margen }
       .font(negrita ? 'Helvetica-Bold' : 'Helvetica').fillColor('#000000').fontSize(9 * t).text(String(valor));
   };
 
-  // Encabezado de la empresa: logo grande y centrado sobre el nombre
+  // Encabezado de la empresa. Térmico: logo grande centrado sobre el nombre. A4: logo a la izquierda del
+  // nombre, para que el ticket siga cabiendo en una sola hoja.
   const logo = logoEtiqueta(conf);
+  const ladoLogo = termico ? 96 : 72;
+  const inicioEncabezado = doc.y;
+  let anchoEncabezado = util;
+  let xEncabezado = margen;
   if (logo) {
-    const ladoLogo = termico ? 96 : 120;
     try {
-      doc.image(logo, (ancho - ladoLogo) / 2, doc.y, { fit: [ladoLogo, ladoLogo], align: 'center', valign: 'center' });
-      doc.y += ladoLogo + 6;
+      doc.image(logo, termico ? (ancho - ladoLogo) / 2 : margen, inicioEncabezado, { fit: [ladoLogo, ladoLogo], align: 'center', valign: 'center' });
+      if (termico) doc.y = inicioEncabezado + ladoLogo + 6;
+      else { xEncabezado = margen + ladoLogo + 12; anchoEncabezado = util - (ladoLogo + 12) * 2; }
     } catch { /* un logo dañado no debe impedir imprimir la etiqueta */ }
   }
-  doc.fontSize(13 * t).font('Helvetica-Bold').fillColor('#000000').text(conf.negocio.nombre, { align: 'center', width: util });
+  const encabezado = { align: 'center', width: anchoEncabezado };
+  doc.fontSize(13 * t).font('Helvetica-Bold').fillColor('#000000').text(conf.negocio.nombre, xEncabezado, doc.y, encabezado);
   const contacto = [conf.negocio.rut && `RUT ${conf.negocio.rut}`, conf.negocio.telefono, conf.negocio.correo].filter(Boolean).join(' · ');
-  if (contacto) doc.fontSize(7 * t).font('Helvetica').text(contacto, { align: 'center', width: util });
-  doc.fontSize(6.5 * t).fillColor(gris).text('Comprobante interno de envío — no es documento tributario', { align: 'center', width: util });
+  if (contacto) doc.fontSize(7 * t).font('Helvetica').text(contacto, encabezado);
+  doc.fontSize(6.5 * t).fillColor(gris).text('Comprobante interno de envío — no es documento tributario', encabezado);
+  doc.x = margen;
+  if (logo && !termico) doc.y = Math.max(doc.y, inicioEncabezado + ladoLogo);
   linea();
 
   // Folio, bulto y estado de pago
