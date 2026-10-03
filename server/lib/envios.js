@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { uno, query } from '../db/pool.js';
 import { falla } from './http.js';
 import { enlacesMapa, ocultarMontos } from './reglas.js';
@@ -45,6 +46,14 @@ export function puedeVerTicket(usuario, envio) {
   return usuario.rol === 'cliente' && envio.cliente_id === usuario.id && envio.estado !== 'anulado';
 }
 
+// Hasta cuándo se puede pagar antes de que el envío se anule solo (pedido 03-10). El plazo corre desde que se
+// confirmó o, si administración lo reactivó, desde la reactivación. Mismo criterio que lib/vencimientos.js.
+export function venceEn(envio) {
+  if (envio.estado !== 'creado' || envio.estado_pago !== 'pendiente' || envio.repartidor_id) return null;
+  const inicio = new Date(envio.reactivado_en || envio.confirmado_en || envio.creado_en).getTime();
+  return Number.isFinite(inicio) ? new Date(inicio + config.horasSinPago * 3600_000).toISOString() : null;
+}
+
 // Representación pública para la API según el rol (el repartidor no ve montos).
 export function presentar(envio, usuario) {
   const salida = {
@@ -52,6 +61,7 @@ export function presentar(envio, usuario) {
     mapas: enlacesMapa({ calle: envio.calle, numero: envio.numero, comuna: envio.comuna_nombre, region: envio.region, lat: envio.lat, lon: envio.lon }),
     qr_url: envio.folio ? urlQr(envio) : null,
     ticket_url: puedeVerTicket(usuario, envio) ? firmarTicket(envio.id, usuario.id) : null,
+    vence_en: venceEn(envio),
     // Dónde retirar el paquete (dirección del remitente).
     mapas_retiro: envio.retiro_calle
       ? enlacesMapa({ calle: envio.retiro_calle, numero: envio.retiro_numero, comuna: envio.retiro_comuna_nombre, region: envio.retiro_region })

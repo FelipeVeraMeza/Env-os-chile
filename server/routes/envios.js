@@ -11,9 +11,11 @@ import {
 import {
   cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, puedeVerTicket, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
 } from '../lib/envios.js';
-import { conArchivo, subida, verificarTicket } from '../lib/archivos.js';
+import { conArchivo, firmarLote, subida, subidaEntrega, verificarLote, verificarTicket } from '../lib/archivos.js';
+import { optimizarRuta } from '../lib/rutas.js';
+import { INICIO_PLAZO, PREFIJO_VENCIDO } from '../lib/vencimientos.js';
 import { quitarExif } from '../lib/exif.js';
-import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
+import { generarEtiquetasPdf, generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
 import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, cerrarCobrosAbiertos, iniciarPago, registrarComprobante, registrarComprobanteLote, registrarEventoPago } from '../lib/pagos.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
@@ -298,7 +300,9 @@ envios.get('/resumen', ruta(async (req, res) => {
        count(*) FILTER (WHERE e.estado_pago = 'pendiente' AND e.estado NOT IN ('borrador','anulado'))::int AS por_pagar,
        COALESCE(sum(e.tarifa_total) FILTER (WHERE e.estado_pago = 'pendiente' AND e.estado NOT IN ('borrador','anulado')), 0)::int AS monto_por_pagar,
        count(*) FILTER (WHERE e.estado_pago = 'en_revision' AND e.estado <> 'anulado')::int AS en_revision,
-       count(*) FILTER (WHERE e.estado = 'entregado')::int AS entregados
+       count(*) FILTER (WHERE e.estado = 'entregado')::int AS entregados,
+       min(${INICIO_PLAZO}) FILTER (WHERE e.estado = 'creado' AND e.estado_pago = 'pendiente' AND e.repartidor_id IS NULL)
+         + make_interval(hours => ${Number(config.horasSinPago)}) AS proximo_vence_en
      FROM envio e JOIN destinatario d ON d.id = e.destinatario_id JOIN direccion di ON di.id = e.direccion_id JOIN comuna c ON c.id = e.comuna_id ${where}`, params);
   if (req.usuario.rol === 'repartidor') delete r.monto_por_pagar;
   res.json(r);
@@ -383,15 +387,76 @@ envios.put('/ruta/orden', requiereRol('repartidor', 'admin'), ruta(async (req, r
   }
   // Sin repartidor_id, administración ordena su propia ruta (también reparte).
   const repartidorId = req.usuario.rol === 'repartidor' || !req.body.repartidor_id ? req.usuario.id : Number(req.body.repartidor_id);
-  // En una transacción: si hay un envío ajeno en la lista no se cambia nada.
-  const n = await transaccion(async (db) => {
+  res.json({ ok: true, ordenados: await guardarOrden(ids, repartidorId) });
+}));
+
+// En una transacción: si hay un envío ajeno en la lista no se cambia nada.
+function guardarOrden(ids, repartidorId) {
+  return transaccion(async (db) => {
     const r = await db.query(
       `UPDATE envio e SET orden_ruta = o.pos FROM unnest($1::int[]) WITH ORDINALITY AS o(id, pos)
        WHERE e.id = o.id AND e.repartidor_id = $2 AND e.estado = ANY($3)`, [ids, repartidorId, EN_RUTA_REPARTIDOR]);
     if (r.rowCount !== ids.length) throw falla(403, 'Solo puedes ordenar envíos asignados a ti que siguen en tu ruta');
     return r.rowCount;
   });
-  res.json({ ok: true, ordenados: n });
+}
+
+// Ordena la ruta sola (pedido 03-10): desde donde está el repartidor (GPS del teléfono, opcional) hacia la parada
+// más cercana. Igual que la pantalla: primero lo que va en ruta (a entregar) y después lo por retirar o reintentar.
+envios.post('/ruta/optimizar', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
+  const lat = Number(req.body?.lat);
+  const lon = Number(req.body?.lon);
+  const inicio = req.body?.lat != null && req.body?.lon != null && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? [lat, lon] : null;
+  const { rows } = await query(
+    `SELECT e.id, e.estado, di.lat, di.lon, di.calle, c.nombre AS comuna, e.retiro_calle, rc.nombre AS retiro_comuna
+       FROM envio e JOIN direccion di ON di.id = e.direccion_id JOIN comuna c ON c.id = e.comuna_id
+       LEFT JOIN comuna rc ON rc.id = e.retiro_comuna_id
+      WHERE e.repartidor_id = $1 AND e.estado = ANY($2) ORDER BY e.id LIMIT 200`, [req.usuario.id, EN_RUTA_REPARTIDOR]);
+  // Un envío por retirar se ubica en la dirección de retiro; los demás en la de entrega.
+  const parada = (e) => (e.estado === 'asignado' && e.retiro_calle
+    ? { id: e.id, comuna: e.retiro_comuna, calle: e.retiro_calle }
+    : { id: e.id, lat: e.lat, lon: e.lon, comuna: e.comuna, calle: e.calle });
+  const ids = [
+    ...optimizarRuta(rows.filter((e) => e.estado === 'en_ruta').map(parada), inicio),
+    ...optimizarRuta(rows.filter((e) => e.estado !== 'en_ruta').map(parada), inicio),
+  ];
+  if (ids.length) await guardarOrden(ids, req.usuario.id);
+  res.json({ ok: true, ids, con_gps: Boolean(inicio) });
+}));
+
+// Escanear el QR de la etiqueta (pedido 03-10): el QR lleva el token del envío. El repartidor solo encuentra los
+// envíos de su ruta; administración, cualquiera.
+envios.get('/por-qr/:token', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
+  const token = String(req.params.token || '');
+  const fila = /^[A-Za-z0-9_-]{8,100}$/.test(token) ? await uno('SELECT id FROM envio WHERE token_qr = $1', [token]) : null;
+  if (!fila) throw falla(404, 'Código QR no reconocido');
+  const envio = await cargarEnvio(fila.id);
+  if (req.usuario.rol === 'repartidor' && envio.repartidor_id !== req.usuario.id) throw falla(404, 'Este envío no está en tu ruta');
+  res.json(presentar(envio, req.usuario));
+}));
+
+// Cobranza: envíos que se anulan pronto por falta de pago y los anulados así en los últimos 7 días (para reactivarlos).
+const ULTIMA_ANULACION_AUTOMATICA = `(SELECT h.usuario_id IS NULL AND h.motivo LIKE '${PREFIJO_VENCIDO}%' AND h.fecha > now() - interval '7 days'
+   FROM envio_estado h WHERE h.envio_id = e.id AND h.estado_nuevo = 'anulado' ORDER BY h.fecha DESC, h.id DESC LIMIT 1)`;
+envios.get('/vencimientos', requiereRol('admin'), ruta(async (req, res) => {
+  const [porVencer, anulados] = await Promise.all([
+    query(`${SELECT_ENVIO} WHERE e.estado = 'creado' AND e.estado_pago = 'pendiente' AND e.repartidor_id IS NULL ORDER BY ${INICIO_PLAZO}, e.id LIMIT 200`),
+    query(`${SELECT_ENVIO} WHERE e.estado = 'anulado' AND e.estado_pago = 'pendiente' AND ${ULTIMA_ANULACION_AUTOMATICA} ORDER BY e.actualizado_en DESC LIMIT 100`),
+  ]);
+  res.json({ horas: config.horasSinPago, por_vencer: porVencer.rows.map((e) => presentar(e, req.usuario)), anulados: anulados.rows.map((e) => presentar(e, req.usuario)) });
+}));
+
+// Etiquetas de los envíos confirmados un día (pedido 03-10): cuenta y enlace firmado al PDF con todas.
+const DEL_DIA = "e.folio IS NOT NULL AND e.estado NOT IN ('borrador', 'anulado') AND (e.confirmado_en AT TIME ZONE 'America/Santiago')::date = $1::date";
+const fechaValida = (f) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(f || ''))) return false;
+  const d = new Date(`${f}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === f; // descarta 2026-02-30 y similares
+};
+envios.get('/etiquetas-del-dia', requiereRol('admin'), ruta(async (req, res) => {
+  const fecha = fechaValida(req.query.fecha) ? req.query.fecha : new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+  const r = await uno(`SELECT count(*)::int AS envios, COALESCE(sum(e.bultos), 0)::int AS bultos FROM envio e WHERE ${DEL_DIA}`, [fecha]);
+  res.json({ fecha, ...r, url: r.envios ? firmarLote(fecha, req.usuario.id) : null });
 }));
 
 async function envioAccesible(req) {
@@ -475,6 +540,26 @@ envios.post('/:id/estado', ruta(async (req, res) => {
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));
 
+// Reactivar un envío anulado automáticamente por falta de pago (pedido 03-10): vuelve a "creado" y el plazo de
+// pago empieza de nuevo. Solo administración, y solo si la última anulación fue la automática.
+envios.post('/:id/reactivar', requiereRol('admin'), ruta(async (req, res) => {
+  const envio = await envioAccesible(req);
+  if (envio.estado !== 'anulado') throw falla(409, 'Solo se reactiva un envío anulado');
+  const ultima = await uno(
+    "SELECT usuario_id, motivo FROM envio_estado WHERE envio_id = $1 AND estado_nuevo = 'anulado' ORDER BY fecha DESC, id DESC LIMIT 1", [envio.id]);
+  if (!ultima || ultima.usuario_id !== null || !String(ultima.motivo || '').startsWith(PREFIJO_VENCIDO)) {
+    throw falla(409, 'Solo se reactivan los envíos que se anularon solos por falta de pago');
+  }
+  if (envio.estado_pago !== 'pendiente') throw falla(409, 'El pago de este envío ya no está pendiente');
+  await transaccion(async (db) => {
+    exigirSinConflicto(await db.query(
+      "UPDATE envio SET estado = 'creado', reactivado_en = now(), aviso_vencimiento_en = NULL, actualizado_en = now() WHERE id = $1 AND estado = 'anulado'", [envio.id]));
+    await registrarEstado(db, { envioId: envio.id, anterior: 'anulado', nuevo: 'creado', motivo: `Reactivado por administración: tiene ${config.horasSinPago} horas más para pagar`, usuarioId: req.usuario.id });
+  });
+  await auditar(req, 'reactivar', 'envio', envio.id);
+  res.json(presentar(await cargarEnvio(envio.id), req.usuario));
+}));
+
 // El repartidor registra que llegó al destino: empieza la espera máxima (5 min).
 envios.post('/:id/llegada', requiereRol('admin', 'repartidor'), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
@@ -486,13 +571,19 @@ envios.post('/:id/llegada', requiereRol('admin', 'repartidor'), ruta(async (req,
 }));
 
 // Cierre de entrega: foto OBLIGATORIA + ubicación GPS.
-envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('foto'), ruta(async (req, res) => {
+envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subidaEntrega.fields([{ name: 'foto', maxCount: 1 }, { name: 'firma', maxCount: 1 }]), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
   if (req.usuario.rol === 'repartidor' && envio.repartidor_id !== req.usuario.id) throw falla(403, 'El envío no está asignado a ti');
   const conf = await leerConfig();
   validarTransicion({ actual: envio.estado, nuevo: 'entregado', estadoPago: envio.estado_pago, intentos: envio.intentos, config: conf });
+  req.file = req.files?.foto?.[0];
+  // Firma del destinatario en la pantalla (opcional, pedido 03-10): PNG dibujado en el teléfono del repartidor.
+  const firma = req.files?.firma?.[0] || null;
   if (!req.file) throw falla(422, 'La foto de la entrega es obligatoria para cerrar el envío', { foto: 'Obligatoria' });
   if (!MIME_IMAGEN.includes(req.file.mimetype)) throw falla(422, 'La foto debe ser JPG, PNG o WebP', { foto: 'Formato inválido' });
+  if (firma && (firma.mimetype !== 'image/png' || !firma.buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))) {
+    throw falla(422, 'La firma debe ser una imagen PNG', { firma: 'Formato inválido' });
+  }
   const ubic = validarUbicacion(req.body, conf.operacion.gps_obligatorio);
   // Precisión del GPS en metros: número positivo o nada (Postgres aceptaría "NaN" y lo guardaría).
   const precision = req.body.precision === undefined || req.body.precision === '' ? null : Number(req.body.precision);
@@ -502,20 +593,29 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subida.single('
   const hora = req.body.hora_entrega ? new Date(req.body.hora_entrega) : null;
   const horaReal = hora && !Number.isNaN(hora.getTime()) && hora.getTime() <= Date.now() + 5 * 60_000 && hora.getTime() >= Date.now() - 72 * 3600_000 ? hora : null;
 
-  await conArchivo(quitarExif(req.file.buffer), req.file.mimetype, (archivo) => transaccion(async (db) => {
+  // La firma se guarda primero (si viene); la foto y el cambio de estado van en la misma transacción.
+  const conFirma = (fn) => (firma ? conArchivo(firma.buffer, 'image/png', fn) : fn(null));
+  await conFirma((archivoFirma) => conArchivo(quitarExif(req.file.buffer), req.file.mimetype, (archivo) => transaccion(async (db) => {
     await db.query(
       `INSERT INTO adjunto (envio_id, tipo, nombre_original, mime, tamano, ruta, sha256, subido_por)
        VALUES ($1, 'foto_entrega', $2, $3, $4, $5, $6, $7)`,
       [envio.id, req.file.originalname, req.file.mimetype, archivo.tamano, archivo.ruta, archivo.sha256, req.usuario.id],
     );
+    if (archivoFirma) {
+      await db.query(
+        `INSERT INTO adjunto (envio_id, tipo, nombre_original, mime, tamano, ruta, sha256, subido_por)
+         VALUES ($1, 'firma_entrega', 'firma.png', 'image/png', $2, $3, $4, $5)`,
+        [envio.id, archivoFirma.tamano, archivoFirma.ruta, archivoFirma.sha256, req.usuario.id],
+      );
+    }
     exigirSinConflicto(await db.query(
       `UPDATE envio SET estado = 'entregado', entregado_en = COALESCE($7, now()), entrega_lat = $1, entrega_lon = $2, entrega_precision_m = $3,
          entrega_receptor = $4, actualizado_en = now() WHERE id = $5 AND estado = $6`,
       [ubic?.lat ?? null, ubic?.lon ?? null, precision, receptor, envio.id, envio.estado, horaReal],
     ));
-    const notas = [receptor && `Recibe: ${receptor}`, horaReal && 'registrada sin conexión', !ubic && 'sin GPS'].filter(Boolean).join(' · ') || null;
+    const notas = [receptor && `Recibe: ${receptor}`, firma && 'con firma', horaReal && 'registrada sin conexión', !ubic && 'sin GPS'].filter(Boolean).join(' · ') || null;
     await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: notas });
-  }));
+  })));
   await auditar(req, 'entregar', 'envio', envio.id, { lat: ubic?.lat, lon: ubic?.lon });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));
@@ -690,6 +790,22 @@ async function enviarTicket(res, envio, usuario, formato) {
 
 // Etiqueta por enlace firmado (sin cabeceras de sesión): lo abre el visor de PDF del celular directamente.
 export const tickets = Router();
+tickets.get('/lote', ruta(async (req, res) => {
+  const { fecha, exp, u, sig } = req.query;
+  if (!verificarLote(fecha, exp, u, sig)) {
+    await registrarEvento(req, 'enlace_invalido', { usuarioId: null, detalle: { lote: String(fecha || '').slice(0, 10) } });
+    throw falla(403, 'Enlace vencido: vuelve a abrir las etiquetas desde la app');
+  }
+  const usuario = await uno('SELECT id, rol, activo FROM usuario WHERE id = $1', [Number(u)]);
+  if (!usuario?.activo || usuario.rol !== 'admin') throw falla(403, 'Enlace vencido: vuelve a abrir las etiquetas desde la app');
+  const { rows } = await query(`${SELECT_ENVIO} WHERE ${DEL_DIA} ORDER BY e.folio LIMIT 300`, [fecha]);
+  if (!rows.length) throw falla(404, 'No hay envíos confirmados ese día');
+  const pdf = await generarEtiquetasPdf(rows, await leerConfig(), req.query.formato === 'a4' ? 'a4' : '80mm', `Etiquetas ${fecha}`);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Disposition', `inline; filename="etiquetas-${fecha}.pdf"`);
+  res.send(pdf);
+}));
 tickets.get('/:id', ruta(async (req, res) => {
   const id = idNumerico(req.params.id);
   if (!verificarTicket(id, req.query.exp, req.query.u, req.query.sig)) {

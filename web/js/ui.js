@@ -45,6 +45,33 @@ export function toast(mensaje, tipo = '') {
 
 export function errorToast(err) { toast(err.message || 'Ocurrió un error', 'error'); }
 
+// Botón para copiar un dato con un toque (datos bancarios y monto de la transferencia, pedido 03-10).
+export function botonCopiar(valor, etiqueta = 'dato') {
+  return html`<button type="button" class="copiar" data-copiar="${String(valor ?? '')}" aria-label="Copiar ${etiqueta}">Copiar</button>`;
+}
+async function copiarTexto(texto) {
+  try { await navigator.clipboard.writeText(texto); return true; } catch { /* sin permiso o sin HTTPS: método antiguo */ }
+  const area = Object.assign(document.createElement('textarea'), { value: texto });
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+  document.body.append(area);
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  area.remove();
+  return ok;
+}
+document.addEventListener('click', async (ev) => {
+  const b = ev.target.closest?.('[data-copiar]');
+  if (!b) return;
+  ev.preventDefault();
+  if (await copiarTexto(b.dataset.copiar)) {
+    toast(`Copiado: ${b.dataset.copiar}`, 'ok');
+    b.textContent = '✔ Copiado';
+    setTimeout(() => { b.textContent = 'Copiar'; }, 2000);
+  } else toast('No se pudo copiar: mantén presionado el dato para copiarlo', 'error');
+});
+
 // Abre un modal; devuelve { el, cerrar }. onClose se ejecuta al cerrar.
 // fijo: true → no se cierra con Escape, clic afuera ni ✕ (solo por código).
 export function modal(contenido, { onClose, fijo = false } = {}) {

@@ -27,8 +27,8 @@ async function tabla(modo, operacion) {
 }
 
 // Guarda una entrega hecha sin señal. Se identifica por el envío: guardarla de nuevo reemplaza la anterior.
-export async function guardarEntrega({ envioId, foto, lat, lon, precision, receptor }) {
-  await tabla('readwrite', (t) => t.put({ envioId, foto, lat, lon, precision, receptor, hora: new Date().toISOString() }));
+export async function guardarEntrega({ envioId, foto, firma = null, lat, lon, precision, receptor }) {
+  await tabla('readwrite', (t) => t.put({ envioId, foto, firma, lat, lon, precision, receptor, hora: new Date().toISOString() }));
 }
 
 export async function entregasPendientes() {
@@ -49,6 +49,7 @@ export async function enviarPendientes() {
     for (const x of await entregasPendientes()) {
       const fd = new FormData();
       fd.append('foto', x.foto, 'entrega.jpg');
+      if (x.firma) fd.append('firma', x.firma, 'firma.png');
       if (x.lat != null && x.lon != null) { fd.append('lat', x.lat); fd.append('lon', x.lon); if (x.precision) fd.append('precision', x.precision); }
       if (x.receptor) fd.append('receptor', x.receptor);
       fd.append('hora_entrega', x.hora);

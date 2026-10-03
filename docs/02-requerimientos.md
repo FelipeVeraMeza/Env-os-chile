@@ -128,6 +128,15 @@ Faltan para operar con clientes reales. La mayoría depende de respuestas del cl
 | RF-71 | **Pago por transferencia con comprobante**: el cliente sube la imagen (o PDF) de la transferencia y el pago queda **en revisión**; administración la ve y **aprueba** o **rechaza con motivo** (el cliente sube otra). **El pago manda**: sin pago aprobado no se asigna repartidor ni se retira (la etiqueta sí se imprime antes de pagar, pedido 03-10). Avisa si el mismo comprobante o N° de operación ya se usó en otro envío | I | ✅ | CP-160 a CP-170 |
 | RF-72 | **Etiqueta antes de pagar** (pedido 03-10): el cliente ve e imprime la etiqueta (80 mm y A4) apenas confirma el envío. El botón es un enlace firmado que vence en 12 horas, así el celular abre el PDF directo (antes el navegador del celular bloqueaba la pestaña y la etiqueta no salía) | I | ✅ | CP-22, CP-160, simulación por rol |
 | RF-73 | **Anulación automática por falta de pago** (pedido 03-10): un envío confirmado que sigue con el pago pendiente 24 horas después (configurable con `ANULAR_SIN_PAGO_HORAS`) se anula solo y queda en su historial como "Sistema". No se anulan los que tienen un comprobante en revisión ni los que ya tienen repartidor. El cliente ve el plazo en el envío | I | ✅ | simulación de vencimiento |
+| RF-74 | **Copiar datos de la transferencia** con un toque: monto exacto (sin puntos ni signo), N° de cuenta, RUT y correo, en el pago de un envío y en el carrito | A | ✅ | simulación ★1 |
+| RF-75 | **Aviso antes de la anulación**: correo automático al cliente 2 horas antes (si hay SMTP), aviso en el inicio y en "Por pagar" con la hora límite, y botón "Recordar por WhatsApp" en Cobranza | A | ✅ | simulación ★2 y ★19 |
+| RF-76 | **Repetir un envío**: desde el detalle, el asistente se abre con el mismo retiro, destinatario, dirección y paquete (el valor declarado no se copia) | A | ✅ | simulación ★3 |
+| RF-77 | **Cobranza: por vencer**: lista de envíos sin pagar con la hora en que se anulan y cuánto falta | I | ✅ | simulación ★19 |
+| RF-78 | **Etiquetas del día en lote**: un PDF con todas las etiquetas de los envíos confirmados un día (térmica: una por bulto; A4: una hoja por envío), por enlace firmado solo para administración | A | ✅ | simulación ★20 |
+| RF-79 | **Reactivar** un envío que se anuló solo por falta de pago: vuelve a "creado" con 24 horas nuevas; queda en el historial. No aplica a anulaciones hechas a mano | A | ✅ | simulación ★21 |
+| RF-80 | **Ordenar la ruta automáticamente** desde la ubicación del repartidor (vecino más cercano + 2-opt; GPS de la dirección o centro de la comuna) | A | ✅ | tests/unit/rutas, simulación ★36 |
+| RF-81 | **Escanear la etiqueta**: la cámara lee el QR (o se escribe el folio si el teléfono no tiene lector); un envío por retirar se marca retirado y uno en ruta abre la entrega | A | ✅ | simulación ★37 |
+| RF-82 | **Firma del destinatario** en la pantalla al entregar (opcional): queda como imagen del envío, también en entregas guardadas sin señal | A | ✅ | simulación ★38 |
 
 ## Requerimientos no funcionales
 

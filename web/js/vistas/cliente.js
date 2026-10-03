@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { enviarForm, get, post, patch, api, urlApi } from '../api.js';
 import {
-  $, $$, badgePago, clp, comprimirFoto, datosForm, errorToast, esqueleto, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio,
+  $, $$, badgePago, botonCopiar, clp, comprimirFoto, datosForm, errorToast, esqueleto, fechaHora, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio,
 } from '../ui.js';
 import { comunasCobertura, direccionTexto, itemEnvio, mapaGoogle, opcionesComunas, textoPaquete, urlMapaGoogle } from './comun.js';
 import { pagar, subirComprobante } from './envios.js';
@@ -28,7 +28,7 @@ export async function inicio() {
       <div class="kpi"><div class="etiqueta">Entregados</div><div class="valor">${r.entregados}</div><div class="nota">con foto y GPS</div></div>
       <div class="kpi destacado"><div class="etiqueta">Total</div><div class="valor">${r.total}</div><div class="nota">envíos registrados</div></div>
     </div>
-    ${r.por_pagar ? html`<div class="aviso magenta fila entre" style="margin-bottom:16px"><span><b>Tienes ${r.por_pagar} envío(s) pendientes de pago (${clp(r.monto_por_pagar)}).</b> El repartidor solo puede retirar envíos pagados, y los que sigan sin pagar ${app.conf.operacion.horas_sin_pago || 24} horas después de creados se anulan solos.</span>
+    ${r.por_pagar ? html`<div class="aviso magenta fila entre" style="margin-bottom:16px"><span><b>Tienes ${r.por_pagar} envío(s) pendientes de pago (${clp(r.monto_por_pagar)}).</b> El repartidor solo puede retirar envíos pagados, y los que sigan sin pagar ${app.conf.operacion.horas_sin_pago || 24} horas después de creados se anulan solos.${r.proximo_vence_en ? html` <b>El primero se anula el ${fechaHora(r.proximo_vence_en)}.</b>` : ''}</span>
       <a class="btn chico" href="#/carrito">Pagar todos con una transferencia</a></div>` : ''}
     ${r.en_revision ? html`<div class="aviso" style="margin-bottom:16px"><b>${r.en_revision} comprobante(s) de transferencia en revisión.</b> El repartidor retira cuando administración apruebe el pago.</div>` : ''}
     <div class="card">
@@ -53,17 +53,18 @@ export async function carrito() {
     ${items.length ? html`
       <form class="card" id="f-carrito" novalidate>
         <div class="lista-envios">${items.map((e) => html`<label class="item-envio" style="cursor:pointer">
-          <div><div class="folio">${e.folio}</div><div class="dir">${e.destinatario_nombre} · ${direccionTexto(e)}</div><div class="sub">${textoPaquete(e)}</div></div>
+          <div><div class="folio">${e.folio}</div><div class="dir">${e.destinatario_nombre} · ${direccionTexto(e)}</div><div class="sub">${textoPaquete(e)}</div>
+            ${e.vence_en ? html`<div class="sub" style="color:var(--alerta)">Se anula el ${fechaHora(e.vence_en)} si no se paga</div>` : ''}</div>
           <div class="der"><span class="monto">${clp(e.tarifa_total)}</span><input type="checkbox" name="envio" value="${e.id}" data-monto="${e.tarifa_total}" checked style="width:22px;min-height:22px"></div>
         </label>`)}</div>
-        <div class="fila entre" style="margin:16px 0 8px"><span class="sub" id="cuenta-carrito"></span><div class="monto-grande" id="total-carrito"></div></div>
+        <div class="fila entre" style="margin:16px 0 8px"><span class="sub" id="cuenta-carrito"></span><div class="fila"><div class="monto-grande" id="total-carrito"></div><button type="button" class="copiar" id="copiar-total" data-copiar="" aria-label="Copiar monto">Copiar</button></div></div>
         ${t.banco && t.numero_cuenta ? html`<div class="desglose" style="margin-bottom:12px">
             <div><span>Banco</span><b>${t.banco}</b></div>
             ${t.tipo_cuenta ? html`<div><span>Tipo de cuenta</span><b>${t.tipo_cuenta}</b></div>` : ''}
-            <div><span>N° de cuenta</span><b class="mono">${t.numero_cuenta}</b></div>
+            <div><span>N° de cuenta</span><b class="mono">${t.numero_cuenta} ${botonCopiar(t.numero_cuenta, 'número de cuenta')}</b></div>
             ${t.titular ? html`<div><span>Titular</span><b>${t.titular}</b></div>` : ''}
-            ${t.rut ? html`<div><span>RUT</span><b>${t.rut}</b></div>` : ''}
-            ${t.correo ? html`<div><span>Correo</span><b>${t.correo}</b></div>` : ''}
+            ${t.rut ? html`<div><span>RUT</span><b>${t.rut} ${botonCopiar(t.rut, 'RUT')}</b></div>` : ''}
+            ${t.correo ? html`<div><span>Correo</span><b>${t.correo} ${botonCopiar(t.correo, 'correo')}</b></div>` : ''}
           </div>` : html`<div class="aviso" style="margin-bottom:12px">Pide a la empresa los datos de la cuenta para transferir.</div>`}
         <label class="campo">Comprobante de la transferencia * <small>(imagen o PDF)</small><input type="file" name="archivo" accept="image/*,application/pdf"></label>
         <label class="campo" style="margin-top:10px">N° de operación <small>(opcional)</small><input name="referencia" maxlength="60" placeholder="Aparece en el comprobante"></label>
@@ -78,7 +79,9 @@ export async function carrito() {
   const marcados = () => $$('input[name="envio"]:checked', f);
   const actualizar = () => {
     const sel = marcados();
-    $('#total-carrito').textContent = clp(sel.reduce((s, x) => s + Number(x.dataset.monto), 0));
+    const total = sel.reduce((s, x) => s + Number(x.dataset.monto), 0);
+    $('#total-carrito').textContent = clp(total);
+    $('#copiar-total').dataset.copiar = String(Math.round(total));
     $('#cuenta-carrito').textContent = `${sel.length} de ${items.length} envío(s) marcados · total a transferir`;
     $('#pagar-carrito').disabled = !sel.length;
   };
@@ -129,7 +132,34 @@ export async function nuevo() {
     const r = w.clienteId ? await get(`/api/envios/retiro-guardado${esAdmin ? `?cliente_id=${w.clienteId}` : ''}`).catch(() => null) : null;
     w.retiro = r ? { calle: r.calle, numero: r.numero, depto: r.depto || '', referencia: r.referencia || '', comuna_id: r.comuna_id } : {};
   };
+  // Repetir un envío anterior (pedido 03-10): mismo retiro, destinatario, dirección y paquete. Se abre en el paso
+  // del paquete para revisar y confirmar. El valor declarado no se copia (necesita su propia boleta).
+  const base = app.repetir;
+  app.repetir = null;
+  if (base && esAdmin) w.clienteId = base.cliente_id;
   await Promise.all([cargarLibreta(), cargarRetiro()]);
+  if (base) {
+    if (base.retiro_calle) w.retiro = { calle: base.retiro_calle, numero: base.retiro_numero, depto: base.retiro_depto || '', referencia: base.retiro_referencia || '', comuna_id: base.retiro_comuna_id };
+    const dirAnterior = { calle: base.calle, numero: base.numero, depto: base.depto || '', comuna_id: base.comuna_id, referencia: base.referencia || '', alias: '' };
+    const dest = libreta.find((d) => d.id === base.destinatario_id);
+    if (dest) {
+      w.modoDest = 'libreta';
+      w.destinatario = dest;
+      const dir = dest.direcciones.find((x) => x.id === base.direccion_id);
+      w.direccionId = dir ? dir.id : 'nueva';
+      if (!dir) w.nuevaDir = dirAnterior;
+    } else {
+      w.modoDest = 'nuevo';
+      w.nuevoDest = { nombre: base.destinatario_nombre, telefono: base.destinatario_telefono, correo: base.destinatario_correo || '' };
+      w.nuevaDir = dirAnterior;
+    }
+    w.tipo_destino = base.tipo_destino === 'punto_courier' && app.conf.operacion.punto_courier ? 'punto_courier' : 'domicilio';
+    if (w.tipo_destino === 'punto_courier') w.courier = { courier_empresa: base.courier_empresa, courier_punto: base.courier_punto, courier_codigo: base.courier_codigo || '' };
+    w.paquete = { bultos: base.bultos || 1, tamano: base.tamano || undefined, descripcion_producto: base.descripcion_producto || '', observaciones: base.observaciones || '',
+      horario_especial: Boolean(base.horario_especial), franja_horaria: base.franja_horaria || '' };
+    w.repitiendo = base.folio;
+    w.paso = P.paquete;
+  }
   const nombreComuna = (id) => comunas.find((x) => String(x.id) === String(id))?.nombre || '';
 
   const cuerpo = () => {
@@ -287,6 +317,7 @@ export async function nuevo() {
   const pintar = () => {
     montar(vista, html`
       <div class="encabezado"><div><h1>Nuevo envío</h1><p>Paso ${w.paso + 1} de ${PASOS.length} · ${PASOS[w.paso]}</p></div></div>
+      ${w.repitiendo ? html`<div class="aviso" style="margin-bottom:16px">Repitiendo el envío <b class="mono">${w.repitiendo}</b>: revisa el paquete y continúa. Puedes volver atrás para cambiar el retiro, el destinatario o la dirección.</div>` : ''}
       <div class="pasos">${PASOS.map((p, i) => html`<div class="paso ${i < w.paso ? 'hecho' : i === w.paso ? 'actual' : ''}">${p}</div>`)}</div>
       <form class="card" id="form-envio" novalidate>
         ${cuerpo()}

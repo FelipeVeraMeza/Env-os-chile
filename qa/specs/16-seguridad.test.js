@@ -37,8 +37,15 @@ test('CP-142 · Intentar abrir envíos ajenos se registra y 5 intentos generan u
   const ev = await eventos({ tipo: 'sondeo_ajeno', usuario_id: esc.cliente.usuario.id });
   assert.ok(ev.length >= 5);
   assert.equal(ev[0].detalle.existe, true);
-  const alertas = (await peticion('GET', '/api/seguridad/alertas', { sesion: esc.admin })).datos;
-  assert.ok(alertas.some((a) => a.regla === 'enumeracion' && a.usuario_id === esc.cliente.usuario.id && a.nivel === 'critica'));
+  // El intento se registra sin demorar la respuesta (server/lib/http.js), así que la alerta aparece unos
+  // milisegundos después: con la tabla de eventos grande (tras el barrido CP-139) la prueba llegaba antes.
+  let alerta = false;
+  for (let i = 0; i < 30 && !alerta; i++) {
+    const alertas = (await peticion('GET', '/api/seguridad/alertas', { sesion: esc.admin })).datos;
+    alerta = alertas.some((a) => a.regla === 'enumeracion' && a.usuario_id === esc.cliente.usuario.id && a.nivel === 'critica');
+    if (!alerta) await new Promise((r) => { setTimeout(r, 100); });
+  }
+  assert.ok(alerta, 'se abre una alerta crítica de enumeración');
 });
 
 test('CP-143 · La exportación queda registrada con la cantidad de registros y sin inyección de fórmulas', async () => {

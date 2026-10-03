@@ -1,7 +1,7 @@
-import { app } from '../app.js';
+import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, put } from '../api.js';
 import {
-  $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, html, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
+  $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, html, modal, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, direccionTexto, retiroTexto, textoPaquete } from './comun.js';
 import { enviarPendientes, entregaPendiente, guardarCopia, guardarEntrega, leerCopia } from '../sin-conexion.js';
@@ -75,6 +75,9 @@ export async function ruta() {
     <section class="hero"><p>${new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Santiago' })}</p>
       <h1>Mi ruta</h1>
       <div class="fila"><span class="badge" style="background:rgba(255,255,255,.2)">${enRuta.length} en ruta</span><span class="badge" style="background:rgba(255,255,255,.2)">${porRetirar.length} por retirar</span><span class="badge" style="background:rgba(255,255,255,.2)">${hechos.total} cerrados hoy</span>${disponibles.total ? html`<span class="badge" style="background:rgba(255,255,255,.2)">${disponibles.total} disponibles</span>` : ''}</div></section>
+    ${offline ? '' : html`<div class="grid g2" style="margin-bottom:16px">
+      <button class="btn grande" id="escanear">Escanear etiqueta (QR)</button>
+      <button class="btn sec grande" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente</button></div>`}
     <div class="card"><h2>En ruta</h2><div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
     <div class="card"><h2>Por retirar / reintentar</h2><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
     ${disponibles.autoasignacion || esAdmin ? html`<div class="card"><div class="card-titulo"><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
@@ -82,6 +85,19 @@ export async function ruta() {
       ${disponibles.total > 10 ? html`<button class="btn sec ancho" id="ver-disponibles" style="margin-top:12px">Ver los ${disponibles.total - 10} restantes</button>` : ''}</div>`
     : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
   $$('[data-mover]').forEach((b) => { b.onclick = () => mover(Number(b.dataset.mover), Number(b.dataset.paso)); });
+  $('#escanear')?.addEventListener('click', () => escanearEtiqueta(ruta));
+  // Ordena la ruta sola desde donde está el repartidor (si el teléfono da la ubicación; si no, desde el centro).
+  $('#optimizar')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Ordenando…';
+    const ubic = await Promise.race([obtenerGps().catch(() => null), new Promise((r) => { setTimeout(() => r(null), 6000); })]);
+    try {
+      const r = await post('/api/envios/ruta/optimizar', ubic ? { lat: ubic.lat, lon: ubic.lon } : {});
+      toast(r.con_gps ? 'Ruta ordenada desde tu ubicación' : 'Ruta ordenada (sin GPS: desde el centro de Santiago)', 'ok');
+      ruta();
+    } catch (err) { errorToast(err); btn.disabled = false; btn.textContent = 'Ordenar ruta automáticamente'; }
+  });
   // Los disponibles se muestran de a 10: con muchos, la ruta propia quedaba perdida al final de una lista larga.
   $('#ver-disponibles')?.addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
@@ -242,6 +258,9 @@ function entregar(e, recargar) {
       <div class="aviso" id="gps">Obteniendo ubicación GPS…</div>
       ${esDemo ? html`<button type="button" class="btn sec chico" id="gps-demo">Usar ubicación de prueba (solo demo)</button>` : ''}
       <label class="campo">¿Quién recibe? <small>(opcional)</small><input name="receptor" placeholder="Nombre de quien recibe"></label>
+      <div class="campo"><span>Firma de quien recibe <small>(opcional)</small></span>
+        <canvas id="firma" class="firma-pad" aria-label="Recuadro para firmar con el dedo"></canvas>
+        <div class="fila entre"><small id="firma-estado">Firma con el dedo dentro del recuadro.</small><button type="button" class="btn sec chico" id="borrar-firma">Borrar firma</button></div></div>
       <div class="fila"><button type="button" class="btn sec" id="cancelar">Cancelar</button><button class="btn grande" id="confirmar-ent" disabled>Confirmar entrega</button></div>
     </form></div>`);
   $('#modal-raiz').append(cont);
@@ -269,18 +288,22 @@ function entregar(e, recargar) {
     img.style.display = 'block';
     listo();
   };
+  const pad = padFirma($('#firma', cont), () => { $('#firma-estado', cont).textContent = '✔ Firma lista'; });
+  $('#borrar-firma', cont).onclick = () => { pad.borrar(); $('#firma-estado', cont).textContent = 'Firma con el dedo dentro del recuadro.'; };
   $('#cancelar', cont).onclick = () => cont.remove();
   $('#f-ent', cont).onsubmit = async (ev) => {
     ev.preventDefault();
     if (!foto) return toast('La foto es obligatoria para terminar la entrega', 'error');
+    const firma = await pad.png();
     const fd = new FormData();
     fd.append('foto', foto, 'entrega.jpg');
+    if (firma) fd.append('firma', firma, 'firma.png');
     if (ubic) { fd.append('lat', ubic.lat); fd.append('lon', ubic.lon); if (ubic.precision) fd.append('precision', ubic.precision); }
     if (ev.target.receptor.value) fd.append('receptor', ev.target.receptor.value);
     const btn = $('#confirmar-ent', cont);
     btn.disabled = true;
     const guardarSinSenal = async () => {
-      await guardarEntrega({ envioId: e.id, foto, lat: ubic?.lat, lon: ubic?.lon, precision: ubic?.precision, receptor: ev.target.receptor.value || null });
+      await guardarEntrega({ envioId: e.id, foto, firma, lat: ubic?.lat, lon: ubic?.lon, precision: ubic?.precision, receptor: ev.target.receptor.value || null });
       cont.remove();
       toast('Sin señal: la entrega quedó guardada en el teléfono y se enviará sola al volver internet', 'ok');
       recargar();
@@ -338,3 +361,121 @@ function fallido(e, segundosDesdeLlegada, espera, recargar) {
   };
 }
 
+
+// ================= Firma en la pantalla (pedido 03-10) =================
+// Recuadro para firmar con el dedo. png() devuelve la firma como imagen PNG, o null si no se firmó.
+function padFirma(canvas, alFirmar) {
+  const escala = window.devicePixelRatio || 1;
+  const ajustar = () => {
+    const { width } = canvas.getBoundingClientRect();
+    canvas.width = Math.round(width * escala);
+    canvas.height = Math.round(160 * escala);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(escala, escala);
+    ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#0a1a6b';
+  };
+  ajustar();
+  const ctx = canvas.getContext('2d');
+  let firmado = false;
+  let dibujando = false;
+  const punto = (ev) => { const r = canvas.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+  canvas.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    canvas.setPointerCapture?.(ev.pointerId);
+    dibujando = true;
+    const [x, y] = punto(ev);
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 0.1, y + 0.1); ctx.stroke();
+  });
+  canvas.addEventListener('pointermove', (ev) => {
+    if (!dibujando) return;
+    ev.preventDefault();
+    const [x, y] = punto(ev);
+    ctx.lineTo(x, y); ctx.stroke();
+    if (!firmado) { firmado = true; alFirmar?.(); }
+  });
+  const soltar = () => { dibujando = false; };
+  canvas.addEventListener('pointerup', soltar);
+  canvas.addEventListener('pointercancel', soltar);
+  return {
+    borrar() { ctx.clearRect(0, 0, canvas.width, canvas.height); firmado = false; },
+    png() { return firmado ? new Promise((r) => { canvas.toBlob((b) => r(b), 'image/png'); }) : Promise.resolve(null); },
+  };
+}
+
+// ================= Escanear la etiqueta (pedido 03-10) =================
+// La cámara lee el QR de la etiqueta (lector del navegador, sin librerías externas). Si el teléfono no tiene
+// lector (iPhone con Safari), se escribe el folio. Un envío por retirar se marca retirado ahí mismo; uno en ruta
+// abre su detalle para entregarlo con foto, GPS y firma.
+function escanearEtiqueta(alTerminar) {
+  let stream = null;
+  let activo = true;
+  const detener = () => { activo = false; stream?.getTracks().forEach((t) => t.stop()); };
+  const m = modal(html`<h2>Escanear etiqueta</h2>
+    <p class="sub">Apunta la cámara al código QR de la etiqueta del paquete.</p>
+    <div class="escaner"><video id="cam" playsinline muted></video></div>
+    <p class="muted" id="estado-cam" style="margin-top:8px">Abriendo la cámara…</p>
+    <form class="fila" id="f-folio" style="margin-top:12px" novalidate>
+      <input name="folio" placeholder="O escribe el folio: ENV-2026-…" autocomplete="off" style="flex:1;min-width:0">
+      <button class="btn sec">Buscar</button></form>`, { onClose: detener });
+  const estado = (t) => { const p = $('#estado-cam', m.el); if (p) p.textContent = t; };
+  let ocupado = false;
+  const accion = async (e) => {
+    detener();
+    m.cerrar();
+    if (e.estado === 'asignado' || e.estado === 'reagendado') {
+      if (e.estado_pago !== 'pagado') { toast(`${e.folio} no está pagado: no se puede retirar todavía`, 'error'); ir(`#/envio/${e.id}`); return; }
+      if (await confirmar('¿Retiraste este paquete?', `${e.folio} · ${textoPaquete(e)} · para ${e.destinatario_nombre} (${e.comuna_nombre})`, 'Sí, lo retiré')) {
+        try { await post(`/api/envios/${e.id}/estado`, { estado: 'en_ruta' }); toast(`${e.folio} retirado. ¡Buen viaje!`, 'ok'); alTerminar?.(); return; } catch (err) { errorToast(err); }
+      }
+      ir(`#/envio/${e.id}`);
+      return;
+    }
+    if (e.estado === 'en_ruta') toast(`${e.folio}: confirma la entrega con foto${app.conf.operacion.gps_obligatorio ? ', GPS' : ''} y firma`, 'ok');
+    ir(`#/envio/${e.id}`);
+  };
+  const buscarToken = async (texto) => {
+    const token = (String(texto).match(/\/q\/([A-Za-z0-9_-]{8,100})/) || [])[1];
+    if (!token) { estado('Ese código no es de una etiqueta de envío. Prueba de nuevo.'); return; }
+    ocupado = true;
+    try { await accion(await get(`/api/envios/por-qr/${encodeURIComponent(token)}`)); } catch (err) { estado(err.message); ocupado = false; }
+  };
+  $('#f-folio', m.el).onsubmit = async (ev) => {
+    ev.preventDefault();
+    const folio = ev.target.folio.value.trim().toUpperCase();
+    if (!folio) return;
+    try {
+      const r = await get(`/api/envios?q=${encodeURIComponent(folio)}&limite=5`);
+      const e = r.items.find((x) => String(x.folio).toUpperCase() === folio) || (r.items.length === 1 ? r.items[0] : null);
+      if (e) await accion(e); else estado('No encontramos ese folio en tu ruta.');
+    } catch (err) { errorToast(err); }
+  };
+  (async () => {
+    if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) {
+      $('.escaner', m.el).hidden = true;
+      estado('Este teléfono no puede leer el QR desde la app: escribe el folio que aparece en la etiqueta.');
+      return;
+    }
+    try {
+      const formatos = await window.BarcodeDetector.getSupportedFormats?.() || ['qr_code'];
+      if (!formatos.includes('qr_code')) throw new Error('sin lector de QR');
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      if (!activo) { detener(); return; }
+      const video = $('#cam', m.el);
+      video.srcObject = stream;
+      await video.play();
+      estado('Buscando el código QR…');
+      const leer = async () => {
+        if (!activo) return;
+        if (!ocupado && video.readyState >= 2) {
+          try { const [codigo] = await detector.detect(video); if (codigo?.rawValue) await buscarToken(codigo.rawValue); } catch { /* cuadro sin QR */ }
+        }
+        if (activo) setTimeout(leer, 250);
+      };
+      leer();
+    } catch (err) {
+      $('.escaner', m.el).hidden = true;
+      estado(err?.name === 'NotAllowedError' ? 'No diste permiso para usar la cámara: escribe el folio de la etiqueta.' : 'No se pudo abrir la cámara: escribe el folio de la etiqueta.');
+    }
+  })();
+}

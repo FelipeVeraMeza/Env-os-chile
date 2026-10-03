@@ -13,6 +13,13 @@ export const subida = multer({
   limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1, fields: 40, fieldSize: 64 * 1024, parts: 45 },
 });
 
+// Entrega: la foto y, opcionalmente, la firma del destinatario (pedido 03-10). Mismos límites, dos archivos.
+export const subidaEntrega = multer({
+  storage: multer.memoryStorage(),
+  defParamCharset: 'utf8',
+  limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 2, fields: 40, fieldSize: 64 * 1024, parts: 46 },
+});
+
 const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' };
 const MIMES = Object.keys(EXT);
 const PREFIJO_SUPABASE = 'sb:';
@@ -183,13 +190,23 @@ function firmaValida(esperada, exp, usuarioId, sig) {
 // Etiqueta por enlace firmado (pedido 03-10): el botón es un enlace normal y el celular abre el PDF en su visor.
 // Antes la app descargaba el PDF y recién después abría una pestaña; los navegadores del celular bloquean esa
 // pestaña (ya no cuenta como toque del usuario) y la etiqueta "no salía". El prefijo separa estas firmas de las de adjuntos.
-const firmaTicket = (envioId, exp, usuarioId) => crypto.createHmac('sha256', config.jwtSecret).update(`ticket.${envioId}.${exp}.${usuarioId}`).digest('base64url');
+const firmaRecurso = (recurso, exp, usuarioId) => crypto.createHmac('sha256', config.jwtSecret).update(`${recurso}.${exp}.${usuarioId}`).digest('base64url');
 
 export function firmarTicket(envioId, usuarioId, segundos = 12 * 3600) {
   const exp = Math.floor(Date.now() / 1000) + segundos;
-  return `/api/tickets/${envioId}?exp=${exp}&u=${usuarioId}&sig=${firmaTicket(envioId, exp, usuarioId)}`;
+  return `/api/tickets/${envioId}?exp=${exp}&u=${usuarioId}&sig=${firmaRecurso(`ticket.${envioId}`, exp, usuarioId)}`;
 }
 
 export function verificarTicket(envioId, exp, usuarioId, sig) {
-  return firmaValida(firmaTicket(envioId, exp, usuarioId), exp, usuarioId, sig);
+  return firmaValida(firmaRecurso(`ticket.${envioId}`, exp, usuarioId), exp, usuarioId, sig);
+}
+
+// Etiquetas del día en lote (solo administración): la firma cubre la fecha, así el enlace no sirve para otro día.
+export function firmarLote(fecha, usuarioId, segundos = 12 * 3600) {
+  const exp = Math.floor(Date.now() / 1000) + segundos;
+  return `/api/tickets/lote?fecha=${fecha}&exp=${exp}&u=${usuarioId}&sig=${firmaRecurso(`lote.${fecha}`, exp, usuarioId)}`;
+}
+
+export function verificarLote(fecha, exp, usuarioId, sig) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(fecha || '')) && firmaValida(firmaRecurso(`lote.${fecha}`, exp, usuarioId), exp, usuarioId, sig);
 }

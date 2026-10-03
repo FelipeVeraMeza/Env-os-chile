@@ -5,7 +5,7 @@
 --  CÓMO USARLO: Supabase → SQL Editor → New query → pegar TODO este archivo → Run.
 --  Se puede ejecutar más de una vez: si la base ya existe, no hace nada.
 --
---  Crea: 14 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
+--  Crea: 15 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
 --  dentro de Santiago), tarifas ($3.500 base, +$1.000 horario especial, 20 kg / 60 cm),
 --  reglas de operación (3 intentos, 5 min de espera) y el bucket privado de fotos y boletas.
 --  Los usuarios los crea la app en su primer arranque (ADMIN_EMAIL / ADMIN_PASSWORD en Railway).
@@ -730,6 +730,29 @@ BEGIN
     -- 4) GPS opcional (se puede volver a exigir en Tarifas y reglas).
     UPDATE config SET valor = jsonb_set(valor, '{gps_obligatorio}', 'false'::jsonb) WHERE clave = 'operacion';
     INSERT INTO schema_migracion (nombre) VALUES ('013_retiro_tamano_carrito.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
+-- Migración 014_firma_avisos.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '014_firma_avisos.sql') THEN
+    -- Pedidos del cliente del 03-10-2026:
+    --  1) Firma del destinatario en la pantalla del repartidor al entregar (queda como un adjunto más del envío).
+    --  2) Aviso antes de que un envío sin pagar se anule solo: se guarda cuándo se avisó para no repetirlo.
+    --  3) Reactivar un envío anulado por falta de pago: se guarda cuándo se reactivó (reinicia el plazo de pago).
+
+    ALTER TABLE adjunto DROP CONSTRAINT IF EXISTS adjunto_tipo_check;
+    ALTER TABLE adjunto ADD CONSTRAINT adjunto_tipo_check
+      CHECK (tipo IN ('foto_paquete', 'foto_entrega', 'boleta', 'comprobante_pago', 'firma_entrega'));
+
+    ALTER TABLE envio
+      ADD COLUMN aviso_vencimiento_en TIMESTAMPTZ,
+      ADD COLUMN reactivado_en        TIMESTAMPTZ;
+    INSERT INTO schema_migracion (nombre) VALUES ('014_firma_avisos.sql');
   END IF;
 END
 $migracion$;

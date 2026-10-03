@@ -460,15 +460,27 @@ export async function cobranza(rango = {}) {
   const desde = rango.desde || `${hoy.slice(0, 8)}01`;
   const hasta = rango.hasta || hoy;
   montar(vista, esqueleto(4));
-  let r; let pagos; let est; let comprobantes;
+  let r; let pagos; let est; let comprobantes; let venc;
   try {
-    [r, pagos, est, comprobantes] = await Promise.all([
+    [r, pagos, est, comprobantes, venc] = await Promise.all([
       get(`/api/cobranza/resumen?desde=${desde}&hasta=${hasta}`),
       get('/api/cobranza/pagos'),
       get(`/api/cobranza/estimar${rango.envios_mes ? `?envios_mes=${rango.envios_mes}` : ''}`),
       get('/api/cobranza/comprobantes'),
+      get('/api/envios/vencimientos'),
     ]);
   } catch (err) { return errorRango(vista, err, () => cobranza()); }
+  // Recordatorio al cliente por WhatsApp (mensaje listo; se envía con un toque desde el teléfono de administración).
+  const recordatorio = (e) => {
+    const fono = String(e.cliente_telefono || '').replace(/\D/g, '');
+    const texto = `Hola ${e.cliente_nombre}: tu envío ${e.folio} (${clp(e.tarifa_total)}) sigue sin pagar y se anula el ${fechaHora(e.vence_en)}. Paga desde la app en "Por pagar" o sube el comprobante de tu transferencia. ${app.conf.negocio.nombre}`;
+    return fono ? `https://wa.me/${fono}?text=${encodeURIComponent(texto)}` : null;
+  };
+  const restante = (iso) => {
+    const min = Math.round((new Date(iso).getTime() - Date.now()) / 60_000);
+    if (min <= 0) return 'se anula en minutos';
+    return min < 60 ? `quedan ${min} min` : `quedan ${Math.floor(min / 60)} h ${min % 60} min`;
+  };
   // Las transferencias ya están en la cuenta: no hay abono de una pasarela que conciliar.
   const pendienteAbono = (p) => p.estado === 'aprobado' && !p.abonado_en && !['manual', 'simulado', 'transferencia'].includes(p.proveedor);
   montar(vista, html`
@@ -493,6 +505,22 @@ export async function cobranza(rango = {}) {
           <td data-label="Acción"><button class="btn chico" data-revisar-comprobante="${c.id}">Revisar</button></td>
         </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay comprobantes pendientes ✔</p>`}
     </div>
+    <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Por vencer (sin pagar)</h2><span class="sub">Se anulan solos ${venc.horas} h después de confirmados</span></div>
+      ${venc.por_vencer.length ? html`<div class="tabla-wrap" tabindex="0" role="region" aria-label="Envíos por vencer"><table class="tabla-cards"><thead><tr><th>Folio</th><th>Cliente</th><th class="num">Monto</th><th>Se anula</th><th>Acción</th></tr></thead>
+        <tbody>${venc.por_vencer.map((e) => html`<tr>
+          <td data-label="Folio" class="mono"><a href="#/envio/${e.id}">${e.folio}</a></td><td data-label="Cliente">${e.cliente_nombre}</td>
+          <td data-label="Monto" class="num">${clp(e.tarifa_total)}</td>
+          <td data-label="Se anula">${fechaHora(e.vence_en)}<div class="muted">${restante(e.vence_en)}${e.aviso_vencimiento_en ? ' · avisado por correo' : ''}</div></td>
+          <td data-label="Acción">${recordatorio(e) ? html`<a class="btn sec chico" href="${recordatorio(e)}" target="_blank" rel="noopener">Recordar por WhatsApp</a>` : html`<span class="muted">Sin teléfono</span>`}</td>
+        </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay envíos sin pagar ✔</p>`}
+    </div>
+    ${venc.anulados.length ? html`<div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Anulados por falta de pago</h2><span class="sub">Últimos 7 días · puedes reactivarlos</span></div>
+      <div class="tabla-wrap"><table class="tabla-cards"><thead><tr><th>Folio</th><th>Cliente</th><th class="num">Monto</th><th>Acción</th></tr></thead>
+        <tbody>${venc.anulados.map((e) => html`<tr>
+          <td data-label="Folio" class="mono"><a href="#/envio/${e.id}">${e.folio}</a></td><td data-label="Cliente">${e.cliente_nombre}</td>
+          <td data-label="Monto" class="num">${clp(e.tarifa_total)}</td>
+          <td data-label="Acción"><button class="btn chico" data-reactivar="${e.id}">Reactivar</button></td>
+        </tr>`)}</tbody></table></div></div>` : ''}
     ${r.sin_respuesta ? html`<div class="aviso alerta" style="margin-top:16px">${r.sin_respuesta} pago(s) iniciados hace más de 30 minutos sin respuesta de la pasarela: el cliente abandonó el pago o el aviso no llegó.</div>` : ''}
     ${!app.conf.pagos.en_linea ? html`<div class="aviso" style="margin-top:16px">Los clientes pagan <b>por transferencia</b>: suben el comprobante y tú lo apruebas o rechazas arriba. El pago en línea está apagado; el comparador de abajo sirve para elegir una pasarela real más adelante.</div>`
       : r.proveedor_actual === 'simulado' ? html`<div class="aviso magenta" style="margin-top:16px">Los pagos en línea están en <b>modo simulado</b>: no se mueve dinero real. Elige un proveedor con el comparador de abajo para conectarlo en la etapa de desarrollo.</div>` : ''}
@@ -518,6 +546,14 @@ export async function cobranza(rango = {}) {
   $('#rango-c').addEventListener('change', (e) => cobranza(datosForm(e.currentTarget)));
   $('#f-est').addEventListener('change', (e) => cobranza({ desde, hasta, envios_mes: e.target.value }));
   $('#f-est').onsubmit = (e) => { e.preventDefault(); cobranza({ desde, hasta, envios_mes: e.target.envios_mes.value }); };
+  $$('[data-reactivar]').forEach((b) => {
+    b.onclick = async () => {
+      const e = venc.anulados.find((x) => String(x.id) === b.dataset.reactivar);
+      if (!(await confirmar('¿Reactivar el envío?', `${e.folio} vuelve a quedar creado y tiene ${venc.horas} horas más para pagarse.`, 'Reactivar'))) return;
+      b.disabled = true;
+      try { await post(`/api/envios/${e.id}/reactivar`); toast(`${e.folio} reactivado`, 'ok'); cobranza({ desde, hasta }); } catch (err) { errorToast(err); b.disabled = false; }
+    };
+  });
   $$('[data-revisar-comprobante]').forEach((b) => {
     b.onclick = () => revisarComprobante(comprobantes.find((c) => String(c.id) === b.dataset.revisarComprobante), () => cobranza({ desde, hasta }));
   });

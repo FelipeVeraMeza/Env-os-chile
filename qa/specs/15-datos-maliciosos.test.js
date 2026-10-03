@@ -60,6 +60,9 @@ const RUTAS = [
   ['GET', '/api/seguridad/resumen'], ['GET', '/api/seguridad/extraccion'], ['GET', '/api/seguridad/eventos'], ['GET', '/api/seguridad/alertas'],
   ['POST', '/api/seguridad/alertas/:envio/revisar'], ['POST', '/api/seguridad/cerrar-todas-las-sesiones'],
   ['GET', '/api/seguimiento/:folio'], ['GET', '/q/:token'], ['GET', '/api/adjuntos/:envio/archivo'], ['GET', '/api/auth/yo'], ['POST', '/api/auth/cambiar-clave'],
+  // Pedidos 03-10: etiquetas por enlace firmado, lote del día, vencimientos, reactivar, ruta automática y QR.
+  ['GET', '/api/tickets/:envio'], ['GET', '/api/tickets/lote'], ['GET', '/api/envios/etiquetas-del-dia'], ['GET', '/api/envios/vencimientos'],
+  ['POST', '/api/envios/:envio/reactivar'], ['POST', '/api/envios/ruta/optimizar'], ['GET', '/api/envios/por-qr/:token'],
 ];
 // El inicio de sesión se prueba aparte (09-sesion): aquí solo cuerpos que no cuentan como intento fallido,
 // para no activar el bloqueo por IP que protege contra fuerza bruta.
@@ -82,7 +85,13 @@ test('CP-139 · Ninguna ruta responde error interno ante datos malformados o mal
   let total = 0;
   const probar = async (metodo, url, opciones, perfil) => {
     total++;
-    const r = await peticion(metodo, url, opciones);
+    let r;
+    try { r = await peticion(metodo, url, opciones); } catch (err) {
+      // Una URL más larga que el límite de cabeceras de Node (16 KB) se rechaza con 431 y se cierra la conexión; en
+      // Windows fetch lo informa como ECONNRESET en vez de entregar el 431. No es un error interno del servidor.
+      if (url.length > 16_000 && /ECONNRESET|EPIPE|socket|fetch failed/i.test(`${err.cause?.code || ''} ${err.message}`)) return;
+      throw err;
+    }
     if (r.status >= 500) fallas.push(`${perfil} ${metodo} ${url} ${JSON.stringify(opciones.json ?? '[form]').slice(0, 80)} → ${r.status}`);
   };
   for (const [perfil, sesion] of [['admin', esc.admin], ['cliente', esc.cliente], ['repartidor', esc.repartidor]]) {

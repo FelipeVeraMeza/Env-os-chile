@@ -99,29 +99,34 @@ function dibujarEtiqueta(doc, { envio, conf, qr, termico, ancho, margen }) {
 }
 
 // Ticket en formato térmico 80 mm (una etiqueta por bulto, alto justo al contenido) o A4 (RF-20, RF-21).
-export async function generarTicketPdf(envio, conf, formato = '80mm') {
+export function generarTicketPdf(envio, conf, formato = '80mm') {
+  return generarEtiquetasPdf([envio], conf, formato, `Ticket ${envio.folio}`);
+}
+
+// Varias etiquetas en un solo PDF (impresión en lote del día, pedido 03-10): en térmico una por bulto de cada
+// envío; en A4 una hoja por envío.
+export async function generarEtiquetasPdf(envios, conf, formato = '80mm', titulo = 'Etiquetas') {
   const termico = formato !== 'a4';
   const ancho = termico ? 226.77 : 595.28; // 80 mm en puntos
   const margen = termico ? 10 : 56;
-  const qr = await generarQrPng(urlQr(envio));
-  const opciones = { envio, conf, qr, termico, ancho, margen };
-
-  // El rollo térmico no tiene alto fijo: se mide la etiqueta en una pasada previa para no gastar papel en blanco.
-  let alto = 841.89;
-  if (termico) {
-    const medida = new PDFDocument({ size: [ancho, 5000], margin: margen, autoFirstPage: true });
-    alto = Math.ceil(dibujarEtiqueta(medida, opciones));
-    medida.end();
-  }
-
-  const doc = new PDFDocument({ size: [ancho, alto], margin: margen, autoFirstPage: false, info: { Title: `Ticket ${envio.folio}`, Author: conf.negocio.nombre } });
+  const doc = new PDFDocument({ margin: margen, autoFirstPage: false, info: { Title: titulo, Author: conf.negocio.nombre } });
   const partes = [];
   doc.on('data', (p) => partes.push(p));
   const fin = new Promise((resolve) => doc.on('end', () => resolve(Buffer.concat(partes))));
-  const etiquetas = termico ? Math.max(1, Number(envio.bultos) || 1) : 1;
-  for (let bulto = 1; bulto <= etiquetas; bulto++) {
-    doc.addPage({ size: [ancho, alto], margin: margen });
-    dibujarEtiqueta(doc, opciones);
+  for (const envio of envios) {
+    const opciones = { envio, conf, qr: await generarQrPng(urlQr(envio)), termico, ancho, margen };
+    // El rollo térmico no tiene alto fijo: se mide la etiqueta en una pasada previa para no gastar papel en blanco.
+    let alto = 841.89;
+    if (termico) {
+      const medida = new PDFDocument({ size: [ancho, 5000], margin: margen, autoFirstPage: true });
+      alto = Math.ceil(dibujarEtiqueta(medida, opciones));
+      medida.end();
+    }
+    const etiquetas = termico ? Math.max(1, Number(envio.bultos) || 1) : 1;
+    for (let bulto = 1; bulto <= etiquetas; bulto++) {
+      doc.addPage({ size: [ancho, alto], margin: margen });
+      dibujarEtiqueta(doc, opciones);
+    }
   }
   doc.end();
   return fin;

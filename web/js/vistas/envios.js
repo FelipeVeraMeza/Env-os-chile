@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
-  $, $$, abrirBlob, badge, badgePago, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
+  $, $$, abrirBlob, badge, badgePago, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, itemEnvio, retiroTexto, textoPaquete } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
@@ -18,7 +18,7 @@ export async function registro() {
   montar(vista, html`
     <div class="encabezado"><div><h1>${rol === 'cliente' ? 'Mis envíos' : rol === 'repartidor' ? 'Historial de entregas' : 'Registro de envíos'}</h1>
       <p>Busca por folio, nombre, teléfono, calle o comuna.</p></div>
-      ${rol !== 'repartidor' ? html`<div class="fila"><button class="btn sec" id="exportar">Exportar a Excel (CSV)</button>${rol !== 'repartidor' ? html`<a class="btn" href="#/nuevo">${icono('nuevo')} Nuevo envío</a>` : ''}</div>` : ''}</div>
+      ${rol !== 'repartidor' ? html`<div class="fila">${rol === 'admin' ? html`<button class="btn sec" id="etiquetas-dia">Etiquetas del día</button>` : ''}<button class="btn sec" id="exportar">Exportar a Excel (CSV)</button><a class="btn" href="#/nuevo">${icono('nuevo')} Nuevo envío</a></div>` : ''}</div>
     <form class="card" id="filtros" style="margin-bottom:16px">
       <div class="grid ${rol === 'admin' ? 'g4' : 'g3'}">
         <label class="campo">Buscar<input type="search" name="q" placeholder="ENV-2026-…, nombre, teléfono"></label>
@@ -51,6 +51,7 @@ export async function registro() {
     t = setTimeout(cargar, 300);
   });
   $('#filtros').onsubmit = (e) => e.preventDefault();
+  $('#etiquetas-dia')?.addEventListener('click', etiquetasDelDia);
   $('#exportar')?.addEventListener('click', () => abrirBlob(api(`/api/envios/exportar.csv?${qs()}`, { blob: true }), `envios-${hoyISO()}.csv`).catch(errorToast));
   cargar();
 }
@@ -88,8 +89,14 @@ export async function detalle(id) {
   const e = await get(`/api/envios/${id}`);
   const esAdmin = app.usuario.rol === 'admin';
   const nivel = nivelProgreso(e);
-  const fotos = e.adjuntos.filter((a) => ['foto_paquete', 'foto_entrega'].includes(a.tipo));
+  const fotos = e.adjuntos.filter((a) => ['foto_paquete', 'foto_entrega', 'firma_entrega'].includes(a.tipo));
+  const nombreFoto = (a) => ({ foto_entrega: 'Foto de entrega', firma_entrega: 'Firma de quien recibió', foto_paquete: 'Foto del paquete' })[a.tipo];
   // El pago manda: el cliente recibe el ticket cuando su pago está aprobado.
+  // Reactivar (administración): solo si la última anulación fue la automática por falta de pago.
+  const ultimaAnulacion = [...e.historial].reverse().find((h) => h.estado_nuevo === 'anulado');
+  const reactivable = esAdmin && e.estado === 'anulado' && e.estado_pago === 'pendiente' && ultimaAnulacion && !ultimaAnulacion.usuario_id
+    && /^Anulado automáticamente/.test(ultimaAnulacion.motivo || '');
+  const repetible = e.folio && ['admin', 'cliente'].includes(app.usuario.rol);
   // Enlace firmado que entrega el servidor: el botón abre el PDF directo (también en el celular y en la app instalada).
   const enlaceTicket = (formato) => `${urlApi()}${e.ticket_url}&formato=${formato}`;
   const porPagar = e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado);
@@ -107,11 +114,14 @@ export async function detalle(id) {
           <span class="sub">Intentos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
       <div class="fila">
         ${e.ticket_url ? html`<a class="btn sec" href="${enlaceTicket('80mm')}" target="_blank" rel="noopener">Etiqueta 80 mm</a><a class="btn sec" href="${enlaceTicket('a4')}" target="_blank" rel="noopener">Etiqueta A4</a>` : ''}
+        ${reactivable ? html`<button class="btn" id="reactivar">Reactivar envío</button>` : ''}
+        ${repetible ? html`<button class="btn sec" id="repetir">Repetir envío</button>` : ''}
         ${porPagar && app.conf.pagos.en_linea ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn sec" id="transferir">Pagar con transferencia</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
         ${porPagar && !app.conf.pagos.en_linea ? html`<button class="btn" id="transferir">Pagar ${clp(e.tarifa_total)} con transferencia</button>` : ''}
       </div>
     </div>
-    ${porPagar && e.estado === 'creado' && !e.repartidor_id ? html`<div class="aviso alerta" style="margin-top:12px">Si no se paga antes del <b>${fechaHora(new Date(new Date(e.confirmado_en || e.creado_en).getTime() + (app.conf.operacion.horas_sin_pago || 24) * 3600_000))}</b>, el envío se anula solo.</div>` : ''}
+    ${e.vence_en ? html`<div class="aviso alerta" style="margin-top:12px">Si no se paga antes del <b>${fechaHora(e.vence_en)}</b>, el envío se anula solo.</div>` : ''}
+    ${reactivable ? html`<div class="aviso" style="margin-top:12px">Este envío se anuló solo por falta de pago. Puedes reactivarlo: tendrá ${app.conf.operacion.horas_sin_pago || 24} horas más para pagarse.</div>` : ''}
     ${!['anulado', 'devuelto'].includes(e.estado) ? html`<div class="progreso-envio">${PROGRESO.map(([, t], i) => html`<div class="${i < nivel ? 'on' : ''}">${t}</div>`)}</div>` : ''}
     <div class="grid g2" style="margin-top:18px;align-items:start">
       <div>
@@ -157,7 +167,7 @@ export async function detalle(id) {
         ${e.estado === 'entregado' ? html`<div class="card"><h2>Constancia de entrega</h2>
           <p>Entregado ${fechaHora(e.entregado_en)}${e.entrega_receptor ? ` · recibió ${e.entrega_receptor}` : ''}</p>
           ${e.entrega_lat ? html`<p class="sub">GPS: ${e.entrega_lat.toFixed(5)}, ${e.entrega_lon.toFixed(5)}${e.entrega_precision_m ? ` (±${Math.round(e.entrega_precision_m)} m)` : ''} · <a href="https://www.google.com/maps?q=${e.entrega_lat},${e.entrega_lon}" target="_blank" rel="noopener">ver en mapa</a></p>` : ''}</div>` : ''}
-        ${fotos.length ? html`<div class="card"><h2>Fotos</h2><div class="fila">${fotos.map((a) => html`<a href="${archivo(a.url)}" target="_blank" rel="noopener" title="${a.tipo === 'foto_entrega' ? 'Foto de entrega' : 'Foto del paquete'}"><img class="foto-mini" src="${archivo(a.url)}" alt="${a.tipo === 'foto_entrega' ? 'Foto de entrega' : 'Foto del paquete'}"></a>`)}</div></div>` : ''}
+        ${fotos.length ? html`<div class="card"><h2>Fotos</h2><div class="fila">${fotos.map((a) => html`<a href="${archivo(a.url)}" target="_blank" rel="noopener" title="${nombreFoto(a)}"><img class="foto-mini${a.tipo === 'firma_entrega' ? ' firma-mini' : ''}" src="${archivo(a.url)}" alt="${nombreFoto(a)}"></a>`)}</div></div>` : ''}
         <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${lineaDeTiempo(e).map((h) => html`<li class="${h.clase || ''}"><b>${h.titulo}</b>${h.detalle ? html` · <span class="sub">${h.detalle}</span>` : ''}<div class="cuando">${fechaHora(h.fecha)}${h.quien ? ` · ${h.quien}` : ''}</div></li>`)}</ol></div>
       </div>
     </div>`);
@@ -229,6 +239,12 @@ function enlazarAcciones(e, recargar) {
       try { await post(`/api/envios/${e.id}/reembolso`, { ...d, monto: d.monto === '' ? undefined : Number(d.monto) }); m.cerrar(); toast('Reembolso registrado', 'ok'); recargar(); }
       catch (err) { marcarErrores(ev.target, err.detalles); errorToast(err); }
     };
+  });
+  $('#repetir')?.addEventListener('click', () => { app.repetir = e; ir('#/nuevo'); });
+  $('#reactivar')?.addEventListener('click', async (ev) => {
+    if (!(await confirmar('¿Reactivar el envío?', `${e.folio} vuelve a quedar creado y tiene ${app.conf.operacion.horas_sin_pago || 24} horas más para pagarse.`, 'Reactivar'))) return;
+    ev.target.disabled = true;
+    try { await post(`/api/envios/${e.id}/reactivar`); toast('Envío reactivado', 'ok'); recargar(); } catch (err) { errorToast(err); ev.target.disabled = false; }
   });
   $('#exportar-dest')?.addEventListener('click', () => abrirBlob(api(`/api/destinatarios/${e.destinatario_id}/exportar`, { blob: true }), `destinatario-${e.destinatario_id}.json`).catch(errorToast));
   $('#anonimizar-dest')?.addEventListener('click', async () => {
@@ -317,14 +333,14 @@ export function subirComprobante(envio, alTerminar) {
   const t = app.conf.transferencia || {};
   const m = modal(html`<h2>Pagar con transferencia</h2>
     <p class="sub">Envío <b class="mono">${envio.folio}</b>. Transfiere el monto exacto y sube la imagen del comprobante: administración lo revisa y, al aprobarlo, el repartidor puede retirar tu envío.</p>
-    <div class="monto-grande" style="margin:10px 0">${clp(envio.tarifa_total)}</div>
+    <div class="fila" style="margin:10px 0"><div class="monto-grande">${clp(envio.tarifa_total)}</div>${botonCopiar(Math.round(Number(envio.tarifa_total)), 'monto')}</div>
     ${t.banco && t.numero_cuenta ? html`<div class="desglose" style="margin-bottom:12px">
         <div><span>Banco</span><b>${t.banco}</b></div>
         ${t.tipo_cuenta ? html`<div><span>Tipo de cuenta</span><b>${t.tipo_cuenta}</b></div>` : ''}
-        <div><span>N° de cuenta</span><b class="mono">${t.numero_cuenta}</b></div>
+        <div><span>N° de cuenta</span><b class="mono">${t.numero_cuenta} ${botonCopiar(t.numero_cuenta, 'número de cuenta')}</b></div>
         ${t.titular ? html`<div><span>Titular</span><b>${t.titular}</b></div>` : ''}
-        ${t.rut ? html`<div><span>RUT</span><b>${t.rut}</b></div>` : ''}
-        ${t.correo ? html`<div><span>Correo</span><b>${t.correo}</b></div>` : ''}
+        ${t.rut ? html`<div><span>RUT</span><b>${t.rut} ${botonCopiar(t.rut, 'RUT')}</b></div>` : ''}
+        ${t.correo ? html`<div><span>Correo</span><b>${t.correo} ${botonCopiar(t.correo, 'correo')}</b></div>` : ''}
       </div><p class="muted">Escribe el folio <b class="mono">${envio.folio}</b> en el comentario de la transferencia.</p>`
       : html`<div class="aviso">Pide a la empresa los datos de la cuenta para transferir.</div>`}
     <form class="pila" id="f-comprobante" novalidate style="margin-top:12px">
@@ -506,3 +522,26 @@ export async function reclamos() {
   });
 }
 
+
+// Imprimir de una vez las etiquetas de todos los envíos confirmados un día (pedido 03-10). Los botones son enlaces
+// firmados: el PDF abre directo también en el celular.
+function etiquetasDelDia() {
+  const m = modal(html`<h2>Etiquetas del día</h2>
+    <p class="sub">Todas las etiquetas de los envíos confirmados ese día (sin los anulados), en un solo PDF.</p>
+    <label class="campo" style="margin-top:12px">Día<input type="date" id="dia-etiquetas" value="${hoyISO()}" max="${hoyISO()}"></label>
+    <div id="res-etiquetas" style="margin-top:14px">${esqueleto(1)}</div>`);
+  const cargar = async () => {
+    const caja = $('#res-etiquetas', m.el);
+    montar(caja, esqueleto(1));
+    try {
+      const r = await get(`/api/envios/etiquetas-del-dia?fecha=${$('#dia-etiquetas', m.el).value}`);
+      montar(caja, r.envios ? html`<p><b>${r.envios} envío(s)</b> · ${r.bultos} bulto(s)${r.envios > 300 ? ' · el PDF trae los primeros 300' : ''}</p>
+        <div class="grid g2" style="margin-top:10px"><a class="btn" href="${urlApi()}${r.url}&formato=80mm" target="_blank" rel="noopener">Térmica 80 mm</a>
+        <a class="btn sec" href="${urlApi()}${r.url}&formato=a4" target="_blank" rel="noopener">Hojas A4</a></div>
+        <p class="muted" style="margin-top:8px">En térmica sale una etiqueta por bulto; en A4, una hoja por envío.</p>`
+        : html`<div class="aviso">No hay envíos confirmados ese día.</div>`);
+    } catch (err) { montar(caja, html`<div class="aviso alerta">${err.message}</div>`); }
+  };
+  $('#dia-etiquetas', m.el).addEventListener('change', cargar);
+  cargar();
+}
