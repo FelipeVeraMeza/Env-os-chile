@@ -1,7 +1,19 @@
+import { readFileSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import { config } from '../config.js';
-import { ESTADOS, textoPaquete } from './reglas.js';
+import { ESTADOS } from './reglas.js';
+
+// Logo de la etiqueta: el que se subió en Ajustes (PNG en data URL) o, si no hay, el ícono de la plataforma.
+let logoPorDefecto;
+function logoEtiqueta(conf) {
+  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(conf.negocio.logo_url || '');
+  if (m) return Buffer.from(m[1], 'base64');
+  if (logoPorDefecto === undefined) {
+    try { logoPorDefecto = readFileSync(new URL('../../web/icons/icono-512.png', import.meta.url)); } catch { logoPorDefecto = null; }
+  }
+  return logoPorDefecto;
+}
 
 export function urlQr(envio) {
   return `${config.publicBaseUrl}/q/${envio.token_qr}`;
@@ -43,7 +55,15 @@ function dibujarEtiqueta(doc, { envio, conf, qr, bulto, termico, ancho, margen }
       .font(negrita ? 'Helvetica-Bold' : 'Helvetica').fillColor('#000000').fontSize(9 * t).text(String(valor));
   };
 
-  // Encabezado de la empresa
+  // Encabezado de la empresa: logo grande y centrado sobre el nombre
+  const logo = logoEtiqueta(conf);
+  if (logo) {
+    const ladoLogo = termico ? 96 : 120;
+    try {
+      doc.image(logo, (ancho - ladoLogo) / 2, doc.y, { fit: [ladoLogo, ladoLogo], align: 'center', valign: 'center' });
+      doc.y += ladoLogo + 6;
+    } catch { /* un logo dañado no debe impedir imprimir la etiqueta */ }
+  }
   doc.fontSize(13 * t).font('Helvetica-Bold').fillColor('#000000').text(conf.negocio.nombre, { align: 'center', width: util });
   const contacto = [conf.negocio.rut && `RUT ${conf.negocio.rut}`, conf.negocio.telefono, conf.negocio.correo].filter(Boolean).join(' · ');
   if (contacto) doc.fontSize(7 * t).font('Helvetica').text(contacto, { align: 'center', width: util });
@@ -97,13 +117,8 @@ function dibujarEtiqueta(doc, { envio, conf, qr, bulto, termico, ancho, margen }
   doc.font('Helvetica').fontSize(8.5 * t).text(`Región ${envio.region}${envio.region === 'Metropolitana' ? ' de Santiago' : ''}`, { width: util });
   linea();
 
-  // Paquete (sin describir el producto: pedido del cliente 30-09)
-  seccion('Paquete');
-  par('Bultos', textoPaquete(envio, conf.tarifas));
-  // Sin montos en la etiqueta: el valor declarado solo lo ve administración (para el seguro) y un valor impreso
-  // en el paquete invita al robo. Tampoco se imprime el link de pago.
-  if (envio.valor_declarado) par('Seguro', 'Asegurado');
-  if (envio.observaciones) par('Observaciones', envio.observaciones);
+  // Sin sección "Paquete" (pedido del cliente 02-10): el tamaño, peso, seguro y observaciones los ve el
+  // repartidor en su app al retirar y administración en el sistema; la etiqueta no los muestra.
 
   // Servicio
   seccion('Servicio');

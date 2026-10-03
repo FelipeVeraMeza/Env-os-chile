@@ -153,11 +153,18 @@ export async function detalleRepartidor(id) {
       ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}
       <p><b>${e.destinatario_nombre}</b> · <a href="tel:${e.destinatario_telefono.replace(/\s/g, '')}">${e.destinatario_telefono}</a></p>
       ${e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar por WhatsApp</a>` : ''}
-      <p class="sub">${e.descripcion_producto ? `${e.descripcion_producto} · ` : ''}${textoPaquete(e)}</p>
       <div class="grid g2" style="margin-top:12px">
         <a class="btn blanco grande" href="${e.mapas.google}" target="_blank" rel="noopener">Ir con Google Maps</a>
         <a class="btn azul grande" href="${e.mapas.waze}" target="_blank" rel="noopener">Ir con Waze</a>
       </div>
+    </div>
+    <div class="card"${antesDeRetirar ? html` style="border-color:var(--magenta-500)"` : ''}>
+      <h2>${antesDeRetirar ? 'Paquete a retirar' : 'Paquete'}</h2>
+      <div style="font-size:1.1rem;font-weight:800">${textoPaquete(e)}</div>
+      ${e.descripcion_producto ? html`<p>Contenido: <b>${e.descripcion_producto}</b></p>` : ''}
+      ${e.valor_declarado ? html`<p><span class="badge e-creado">Asegurado</span></p>` : ''}
+      ${e.observaciones ? html`<p class="sub">Observaciones: ${e.observaciones}</p>` : ''}
+      ${antesDeRetirar ? html`<p class="muted">Revisa que los bultos coincidan antes de retirar. Esta información no va impresa en la etiqueta.</p>` : ''}
     </div>
     <div id="acciones"></div>
     <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${e.historial.map((h) => html`<li><b>${ESTADOS[h.estado_nuevo]}</b>${h.motivo ? html` · <span class="sub">${h.motivo}</span>` : ''}<div class="cuando">${fechaHora(h.fecha)}</div></li>`)}</ol></div>`);
