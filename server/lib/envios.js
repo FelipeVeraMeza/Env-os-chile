@@ -6,7 +6,7 @@ import { urlQr } from './ticket.js';
 
 export const SELECT_ENVIO = `
   SELECT e.*,
-    d.nombre AS destinatario_nombre, d.telefono AS destinatario_telefono, d.correo AS destinatario_correo,
+    d.nombre AS destinatario_nombre, d.telefono AS destinatario_telefono, d.correo AS destinatario_correo, d.rut AS destinatario_rut,
     di.calle, di.numero, di.depto, di.referencia, di.lat, di.lon, di.alias AS direccion_alias,
     c.nombre AS comuna_nombre, c.region, c.provincia,
     cli.nombre AS cliente_nombre, cli.telefono AS cliente_telefono, cli.rut AS cliente_rut, rep.nombre AS repartidor_nombre,

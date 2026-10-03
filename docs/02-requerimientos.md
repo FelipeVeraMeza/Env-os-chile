@@ -45,7 +45,7 @@ Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan
 ### Ticket, QR y mapas
 | ID | Requerimiento | Prio. | Proto. | QA |
 |---|---|---|---|---|
-| RF-20 | Ticket con todos los datos del envío: remitente, destinatario y teléfono, dirección completa con referencia, comuna y región, contenido, servicio, pago, firma de recepción y enlace de seguimiento | I | ✅ | CP-22, CP-84 |
+| RF-20 | Etiqueta mínima para pegar en el paquete (pedido del cliente 02-10): logo, folio y bulto, pagado o por pagar, QR, nombre, RUT y celular del destinatario, dirección con referencia y comuna, y quién envía. El contenido del paquete, estado y repartidor se ven en la app y en el sistema | I | ✅ | CP-22, CP-84 |
 | RF-21 | Formato térmico 80 mm y A4 (PDF) | A | ✅ | CP-22 |
 | RF-22 | Imprimir, descargar y compartir (WhatsApp manual) | I | ✅ | — |
 | RF-23 | QR único por envío | I | ✅ | CP-23 |
