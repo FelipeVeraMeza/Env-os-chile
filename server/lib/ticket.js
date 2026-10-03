@@ -30,80 +30,70 @@ const LEYENDA_QR = {
 };
 
 // Dibuja una etiqueta completa (una por bulto en el formato térmico). Devuelve la altura usada.
-function dibujarEtiqueta(doc, { envio, conf, qr, bulto, termico, ancho, margen }) {
+function dibujarEtiqueta(doc, { envio, conf, qr, termico, ancho, margen }) {
   const util = ancho - margen * 2;
   const t = termico ? 1 : 1.35;
-  const gris = '#555555';
   const linea = () => {
     doc.moveDown(0.35);
     doc.moveTo(margen, doc.y).lineTo(ancho - margen, doc.y).lineWidth(0.6).dash(2, { space: 2 }).stroke('#000000').undash();
     doc.moveDown(0.35);
   };
-  const par = (etiqueta, valor, { tamano = 10.5 } = {}) => {
-    if (valor === null || valor === undefined || valor === '') return;
-    doc.font('Helvetica').fontSize(8.5 * t).fillColor(gris).text(`${etiqueta}: `, { width: util, continued: true })
-      .font('Helvetica-Bold').fillColor('#000000').fontSize(tamano * t).text(String(valor));
-    doc.moveDown(0.15);
+  const seccion = (titulo) => {
+    doc.moveDown(0.2).fontSize(7.5 * t).font('Helvetica-Bold').fillColor('#000000').text(titulo.toUpperCase(), { width: util, characterSpacing: 0.6 });
+    doc.font('Helvetica').fontSize(9 * t).fillColor('#000000');
   };
 
-  // Etiqueta mínima (pedido del cliente 02-10, "como el sticker que pegan al paquete"): logo, folio, pagado o
-  // por pagar, QR y los datos del destinatario. Lo demás (fechas, estado, repartidor, contacto de la empresa,
-  // paquete, firma) lo ven el repartidor en su app y administración en el sistema.
+  // Etiqueta mínima (pedido del cliente 03-10, con la etiqueta marcada): logo, folio, QR, remitente y
+  // destinatario con su dirección. Lo demás (nombre y contacto de la empresa, bulto, fechas, pago, estado,
+  // paquete, firma, seguimiento y pie) lo ven el repartidor en su app y administración en el sistema.
 
-  // Encabezado: térmico con el logo grande centrado sobre el nombre; A4 con el logo a la izquierda del nombre.
+  // Logo centrado (el subido en Ajustes; ya lleva el nombre de la empresa)
   const logo = logoEtiqueta(conf);
-  const ladoLogo = termico ? 96 : 72;
-  const inicioEncabezado = doc.y;
-  let anchoEncabezado = util;
-  let xEncabezado = margen;
-  let yNombre = doc.y;
   if (logo) {
+    const ladoLogo = termico ? 96 : 110;
+    const inicio = doc.y;
     try {
-      doc.image(logo, termico ? (ancho - ladoLogo) / 2 : margen, inicioEncabezado, { fit: [ladoLogo, ladoLogo], align: 'center', valign: 'center' });
-      if (termico) yNombre = inicioEncabezado + ladoLogo + 6;
-      else {
-        xEncabezado = margen + ladoLogo + 12; anchoEncabezado = util - (ladoLogo + 12) * 2;
-        yNombre = inicioEncabezado + (ladoLogo - 13 * t) / 2; // nombre centrado a la altura del logo
-      }
-    } catch { /* un logo dañado no debe impedir imprimir la etiqueta */ }
+      doc.image(logo, (ancho - ladoLogo) / 2, inicio, { fit: [ladoLogo, ladoLogo], align: 'center', valign: 'center' });
+      doc.y = inicio + ladoLogo;
+      linea();
+    } catch { doc.y = inicio; /* un logo dañado no debe impedir imprimir la etiqueta */ }
   }
-  doc.fontSize(13 * t).font('Helvetica-Bold').fillColor('#000000').text(conf.negocio.nombre, xEncabezado, yNombre, { align: 'center', width: anchoEncabezado });
-  doc.x = margen;
-  if (logo && !termico) doc.y = Math.max(doc.y, inicioEncabezado + ladoLogo);
-  linea();
 
-  // Folio, bulto, pagado o por pagar
+  // Folio
   doc.fillColor('#000000').fontSize(17 * t).font('Helvetica-Bold').text(envio.folio, { align: 'center', width: util });
-  doc.fontSize(10 * t).text(bulto ? `BULTO ${bulto} DE ${envio.bultos}` : `${envio.bultos} ${envio.bultos > 1 ? 'BULTOS' : 'BULTO'}`, { align: 'center', width: util });
-  const pagado = ['pagado', 'reembolsado'].includes(envio.estado_pago);
-  doc.moveDown(0.3).fontSize(11 * t).text(pagado ? 'PAGADO' : 'POR PAGAR', { align: 'center', width: util });
-  if (envio.horario_especial) doc.fontSize(9 * t).text(`HORARIO ESPECIAL ${envio.franja_horaria}`, { align: 'center', width: util });
   linea();
 
   // QR hacia el mapa con la dirección de destino
-  const ladoQr = termico ? 118 : 140; // > 4 cm: se lee bien desde el teléfono del repartidor
+  const ladoQr = termico ? 132 : 150; // > 4 cm: se lee bien desde el teléfono del repartidor
   doc.image(qr, (ancho - ladoQr) / 2, doc.y, { width: ladoQr });
   doc.y += ladoQr + 2;
   doc.fontSize(7.5 * t).font('Helvetica-Bold').text(LEYENDA_QR[conf.operacion.qr_destino] || LEYENDA_QR.google, { align: 'center', width: util });
   linea();
 
-  // Destinatario: los mismos datos que el sticker (nombre, RUT, celular, dirección).
-  par('Nombre', envio.destinatario_nombre, { tamano: 12 });
-  par('RUT', envio.destinatario_rut);
-  par('Celular', envio.destinatario_telefono);
-  if (envio.tipo_destino === 'punto_courier') {
-    par(`Entregar en punto ${envio.courier_empresa}`, envio.courier_punto);
-    par('Código', envio.courier_codigo);
-  }
-  par('Dirección', `${envio.calle} ${envio.numero}${envio.depto ? `, ${envio.depto}` : ''}`);
-  par('Referencia', envio.referencia, { tamano: 9.5 });
-  doc.moveDown(0.2).font('Helvetica-Bold').fontSize(16 * t).fillColor('#000000').text(String(envio.comuna_nombre).toUpperCase(), { width: util });
+  // Remitente: quién envía (el cliente dueño del envío).
+  seccion('Remitente');
+  doc.font('Helvetica-Bold').fontSize(10 * t).text(envio.cliente_nombre, { width: util });
+  doc.font('Helvetica').fontSize(9 * t);
+  const contactoRemitente = [envio.cliente_telefono && `Tel. ${envio.cliente_telefono}`, envio.cliente_rut && `RUT ${envio.cliente_rut}`].filter(Boolean).join(' · ');
+  if (contactoRemitente) doc.text(contactoRemitente, { width: util });
   linea();
 
-  // Quién envía (la tienda) y el texto al pie que se configura en Ajustes.
-  doc.font('Helvetica').fontSize(8 * t).fillColor(gris).text('Envía: ', { width: util, continued: true })
-    .font('Helvetica-Bold').fillColor('#000000').text(envio.cliente_nombre);
-  if (conf.ticket.pie) doc.moveDown(0.4).font('Helvetica').fontSize(7.5 * t).fillColor(gris).text(conf.ticket.pie, { align: 'center', width: util });
+  // Destinatario y dirección
+  seccion('Destinatario');
+  doc.font('Helvetica-Bold').fontSize(11 * t).text(envio.destinatario_nombre, { width: util });
+  const contactoDestinatario = [envio.destinatario_telefono && `Tel. ${envio.destinatario_telefono}`, envio.destinatario_rut && `RUT ${envio.destinatario_rut}`].filter(Boolean).join(' · ');
+  doc.font('Helvetica').fontSize(9.5 * t).text(contactoDestinatario, { width: util });
+  seccion(envio.tipo_destino === 'punto_courier' ? `Entregar en punto ${envio.courier_empresa}` : 'Dirección de entrega');
+  if (envio.tipo_destino === 'punto_courier') {
+    doc.font('Helvetica-Bold').text(envio.courier_punto, { width: util }).font('Helvetica');
+    if (envio.courier_codigo) doc.text(`Código del courier: ${envio.courier_codigo}`, { width: util });
+  }
+  doc.font('Helvetica-Bold').fontSize(10.5 * t).text(`${envio.calle} ${envio.numero}`, { width: util });
+  doc.font('Helvetica').fontSize(9.5 * t);
+  if (envio.depto) doc.text(`Depto./Of.: ${envio.depto}`, { width: util });
+  if (envio.referencia) doc.text(`Referencia: ${envio.referencia}`, { width: util });
+  doc.moveDown(0.25).font('Helvetica-Bold').fontSize(16 * t).text(String(envio.comuna_nombre).toUpperCase(), { width: util });
+  doc.font('Helvetica').fontSize(8.5 * t).text(`Región ${envio.region}${envio.region === 'Metropolitana' ? ' de Santiago' : ''}`, { width: util });
   doc.fillColor('#000000');
   return doc.y + margen;
 }
@@ -120,7 +110,7 @@ export async function generarTicketPdf(envio, conf, formato = '80mm') {
   let alto = 841.89;
   if (termico) {
     const medida = new PDFDocument({ size: [ancho, 5000], margin: margen, autoFirstPage: true });
-    alto = Math.ceil(dibujarEtiqueta(medida, { ...opciones, bulto: 1 }));
+    alto = Math.ceil(dibujarEtiqueta(medida, opciones));
     medida.end();
   }
 
@@ -131,7 +121,7 @@ export async function generarTicketPdf(envio, conf, formato = '80mm') {
   const etiquetas = termico ? Math.max(1, Number(envio.bultos) || 1) : 1;
   for (let bulto = 1; bulto <= etiquetas; bulto++) {
     doc.addPage({ size: [ancho, alto], margin: margen });
-    dibujarEtiqueta(doc, { ...opciones, bulto: termico ? bulto : null });
+    dibujarEtiqueta(doc, opciones);
   }
   doc.end();
   return fin;
