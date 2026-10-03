@@ -125,7 +125,9 @@ Faltan para operar con clientes reales. La mayoría depende de respuestas del cl
 | RF-68 | **Bitácora de cada pago** (inicio, notificación, verificación, rechazo, conciliación) | I | ✅ | CP-114 |
 | RF-69 | **Cobranza**: cobrado, por cobrar, comisiones de la pasarela y abonos por llegar; conciliación con la cartola (la comisión real es costo "pasarela") | A | ✅ | CP-116 |
 | RF-70 | **Comparador** del costo de cobrar con cada proveedor de pago y proyección mensual | M | ✅ | CP-116 |
-| RF-71 | **Pago por transferencia con comprobante**: el cliente sube la imagen (o PDF) de la transferencia y el pago queda **en revisión**; administración la ve y **aprueba** o **rechaza con motivo** (el cliente sube otra). **El pago manda**: sin pago aprobado el cliente no recibe el ticket, no se asigna repartidor y no se retira. Avisa si el mismo comprobante o N° de operación ya se usó en otro envío | I | ✅ | CP-160 a CP-170 |
+| RF-71 | **Pago por transferencia con comprobante**: el cliente sube la imagen (o PDF) de la transferencia y el pago queda **en revisión**; administración la ve y **aprueba** o **rechaza con motivo** (el cliente sube otra). **El pago manda**: sin pago aprobado no se asigna repartidor ni se retira (la etiqueta sí se imprime antes de pagar, pedido 03-10). Avisa si el mismo comprobante o N° de operación ya se usó en otro envío | I | ✅ | CP-160 a CP-170 |
+| RF-72 | **Etiqueta antes de pagar** (pedido 03-10): el cliente ve e imprime la etiqueta (80 mm y A4) apenas confirma el envío. El botón es un enlace firmado que vence en 12 horas, así el celular abre el PDF directo (antes el navegador del celular bloqueaba la pestaña y la etiqueta no salía) | I | ✅ | CP-22, CP-160, simulación por rol |
+| RF-73 | **Anulación automática por falta de pago** (pedido 03-10): un envío confirmado que sigue con el pago pendiente 24 horas después (configurable con `ANULAR_SIN_PAGO_HORAS`) se anula solo y queda en su historial como "Sistema". No se anulan los que tienen un comprobante en revisión ni los que ya tienen repartidor. El cliente ve el plazo en el envío | I | ✅ | simulación de vencimiento |
 
 ## Requerimientos no funcionales
 

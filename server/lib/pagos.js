@@ -18,11 +18,11 @@ export async function registrarEventoPago(db, { pagoId, tipo, estado = null, mon
 
 // Cuando el envío queda pagado (por cualquier medio), los cobros en línea que quedaron abiertos ya no sirven: se anulan.
 // Si no, Cobranza los mostraba para siempre como "pagos sin respuesta de la pasarela".
-export async function cerrarCobrosAbiertos(db, envioId) {
+export async function cerrarCobrosAbiertos(db, envioId, motivo = 'El envío se pagó por otro medio') {
   const { rows } = await db.query(
     "UPDATE pago SET estado = 'anulado', actualizado_en = now() WHERE envio_id = $1 AND estado = 'iniciado' RETURNING id, monto", [envioId]);
   for (const p of rows) {
-    await registrarEventoPago(db, { pagoId: p.id, tipo: 'rechazo', estado: 'anulado', monto: p.monto, datos: { motivo: 'El envío se pagó por otro medio' } });
+    await registrarEventoPago(db, { pagoId: p.id, tipo: 'rechazo', estado: 'anulado', monto: p.monto, datos: { motivo } });
   }
 }
 

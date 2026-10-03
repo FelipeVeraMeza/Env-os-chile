@@ -90,7 +90,8 @@ export async function detalle(id) {
   const nivel = nivelProgreso(e);
   const fotos = e.adjuntos.filter((a) => ['foto_paquete', 'foto_entrega'].includes(a.tipo));
   // El pago manda: el cliente recibe el ticket cuando su pago está aprobado.
-  const conTicket = e.folio && (esAdmin || ['pagado', 'reembolsado'].includes(e.estado_pago));
+  // Enlace firmado que entrega el servidor: el botón abre el PDF directo (también en el celular y en la app instalada).
+  const enlaceTicket = (formato) => `${urlApi()}${e.ticket_url}&formato=${formato}`;
   const porPagar = e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado);
   const boletas = e.adjuntos.filter((a) => a.tipo === 'boleta');
   const reclamoActivo = e.reclamos.find((r) => r.estado !== 'rechazado');
@@ -100,16 +101,17 @@ export async function detalle(id) {
 
   montar(vista, html`
     <div class="encabezado">
-      <div><a href="#/envios" class="sub" style="text-decoration:none">← Volver</a>
+      <div><a href="#/envios" class="sub volver">← Volver</a>
         <h1 class="mono">${e.folio || 'Borrador'}</h1>
         <div class="fila">${badge(e.estado)} ${badgePago(e.estado_pago)} ${e.horario_especial ? html`<span class="badge e-en_ruta">Horario ${e.franja_horaria}</span>` : ''}
           <span class="sub">Intentos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
       <div class="fila">
-        ${conTicket ? html`<button class="btn sec" data-ticket="80mm">Ticket 80 mm</button><button class="btn sec" data-ticket="a4">Ticket A4</button>` : ''}
+        ${e.ticket_url ? html`<a class="btn sec" href="${enlaceTicket('80mm')}" target="_blank" rel="noopener">Etiqueta 80 mm</a><a class="btn sec" href="${enlaceTicket('a4')}" target="_blank" rel="noopener">Etiqueta A4</a>` : ''}
         ${porPagar && app.conf.pagos.en_linea ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn sec" id="transferir">Pagar con transferencia</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
         ${porPagar && !app.conf.pagos.en_linea ? html`<button class="btn" id="transferir">Pagar ${clp(e.tarifa_total)} con transferencia</button>` : ''}
       </div>
     </div>
+    ${porPagar && e.estado === 'creado' && !e.repartidor_id ? html`<div class="aviso alerta" style="margin-top:12px">Si no se paga antes del <b>${fechaHora(new Date(new Date(e.confirmado_en || e.creado_en).getTime() + (app.conf.operacion.horas_sin_pago || 24) * 3600_000))}</b>, el envío se anula solo.</div>` : ''}
     ${!['anulado', 'devuelto'].includes(e.estado) ? html`<div class="progreso-envio">${PROGRESO.map(([, t], i) => html`<div class="${i < nivel ? 'on' : ''}">${t}</div>`)}</div>` : ''}
     <div class="grid g2" style="margin-top:18px;align-items:start">
       <div>
@@ -120,7 +122,7 @@ export async function detalle(id) {
         <div class="card">
           <div class="card-titulo"><h2>Destino</h2><div class="fila"><a class="btn sec chico" href="${e.mapas.google}" target="_blank" rel="noopener">Google Maps</a><a class="btn sec chico" href="${e.mapas.waze}" target="_blank" rel="noopener">Waze</a></div></div>
           ${e.tipo_destino === 'punto_courier' ? html`<div class="aviso" style="margin-bottom:10px">Entrega en punto <b>${e.courier_empresa}</b>: ${e.courier_punto}${e.courier_codigo ? ` · código ${e.courier_codigo}` : ''}</div>` : ''}
-          <p><b>${e.destinatario_nombre}</b> · ${e.destinatario_telefono}</p>
+          <p><b>${e.destinatario_nombre}</b> · <span class="nowrap">${e.destinatario_telefono}</span></p>
           <p>${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}<br><b style="font-size:1.2rem">${e.comuna_nombre}</b> <span class="muted">· ${e.region}</span></p>
           ${e.folio && e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar al destinatario por WhatsApp</a>` : ''}
           ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}
@@ -138,7 +140,6 @@ export async function detalle(id) {
             <div class="total"><span>Total</span><span>${clp(e.tarifa_total)}</span></div>
           </div>
           ${e.estado_pago === 'pagado' ? html`<p class="sub" style="margin-top:10px">Pagado ${fechaHora(e.pagado_en)} · ${e.pago_medio === 'en_linea' ? 'en línea' : e.pago_medio} ${e.pago_referencia ? `· ${e.pago_referencia}` : ''}</p>` : ''}
-          ${!esAdmin && e.folio && !conTicket && e.estado !== 'anulado' ? html`<p class="muted" style="margin-top:10px">El ticket estará disponible cuando se apruebe el pago.</p>` : ''}
         </div>
         <div class="card">
           <div class="card-titulo"><h2>Seguro</h2>${e.valor_declarado ? html`<span class="badge e-creado">${esAdmin ? `Valor declarado ${clp(e.valor_declarado)}` : 'Asegurado'}</span>` : html`<span class="badge e-anulado">Sin seguro</span>`}</div>
@@ -162,7 +163,6 @@ export async function detalle(id) {
     </div>`);
 
   if (e.folio) api(`/api/envios/${e.id}/qr.png`, { blob: true }).then((b) => mostrarBlob($('#qr'), b)).catch(() => {});
-  $$('[data-ticket]').forEach((b) => { b.onclick = () => abrirBlob(api(`/api/envios/${e.id}/ticket.pdf?formato=${b.dataset.ticket}`, { blob: true })).catch(errorToast); });
   $('#pagar')?.addEventListener('click', () => pagar(e, () => detalle(id)));
   $('#transferir')?.addEventListener('click', () => subirComprobante(e, () => detalle(id)));
   $('#revisar-comprobante')?.addEventListener('click', () => revisarComprobante(comprobanteDe(e), () => detalle(id)));
@@ -230,7 +230,7 @@ function enlazarAcciones(e, recargar) {
       catch (err) { marcarErrores(ev.target, err.detalles); errorToast(err); }
     };
   });
-  $('#exportar-dest')?.addEventListener('click', () => abrirBlob(api(`/api/destinatarios/${e.destinatario_id}/exportar`, { blob: true })).catch(errorToast));
+  $('#exportar-dest')?.addEventListener('click', () => abrirBlob(api(`/api/destinatarios/${e.destinatario_id}/exportar`, { blob: true }), `destinatario-${e.destinatario_id}.json`).catch(errorToast));
   $('#anonimizar-dest')?.addEventListener('click', async () => {
     if (!(await confirmar('¿Anonimizar al destinatario?', `Se borran para siempre el nombre, teléfono y direcciones de ${e.destinatario_nombre}. Los envíos se conservan sin datos personales.`))) return;
     try { await post(`/api/destinatarios/${e.destinatario_id}/anonimizar`); toast('Datos del destinatario anonimizados', 'ok'); recargar(); }
@@ -301,7 +301,7 @@ function tarjetaTransferencia(e, esAdmin) {
       ${esAdmin
         ? html`<p class="sub">El cliente subió el comprobante el ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}. Revísalo contra la cartola antes de aprobar.</p>
           <button class="btn" id="revisar-comprobante" style="margin-top:10px">Revisar comprobante</button>`
-        : html`<div class="aviso">Recibimos tu comprobante el ${fechaHora(c.creado_en)}. <b>Administración lo está revisando</b>: cuando lo apruebe podrás descargar el ticket y el repartidor podrá retirar tu envío.</div>
+        : html`<div class="aviso">Recibimos tu comprobante el ${fechaHora(c.creado_en)}. <b>Administración lo está revisando</b>: cuando lo apruebe el repartidor podrá retirar tu envío.</div>
           <a class="sub" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Ver el comprobante enviado</a>`}
     </div>`;
   }
@@ -316,7 +316,7 @@ function tarjetaTransferencia(e, esAdmin) {
 export function subirComprobante(envio, alTerminar) {
   const t = app.conf.transferencia || {};
   const m = modal(html`<h2>Pagar con transferencia</h2>
-    <p class="sub">Envío <b class="mono">${envio.folio}</b>. Transfiere el monto exacto y sube la imagen del comprobante: administración lo revisa y, al aprobarlo, recibes el ticket y el repartidor puede retirar tu envío.</p>
+    <p class="sub">Envío <b class="mono">${envio.folio}</b>. Transfiere el monto exacto y sube la imagen del comprobante: administración lo revisa y, al aprobarlo, el repartidor puede retirar tu envío.</p>
     <div class="monto-grande" style="margin:10px 0">${clp(envio.tarifa_total)}</div>
     ${t.banco && t.numero_cuenta ? html`<div class="desglose" style="margin-bottom:12px">
         <div><span>Banco</span><b>${t.banco}</b></div>

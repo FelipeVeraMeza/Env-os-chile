@@ -89,7 +89,7 @@ configuracion.get('/publica', ruta(async (req, res) => {
   // cualquiera en internet podía leerlos sin entrar.
   const conSesion = config.authMode === 'demo' || Boolean(await usuarioOpcional(req));
   res.json({
-    negocio: conf.negocio, tarifas: conf.tarifas, operacion: conf.operacion, ticket: conf.ticket,
+    negocio: conf.negocio, tarifas: conf.tarifas, operacion: { ...conf.operacion, horas_sin_pago: config.horasSinPago }, ticket: conf.ticket,
     pagos: { proveedor: conf.pagos.proveedor, en_linea: conf.pagos.en_linea }, transferencia: conSesion ? conf.transferencia : {}, couriers: conf.listas.couriers, franjas: conf.listas.franjas, estados: ESTADOS, motivos_fallo: MOTIVOS_FALLO,
     motivos_reclamo: MOTIVOS_RECLAMO, estados_reclamo: ESTADOS_RECLAMO, auth_mode: config.authMode, demo_protegida: config.authMode === 'demo' && Boolean(config.demoClave), recuperacion_por_correo: correoConfigurado(),
   });

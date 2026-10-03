@@ -8,7 +8,7 @@ import { config } from './config.js';
 import { pool } from './db/pool.js';
 import { falla, manejadorErrores } from './lib/http.js';
 import { autenticar } from './middleware/auth.js';
-import { envios } from './routes/envios.js';
+import { envios, tickets } from './routes/envios.js';
 import { auth, demo, usuarios } from './routes/cuentas.js';
 import { comunas, configuracion, destinatarios, zonas } from './routes/catalogos.js';
 import { adjuntos, auditoria, costos, pagoPublico, pagos, reclamos, reportes } from './routes/operacion.js';
@@ -87,6 +87,7 @@ export function crearApp() {
   app.use('/api/usuarios', usuarios);
   app.use('/api/zonas', zonas);
   app.use('/api/destinatarios', destinatarios);
+  app.use('/api/tickets', tickets);
   app.use('/api/envios', autenticar, envios);
   app.use('/api/pagos', pagos);
   app.use('/api/pago-publico', pagoPublico);

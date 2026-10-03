@@ -4,6 +4,7 @@ import { migrar } from './db/migrate.js';
 import { cerrarCuentasDemo, sembrar } from './db/seed.js';
 import { conectar, explicarErrorConexion, pool } from './db/pool.js';
 import { asegurarAlmacenamiento } from './lib/archivos.js';
+import { programarVencimientos } from './lib/vencimientos.js';
 
 async function iniciar() {
   const faltan = validarProduccion(process.env);
@@ -22,6 +23,7 @@ async function iniciar() {
   const servidor = crearApp().listen(config.puerto, () => {
     console.log(`[api] lista en ${config.publicBaseUrl} (puerto ${config.puerto}, modo ${config.authMode})`);
   });
+  programarVencimientos();
 
   // Railway envía SIGTERM al redesplegar: cerrar ordenado para no cortar peticiones.
   const cerrar = (senal) => {

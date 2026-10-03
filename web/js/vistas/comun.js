@@ -53,8 +53,9 @@ export function urlMapaGoogle(calle, numero, comuna) {
   if (!String(calle || '').trim() || !comuna) return '';
   return `https://www.google.com/maps?q=${encodeURIComponent(`${calle} ${numero || ''}, ${comuna}, Chile`)}&output=embed`;
 }
+// Sin dirección todavía no se muestra el recuadro vacío del mapa: aparece al escribir la calle, el número y la comuna.
 export function mapaGoogle(id, url) {
-  return html`<div class="mapa-dir" style="margin-top:12px">
+  return html`<div class="mapa-dir" style="margin-top:12px" ${url ? '' : html`hidden`}>
     <iframe id="${id}" title="Mapa de Google con la dirección" src="${url || 'about:blank'}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"
       style="width:100%;height:240px;border:0;border-radius:14px;background:rgba(255,255,255,.06)"></iframe>
     <p class="muted" style="margin-top:6px">Revisa en el mapa que el punto sea la dirección correcta. Si no lo es, corrige la calle, el número o la comuna.</p></div>`;

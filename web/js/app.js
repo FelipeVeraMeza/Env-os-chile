@@ -376,8 +376,18 @@ async function iniciar() {
   window.addEventListener('sesion-expirada', (e) => { if (app.usuario) cerrarSesion(e.detail || 'Tu sesión expiró: vuelve a iniciar sesión.'); });
   window.addEventListener('cambiar-clave', () => { if (app.usuario && !$('#f-clave-nueva')) { app.usuario.debe_cambiar_clave = true; dialogoCambiarClave({ obligatorio: true }); } });
   window.addEventListener('hashchange', enrutar);
+  vigilarTeclado();
   enrutar();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// Celular: con el teclado abierto la barra inferior tapa el formulario, así que se oculta. Se detecta por el alto
+// visible (no por el foco): si se ocultara al enfocar un campo, la barra de botones saltaba justo al tocar "Continuar".
+function vigilarTeclado() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const revisar = () => document.body.classList.toggle('teclado', vv.height < window.innerHeight * 0.75);
+  vv.addEventListener('resize', revisar);
 }
 
 // Actualización automática (RNF-22): con muchas personas trabajando a la vez, lo que cambia otro usuario

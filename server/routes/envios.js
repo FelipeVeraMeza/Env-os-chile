@@ -9,9 +9,9 @@ import {
   validarDireccion, validarPaquete, validarRetiro, validarSubidaComprobante, validarTransicion, validarUbicacion, ESTADOS, LIMITES, MIME_COMPROBANTE, TAMANOS,
 } from '../lib/reglas.js';
 import {
-  cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
+  cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, puedeVerTicket, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
 } from '../lib/envios.js';
-import { conArchivo, subida } from '../lib/archivos.js';
+import { conArchivo, subida, verificarTicket } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
 import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, cerrarCobrosAbiertos, iniciarPago, registrarComprobante, registrarComprobanteLote, registrarEventoPago } from '../lib/pagos.js';
@@ -673,16 +673,33 @@ envios.get('/:id/qr.png', ruta(async (req, res) => {
 }));
 
 envios.get('/:id/ticket.pdf', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
-  const envio = await envioAccesible(req);
-  if (!envio.folio) throw falla(409, 'Confirma el envío para emitir el ticket');
-  // El pago manda: el cliente recibe su ticket cuando el pago está aprobado (administración lo ve siempre).
-  if (req.usuario.rol === 'cliente' && !['pagado', 'reembolsado'].includes(envio.estado_pago)) {
-    throw falla(409, envio.estado_pago === 'en_revision'
-      ? 'Tu comprobante está en revisión: el ticket se entrega cuando administración apruebe el pago'
-      : 'El ticket se entrega cuando el pago esté aprobado');
-  }
-  const pdf = await generarTicketPdf(envio, await leerConfig(), req.query.formato === 'a4' ? 'a4' : '80mm');
+  await enviarTicket(res, await envioAccesible(req), req.usuario, req.query.formato);
+}));
+
+// El cliente ve e imprime su etiqueta apenas confirma el envío, aunque no haya pagado (pedido 03-10): la etiqueta
+// no muestra montos ni estado de pago, y el retiro igual exige el pago aprobado. Un envío anulado ya no tiene etiqueta.
+async function enviarTicket(res, envio, usuario, formato) {
+  if (!envio.folio) throw falla(409, 'Confirma el envío para emitir la etiqueta');
+  if (!puedeVerTicket(usuario, envio)) throw falla(409, 'El envío está anulado: ya no tiene etiqueta');
+  const pdf = await generarTicketPdf(envio, await leerConfig(), formato === 'a4' ? 'a4' : '80mm');
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="ticket-${envio.folio}.pdf"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Disposition', `inline; filename="etiqueta-${envio.folio}.pdf"`);
   res.send(pdf);
+}
+
+// Etiqueta por enlace firmado (sin cabeceras de sesión): lo abre el visor de PDF del celular directamente.
+export const tickets = Router();
+tickets.get('/:id', ruta(async (req, res) => {
+  const id = idNumerico(req.params.id);
+  if (!verificarTicket(id, req.query.exp, req.query.u, req.query.sig)) {
+    await registrarEvento(req, 'enlace_invalido', { usuarioId: null, detalle: { ticket: id } });
+    throw falla(403, 'Enlace vencido: vuelve a abrir la etiqueta desde la app');
+  }
+  // Se revisa de nuevo quién es: si lo desactivaron o el envío cambió de dueño, el enlace deja de servir.
+  const usuario = await uno('SELECT id, rol, activo FROM usuario WHERE id = $1', [Number(req.query.u)]);
+  if (!usuario?.activo) throw falla(403, 'Enlace vencido: vuelve a abrir la etiqueta desde la app');
+  const envio = await cargarEnvio(id);
+  exigirAcceso(usuario, envio);
+  await enviarTicket(res, envio, usuario, req.query.formato);
 }));

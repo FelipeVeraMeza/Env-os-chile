@@ -170,8 +170,26 @@ export function firmarEnlace(adjuntoId, usuarioId, segundos = 600) {
 }
 
 export function verificarFirma(adjuntoId, exp, usuarioId, sig) {
+  return firmaValida(firma(adjuntoId, exp, usuarioId), exp, usuarioId, sig);
+}
+
+function firmaValida(esperada, exp, usuarioId, sig) {
   if (!exp || !sig || !/^\d+$/.test(String(usuarioId || '')) || Number(exp) < Math.floor(Date.now() / 1000)) return false;
-  const a = Buffer.from(firma(adjuntoId, exp, usuarioId));
+  const a = Buffer.from(esperada);
   const b = Buffer.from(String(sig));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// Etiqueta por enlace firmado (pedido 03-10): el botón es un enlace normal y el celular abre el PDF en su visor.
+// Antes la app descargaba el PDF y recién después abría una pestaña; los navegadores del celular bloquean esa
+// pestaña (ya no cuenta como toque del usuario) y la etiqueta "no salía". El prefijo separa estas firmas de las de adjuntos.
+const firmaTicket = (envioId, exp, usuarioId) => crypto.createHmac('sha256', config.jwtSecret).update(`ticket.${envioId}.${exp}.${usuarioId}`).digest('base64url');
+
+export function firmarTicket(envioId, usuarioId, segundos = 12 * 3600) {
+  const exp = Math.floor(Date.now() / 1000) + segundos;
+  return `/api/tickets/${envioId}?exp=${exp}&u=${usuarioId}&sig=${firmaTicket(envioId, exp, usuarioId)}`;
+}
+
+export function verificarTicket(envioId, exp, usuarioId, sig) {
+  return firmaValida(firmaTicket(envioId, exp, usuarioId), exp, usuarioId, sig);
 }

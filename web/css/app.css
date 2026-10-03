@@ -132,15 +132,27 @@ p { margin: 0 0 .6em; }
   /* Modales como hoja inferior, al estilo de una app */
   .modal-fondo { align-items: end; padding: 0; }
   .modal { width: 100%; border-radius: 24px 24px 0 0; max-height: 92vh; padding: 22px 18px calc(22px + env(safe-area-inset-bottom)); animation: subir .2s ease; }
-  /* Botones del asistente siempre a mano, sobre la barra inferior */
-  .acciones-fijas { position: sticky; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 5; margin: 18px -20px -20px; padding: 12px 20px;
+  /* Botones del asistente siempre a mano, sobre la barra inferior. Los márgenes negativos son iguales al relleno
+     de la tarjeta en el celular (16 px): con -20 px la barra sobresalía 4 px por cada lado. */
+  .acciones-fijas { position: sticky; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 5; margin: 18px -16px -16px; padding: 12px 16px;
     background: rgba(10, 26, 107, .96); backdrop-filter: blur(10px); border-top: 1px solid var(--borde); border-radius: 0 0 var(--radio) var(--radio); }
-  .acciones-fijas .btn.grande { min-height: 52px; }
+  .acciones-fijas .btn.grande { min-height: 52px; padding: 0 20px; }
+  /* Atrás a la izquierda; a la derecha la tarifa encima de Continuar si no caben en una línea. */
+  .acciones-fijas { flex-wrap: nowrap; }
+  .acciones-fijas > .fila { justify-content: flex-end; row-gap: 4px; }
+  /* Con el teclado abierto (clase puesta por app.js) la barra inferior tapaba el formulario: se oculta. */
+  body.teclado .menu { display: none; }
+  body.teclado .acciones-fijas { bottom: 0; }
   .encabezado { margin-bottom: 16px; }
   .hero { padding: 22px; border-radius: 20px; }
   .card { padding: 16px; }
-  #toasts { left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); max-width: none; }
+  /* Avisos arriba: abajo tapaban los botones Atrás / Continuar del asistente. */
+  body #toasts { left: 16px; right: 16px; top: calc(72px + env(safe-area-inset-top)); bottom: auto; max-width: none; }
   .paso { font-size: .68rem; }
+  /* iOS acerca la pantalla al tocar un campo con letra menor a 16 px. */
+  input, select, textarea { font-size: 16px; }
+  /* El fondo no se desplaza detrás de una hoja abierta. */
+  body:has(.modal-fondo) { overflow: hidden; }
   .menu a { flex-direction: column; gap: 3px; font-size: .66rem; padding: 7px 6px; margin: 0; text-align: center; }
   .vista { padding: 20px 16px 110px; }
 }
@@ -362,7 +374,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .modal-cuerpo > h2:first-child, .modal-cuerpo > .hoja-titulo:first-child { padding-right: 48px; }
 @keyframes aparecer { from { opacity: 0; } to { opacity: 1; } }
 @keyframes subir { from { transform: translateY(40px); opacity: .6; } to { transform: none; opacity: 1; } }
-#toasts { position: fixed; z-index: 60; right: 16px; bottom: 90px; display: grid; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
+#toasts { position: fixed; z-index: 60; right: 16px; bottom: 90px; display: grid; gap: 8px; max-width: min(380px, calc(100vw - 32px)); pointer-events: none; }
+.toast { pointer-events: auto; }
 .toast { padding: 13px 16px; border-radius: 14px; font-weight: 600; background: var(--blanco); color: var(--azul-900); box-shadow: var(--sombra); border-left: 5px solid var(--magenta-500); animation: aparecer .2s ease; }
 .toast.error { border-left-color: var(--error); }
 .toast.ok { border-left-color: var(--ok); }
@@ -375,6 +388,44 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 @keyframes girar { to { transform: rotate(360deg); } }
 .esqueleto { height: 72px; border-radius: 16px; background: linear-gradient(90deg, var(--superficie), var(--superficie-2), var(--superficie)); background-size: 200% 100%; animation: brillo 1.2s infinite; }
 @keyframes brillo { to { background-position: -200% 0; } }
+
+/* ---------- Celular angosto ---------- */
+@media (max-width: 640px) {
+  /* Los botones largos ("Pagar $4.500 con transferencia (subir comprobante)") bajan de línea en vez de salirse de la
+     pantalla y empujar toda la página hacia el lado. */
+  .btn { white-space: normal; text-align: center; line-height: 1.25; padding-top: 8px; padding-bottom: 8px; }
+  .hero .fila .btn { flex: 1 1 100%; }
+  /* Tarjetas de envío: los estados y el monto van debajo, así el nombre y la dirección usan todo el ancho. */
+  a.item-envio { grid-template-columns: minmax(0, 1fr); }
+  a.item-envio .der { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; text-align: left; }
+  /* Filtros de "Mis envíos": las dos fechas lado a lado y los botones del encabezado en una fila. */
+  #filtros .grid .grid.g2 { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .encabezado > .fila .btn { flex: 1 1 auto; min-height: 42px; font-size: .88rem; padding-left: 14px; padding-right: 14px; }
+  /* Pasos del asistente: solo se lee el nombre del paso actual (los nombres no caben y se montaban). */
+  .paso:not(.actual) { font-size: 0; gap: 0; }
+  .paso.actual { white-space: nowrap; }
+}
+.nowrap { white-space: nowrap; }
+/* Opciones con radio dentro de una tarjeta (tamaño, destinatario, dirección): el título sí puede bajar de línea. */
+.item-envio .titulo-item { font-weight: 800; }
+/* Radios visibles sobre el fondo oscuro (antes un círculo gris oscuro casi invisible). */
+input[type="radio"] {
+  appearance: none; -webkit-appearance: none; width: 22px; height: 22px; min-height: 22px; padding: 0; flex: none; cursor: pointer;
+  border-radius: 50%; border: 2px solid rgba(255, 255, 255, .6); background: transparent;
+}
+input[type="radio"]:checked { border-color: var(--magenta-400); background: radial-gradient(circle, var(--magenta-500) 0 42%, transparent 48%); }
+/* Campo de archivo con el estilo de la app (antes el botón gris del navegador y "No se h… archivo"). */
+input[type="file"] { padding: 8px; font-size: .88rem; color: var(--texto-2); }
+input[type="file"]::file-selector-button {
+  font: inherit; font-weight: 700; color: var(--blanco); background: var(--superficie-2); border: 1px solid var(--borde);
+  border-radius: 10px; padding: 8px 12px; margin-right: 10px; cursor: pointer;
+}
+.grupo-error { border-radius: 18px; outline: 2px solid var(--error); outline-offset: 4px; }
+.desglose div { gap: 12px; }
+.desglose b { text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.modal .pila > .btn, .modal form > .btn:last-child { width: 100%; }
+.volver { display: inline-flex; align-items: center; min-height: 40px; text-decoration: none; }
+.campo, .item-envio { scroll-margin: 96px 0 170px; }
 
 /* Tablas que en el celular se muestran como tarjetas */
 @media (max-width: 640px) {

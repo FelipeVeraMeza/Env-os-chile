@@ -17,10 +17,9 @@ before(async () => {
   envio = (await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id), confirmar: true } })).datos;
 });
 
-test('CP-160 · Sin pago aprobado: el cliente no recibe el ticket y administración no puede asignar repartidor', async () => {
-  const t = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente });
-  assert.equal(t.status, 409);
-  assert.match(t.datos.error, /pago/);
+test('CP-160 · Sin pago aprobado: el cliente ya ve su etiqueta, pero administración no puede asignar repartidor', async () => {
+  const t = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente, crudo: true });
+  assert.equal(t.status, 200, 'la etiqueta se imprime antes de pagar (pedido 03-10)');
   const a = await peticion('POST', `/api/envios/${envio.id}/asignar`, { sesion: esc.admin, json: { repartidor_id: esc.repartidor.usuario.id } });
   assert.equal(a.status, 409);
   assert.match(a.datos.error, /pagado/);
@@ -57,7 +56,7 @@ test('CP-163 · El cliente sube el comprobante: el pago queda en revisión y no 
   assert.ok(!disp.items.some((e) => e.id === envio.id), 'no aparece en disponibles');
   assert.equal((await peticion('POST', `/api/envios/${envio.id}/tomar`, { sesion: esc.repartidor })).status, 409);
   assert.equal((await peticion('POST', `/api/envios/${envio.id}/asignar`, { sesion: esc.admin, json: { repartidor_id: esc.repartidor.usuario.id } })).status, 409);
-  assert.equal((await peticion('GET', `/api/envios/${envio.id}/ticket.pdf`, { sesion: esc.cliente })).status, 409);
+  assert.equal((await peticion('GET', `/api/envios/${envio.id}/ticket.pdf`, { sesion: esc.cliente, crudo: true })).status, 200, 'la etiqueta no depende del pago');
 });
 
 test('CP-164 · Con un comprobante en revisión no se sube otro, ni se paga en línea, ni se registra pago manual', async () => {
@@ -91,7 +90,7 @@ test('CP-166 · Rechazar exige motivo; al rechazar el envío vuelve a pendiente 
   assert.equal(d.datos.pagos[0].estado, 'rechazado');
   assert.equal(d.datos.pagos[0].motivo_rechazo, 'El monto transferido no coincide');
   assert.equal((await peticion('POST', `/api/cobranza/comprobantes/${primero.id}/aprobar`, { sesion: esc.admin })).status, 409, 'un comprobante rechazado no se aprueba después');
-  assert.equal((await peticion('GET', `/api/envios/${envio.id}/ticket.pdf`, { sesion: esc.cliente })).status, 409);
+  assert.equal((await peticion('GET', `/api/envios/${envio.id}/ticket.pdf`, { sesion: esc.cliente, crudo: true })).status, 200, 'la etiqueta no depende del pago');
 });
 
 test('CP-167 · El cliente sube un comprobante nuevo (PDF) y administración lo aprueba: queda pagado y con ticket', async () => {

@@ -92,6 +92,8 @@ export const config = {
   jwtDias: numeroEnv(process.env.JWT_DIAS, 30, { min: 1 }),
   uploadDir: path.resolve(process.env.UPLOAD_DIR || './uploads'),
   maxUploadMb: numeroEnv(process.env.MAX_UPLOAD_MB, 10, { min: 1 }),
+  // Horas que un envío confirmado puede seguir sin pagar antes de anularse solo (pedido 03-10).
+  horasSinPago: numeroEnv(process.env.ANULAR_SIN_PAGO_HORAS, 24, { min: 1 }),
   // Solo para crear el primer administrador cuando la base no tiene usuarios. Después las cuentas viven en la base
   // (contraseña cifrada) y estas variables se pueden borrar. En producción no hay valores de respaldo.
   admin: {

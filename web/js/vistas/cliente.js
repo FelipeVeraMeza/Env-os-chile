@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
-import { enviarForm, get, post, patch, api } from '../api.js';
+import { enviarForm, get, post, patch, api, urlApi } from '../api.js';
 import {
-  $, $$, abrirBlob, badgePago, clp, comprimirFoto, datosForm, errorToast, esqueleto, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio,
+  $, $$, badgePago, clp, comprimirFoto, datosForm, errorToast, esqueleto, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio,
 } from '../ui.js';
 import { comunasCobertura, direccionTexto, itemEnvio, mapaGoogle, opcionesComunas, textoPaquete, urlMapaGoogle } from './comun.js';
 import { pagar, subirComprobante } from './envios.js';
@@ -28,9 +28,9 @@ export async function inicio() {
       <div class="kpi"><div class="etiqueta">Entregados</div><div class="valor">${r.entregados}</div><div class="nota">con foto y GPS</div></div>
       <div class="kpi destacado"><div class="etiqueta">Total</div><div class="valor">${r.total}</div><div class="nota">envíos registrados</div></div>
     </div>
-    ${r.por_pagar ? html`<div class="aviso magenta fila entre" style="margin-bottom:16px"><span><b>Tienes ${r.por_pagar} envío(s) pendientes de pago (${clp(r.monto_por_pagar)}).</b> El repartidor solo puede retirar envíos pagados.</span>
+    ${r.por_pagar ? html`<div class="aviso magenta fila entre" style="margin-bottom:16px"><span><b>Tienes ${r.por_pagar} envío(s) pendientes de pago (${clp(r.monto_por_pagar)}).</b> El repartidor solo puede retirar envíos pagados, y los que sigan sin pagar ${app.conf.operacion.horas_sin_pago || 24} horas después de creados se anulan solos.</span>
       <a class="btn chico" href="#/carrito">Pagar todos con una transferencia</a></div>` : ''}
-    ${r.en_revision ? html`<div class="aviso" style="margin-bottom:16px"><b>${r.en_revision} comprobante(s) de transferencia en revisión.</b> Te entregamos el ticket cuando administración apruebe el pago.</div>` : ''}
+    ${r.en_revision ? html`<div class="aviso" style="margin-bottom:16px"><b>${r.en_revision} comprobante(s) de transferencia en revisión.</b> El repartidor retira cuando administración apruebe el pago.</div>` : ''}
     <div class="card">
       <div class="card-titulo"><h2>Envíos recientes</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
       <div class="lista-envios">${items.length ? items.map((e) => itemEnvio(e)) : vacio('Aún no tienes envíos.', html`<a class="btn" href="#/nuevo">Crear mi primer envío</a>`)}</div>
@@ -48,7 +48,7 @@ export async function carrito() {
   const items = pendientes.items;
   const t = app.conf.transferencia || {};
   montar(vista, html`
-    <div class="encabezado"><div><h1>Por pagar</h1><p>Marca los envíos que quieres pagar: haces <b>una sola transferencia</b> por el total y subes <b>un solo comprobante</b>.</p></div>
+    <div class="encabezado"><div><h1>Por pagar</h1><p>Marca los envíos que quieres pagar: haces <b>una sola transferencia</b> por el total y subes <b>un solo comprobante</b>. Los envíos sin pagar se anulan solos ${app.conf.operacion.horas_sin_pago || 24} horas después de creados.</p></div>
       <a class="btn sec" href="#/nuevo">${icono('nuevo')} Agregar otro envío</a></div>
     ${items.length ? html`
       <form class="card" id="f-carrito" novalidate>
@@ -168,7 +168,7 @@ export async function nuevo() {
         <input type="search" id="buscar-dest" placeholder="Buscar por nombre o teléfono…" style="margin-bottom:12px">
         <div class="lista-envios" id="lista-dest">${libreta.map((d) => html`
           <label class="item-envio" data-nombre="${(d.nombre + ' ' + d.telefono).toLowerCase()}" style="cursor:pointer">
-            <div><div class="folio">${d.nombre}</div><div class="dir">${d.telefono} · ${d.direcciones.length} dirección(es)</div></div>
+            <div><div class="titulo-item">${d.nombre}</div><div class="dir"><span class="nowrap">${d.telefono}</span> · ${d.direcciones.length === 1 ? '1 dirección' : `${d.direcciones.length} direcciones`}</div></div>
             <input type="radio" name="dest" value="${d.id}" ${w.destinatario?.id === d.id ? html`checked` : ''} style="width:22px;min-height:22px">
           </label>`)}</div>` : html`
         <div class="grid g2">
@@ -199,10 +199,10 @@ export async function nuevo() {
         </div>
         <h3>Dirección del punto</h3>` : ''}
       ${dirs.length ? html`<div class="lista-envios" style="margin-bottom:14px">
-        ${dirs.map((d) => html`<label class="item-envio" style="cursor:pointer"><div><div class="folio">${d.alias || 'Dirección'} ${d.es_principal ? html`<span class="badge e-creado">Principal</span>` : ''}</div>
+        ${dirs.map((d) => html`<label class="item-envio" style="cursor:pointer"><div><div class="titulo-item">${d.alias || 'Dirección'} ${d.es_principal ? html`<span class="badge e-creado">Principal</span>` : ''}</div>
           <div class="dir">${d.calle} ${d.numero}${d.depto ? ', ' + d.depto : ''} · ${d.comuna_nombre}</div></div>
           <input type="radio" name="dir" value="${d.id}" ${String(w.direccionId) === String(d.id) ? html`checked` : ''} style="width:22px;min-height:22px"></label>`)}
-        <label class="item-envio" style="cursor:pointer"><div><div class="folio">+ Nueva dirección</div><div class="dir">¿Se cambió de casa? Agrega la nueva dirección</div></div>
+        <label class="item-envio" style="cursor:pointer"><div><div class="titulo-item">+ Nueva dirección</div><div class="dir">¿Se cambió de casa? Agrega la nueva dirección</div></div>
           <input type="radio" name="dir" value="nueva" ${w.direccionId === 'nueva' ? html`checked` : ''} style="width:22px;min-height:22px"></label></div>` : ''}
       ${nueva ? html`<div class="grid g2">
         <label class="campo">Calle *<input name="calle" value="${w.nuevaDir.calle || ''}" autocomplete="address-line1" data-mapa="mapa-destino"></label>
@@ -220,13 +220,13 @@ export async function nuevo() {
     const t = app.conf.tarifas;
     return html`
       <h3 style="margin-top:0">¿De qué tamaño es cada bulto? *</h3>
-      <div class="grid g2" style="margin-bottom:8px">
+      <div class="grid g2" id="grupo-tamano" style="margin-bottom:8px">
         <label class="item-envio" style="cursor:pointer;align-items:flex-start"><div>
-          <div class="folio">Estándar · ${clp(t.base)}</div>
+          <div class="titulo-item">Estándar · <span class="nowrap">${clp(t.base)}</span></div>
           <div class="dir">Más pequeño que ${t.dim_estandar_cm}×${t.dim_estandar_cm}×${t.dim_estandar_cm} cm y hasta ${t.peso_estandar_kg} kg</div></div>
           <input type="radio" name="tamano" value="estandar" ${p.tamano === 'estandar' ? html`checked` : ''} style="width:22px;min-height:22px"></label>
         <label class="item-envio" style="cursor:pointer;align-items:flex-start"><div>
-          <div class="folio">Sobredimensionado · ${clp(t.base + t.recargo_sobredimension)}</div>
+          <div class="titulo-item">Sobredimensionado · <span class="nowrap">${clp(t.base + t.recargo_sobredimension)}</span></div>
           <div class="dir">Más grande que el estándar, hasta ${t.dim_max_cm}×${t.dim_max_cm}×${t.dim_max_cm} cm y ${t.peso_max_kg} kg</div></div>
           <input type="radio" name="tamano" value="sobredimensionado" ${p.tamano === 'sobredimensionado' ? html`checked` : ''} style="width:22px;min-height:22px"></label>
       </div>
@@ -236,7 +236,7 @@ export async function nuevo() {
           <small>La cantidad de bultos no cambia el precio</small></label>
         <label class="campo">¿Qué envías? <small>(opcional)</small><input name="descripcion_producto" value="${p.descripcion_producto || ''}" placeholder="Ej. Zapatillas, documentos"></label>
       </div>
-      <div class="card" style="box-shadow:none;background:rgba(224,33,138,.08);border-color:rgba(224,33,138,.35)">
+      <div class="card" style="box-shadow:none;background:rgba(224,33,138,.08);border-color:rgba(224,33,138,.35);margin-top:16px">
         <h3>Seguro del envío</h3>
         <div class="grid g2">
           <label class="campo">Valor declarado (CLP)<input name="valor_declarado" type="number" min="0" step="1" value="${p.valor_declarado || ''}" placeholder="0"><small>Tope de la indemnización en caso de pérdida o daño</small></label>
@@ -245,7 +245,7 @@ export async function nuevo() {
         </div>
       </div>
       <div class="card" style="box-shadow:none">
-        <label class="interruptor"><input type="checkbox" name="horario_especial" ${p.horario_especial ? html`checked` : ''}> Envío especial por horario <span class="badge e-en_ruta">+${clp(t.recargo_horario_especial)}</span></label>
+        <label class="interruptor"><input type="checkbox" name="horario_especial" ${p.horario_especial ? html`checked` : ''}><span>Envío especial por horario <span class="badge e-en_ruta">+${clp(t.recargo_horario_especial)}</span></span></label>
         ${p.horario_especial ? html`<label class="campo" style="margin-top:12px">Franja horaria *<select name="franja_horaria"><option value="">Selecciona…</option>${app.conf.franjas.map((f) => html`<option ${p.franja_horaria === f ? html`selected` : ''}>${f}</option>`)}</select></label>` : ''}
       </div>
       <div class="grid g2" style="margin-top:16px">
@@ -262,7 +262,7 @@ export async function nuevo() {
     const p = w.paquete;
     return html`<div class="grid g2">
       <div class="pila">
-        <div><div class="muted">Destinatario</div><b>${d?.nombre}</b> · ${d?.telefono}</div>
+        <div><div class="muted">Destinatario</div><b>${d?.nombre}</b> · <span class="nowrap">${d?.telefono}</span>${d?.rut ? html` · RUT <span class="nowrap">${d.rut}</span>` : ''}</div>
         <div><div class="muted">${w.tipo_destino === 'punto_courier' ? `Punto ${w.courier.courier_empresa}` : 'Dirección'}</div>
           ${w.tipo_destino === 'punto_courier' ? html`<b>${w.courier.courier_punto}</b><br>` : ''}${dir.calle} ${dir.numero}${dir.depto ? ', ' + dir.depto : ''} · <b>${dir.comuna_nombre}</b></div>
         <div><div class="muted">Retiro</div>${w.retiro.calle} ${w.retiro.numero}${w.retiro.depto ? ', ' + w.retiro.depto : ''} · <b>${nombreComuna(w.retiro.comuna_id)}</b></div>
@@ -283,6 +283,7 @@ export async function nuevo() {
       </div></div>`;
   }
 
+  let pasoPintado = null;
   const pintar = () => {
     montar(vista, html`
       <div class="encabezado"><div><h1>Nuevo envío</h1><p>Paso ${w.paso + 1} de ${PASOS.length} · ${PASOS[w.paso]}</p></div></div>
@@ -295,6 +296,9 @@ export async function nuevo() {
           <button type="submit" class="btn grande" id="siguiente">${w.paso === P.resumen ? 'Confirmar envío' : 'Continuar'}</button></div>
         </div>
       </form>`);
+    // Al avanzar o retroceder de paso la pantalla vuelve arriba (antes quedaba a media altura del paso anterior).
+    if (pasoPintado !== w.paso) window.scrollTo(0, 0);
+    pasoPintado = w.paso;
     enlazar();
   };
 
@@ -360,7 +364,14 @@ export async function nuevo() {
       }
       if (w.tipo_destino === 'punto_courier' && !w.courier.courier_punto?.trim()) e.courier_punto = 'Indica el punto';
     }
-    if (w.paso === P.paquete && !w.paquete.tamano) { toast('Marca si tu paquete es estándar o sobredimensionado', 'error'); return false; }
+    if (w.paso === P.paquete && !w.paquete.tamano) {
+      const grupo = $('#grupo-tamano', form());
+      grupo.classList.add('grupo-error');
+      grupo.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      grupo.addEventListener('change', () => grupo.classList.remove('grupo-error'), { once: true });
+      toast('Marca si tu paquete es estándar o sobredimensionado', 'error');
+      return false;
+    }
     return !marcarErrores(form(), e);
   }
 
@@ -384,7 +395,7 @@ export async function nuevo() {
           const mapa = $(`#${el.dataset.mapa}`);
           if (!mapa) return;
           const url = urlMapaGoogle(f.calle?.value, f.numero?.value, nombreComuna(f.comuna_id?.value));
-          if (url && mapa.src !== url) mapa.src = url;
+          if (url && mapa.src !== url) { mapa.src = url; mapa.closest('.mapa-dir').hidden = false; }
         }, 800);
       });
     });
@@ -459,24 +470,23 @@ export async function nuevo() {
       <section class="hero"><p>Envío confirmado</p><h1 class="mono folio-grande">${envio.folio}</h1>
         <p>${envio.destinatario_nombre} · ${direccionTexto(envio)}</p></section>
       <div class="grid g2">
-        <div class="card" style="text-align:center"><div class="qr-caja"><img id="qr" alt="Código QR del envío ${envio.folio}"></div>
-          <p class="sub" style="margin-top:10px">Al escanearlo se abre la ruta en Google Maps o Waze.</p></div>
         <div class="card pila">
           <div class="fila entre"><h2 style="margin:0">Total ${clp(envio.tarifa_total)}</h2>${badgePago(envio.estado_pago)}</div>
-          <div class="aviso magenta">Paga ahora: con el pago aprobado recibes el ticket y el repartidor puede retirar tu envío.</div>
+          <div class="aviso magenta">Imprime la etiqueta y pégala en el paquete. Paga ahora: con el pago aprobado el repartidor puede retirar tu envío. <b>Si no pagas en ${app.conf.operacion.horas_sin_pago || 24} horas, el envío se anula solo.</b></div>
           ${app.conf.pagos.en_linea ? html`<button class="btn grande ancho" id="pagar">Pagar ${clp(envio.tarifa_total)}</button>` : ''}
           <button class="btn ${app.conf.pagos.en_linea ? 'sec' : 'grande'} ancho" id="transferir">Pagar ${clp(envio.tarifa_total)} con transferencia (subir comprobante)</button>
-          ${esAdmin ? html`<div class="grid g2"><button class="btn sec" id="t80">Ticket 80 mm</button><button class="btn sec" id="ta4">Ticket A4</button></div>` : ''}
-          <a class="btn sec" href="${wa}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
-          <div class="fila"><a class="btn azul" href="#/envio/${envio.id}">Ver detalle</a><a class="btn sec" href="#/nuevo" id="otro">Crear otro envío</a></div>
-          <a class="btn sec" href="#/carrito">Pagar varios envíos juntos (carrito)</a>
+          ${envio.ticket_url ? html`<div class="grid g2"><a class="btn sec" id="t80" href="${urlApi()}${envio.ticket_url}&formato=80mm" target="_blank" rel="noopener">Etiqueta 80 mm (PDF)</a>
+            <a class="btn sec" id="ta4" href="${urlApi()}${envio.ticket_url}&formato=a4" target="_blank" rel="noopener">Etiqueta A4 (PDF)</a></div>` : ''}
+          <a class="btn sec ancho" href="#/carrito">Pagar varios envíos juntos (carrito)</a>
+          <a class="btn sec ancho" href="${wa}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
+          <div class="grid g2"><a class="btn azul" href="#/envio/${envio.id}">Ver detalle</a><a class="btn sec" href="#/nuevo" id="otro">Crear otro envío</a></div>
         </div>
+        <div class="card" style="text-align:center"><div class="qr-caja"><img id="qr" alt="Código QR del envío ${envio.folio}"></div>
+          <p class="sub" style="margin-top:10px">Al escanearlo se abre la ruta en Google Maps o Waze.</p></div>
       </div>`);
     api(`/api/envios/${envio.id}/qr.png`, { blob: true }).then((b) => mostrarBlob($('#qr'), b)).catch(() => {});
     $('#pagar')?.addEventListener('click', () => pagar(envio, () => ir(`#/envio/${envio.id}`)));
     $('#transferir').onclick = () => subirComprobante(envio, () => ir(`#/envio/${envio.id}`));
-    $('#t80')?.addEventListener('click', () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { blob: true })).catch(errorToast));
-    $('#ta4')?.addEventListener('click', () => abrirBlob(api(`/api/envios/${envio.id}/ticket.pdf?formato=a4`, { blob: true })).catch(errorToast));
     $('#otro').onclick = (e) => { e.preventDefault(); nuevo(); };
   }
 

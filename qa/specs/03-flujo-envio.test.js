@@ -25,9 +25,9 @@ test('CP-21 · El cliente crea y confirma un envío: folio único ENV-AAAA-NNNNN
   assert.equal(envio.destinatario_telefono, '+56 9 8765 4321');
 });
 
-test('CP-22 · Ticket PDF térmico 80 mm y A4 (RF-20, RF-21); el cliente lo recibe solo con el pago aprobado', async () => {
-  const cliente = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente });
-  assert.equal(cliente.status, 409, 'sin pago aprobado el cliente no recibe el ticket');
+test('CP-22 · Ticket PDF térmico 80 mm y A4 (RF-20, RF-21); el cliente lo ve apenas confirma, aunque no haya pagado', async () => {
+  const cliente = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=80mm`, { sesion: esc.cliente, crudo: true });
+  assert.equal(cliente.status, 200, 'el cliente imprime su etiqueta antes de pagar (pedido 03-10)');
   for (const formato of ['80mm', 'a4']) {
     const r = await peticion('GET', `/api/envios/${envio.id}/ticket.pdf?formato=${formato}`, { sesion: esc.admin, crudo: true });
     assert.equal(r.status, 200);

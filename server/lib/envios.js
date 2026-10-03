@@ -1,7 +1,7 @@
 import { uno, query } from '../db/pool.js';
 import { falla } from './http.js';
 import { enlacesMapa, ocultarMontos } from './reglas.js';
-import { firmarEnlace } from './archivos.js';
+import { firmarEnlace, firmarTicket } from './archivos.js';
 import { urlQr } from './ticket.js';
 
 export const SELECT_ENVIO = `
@@ -37,12 +37,21 @@ export function exigirAcceso(usuario, envio) {
   if (!puedeVer(usuario, envio)) throw Object.assign(falla(404, 'Envío no encontrado'), { sondeo: { entidad: 'envio', id: envio.envio_id ?? envio.id, existe: true } });
 }
 
+// Etiqueta: administración siempre; el cliente dueño apenas confirma el envío, haya pagado o no (pedido 03-10),
+// salvo que esté anulado. El repartidor recibe el paquete ya etiquetado.
+export function puedeVerTicket(usuario, envio) {
+  if (!envio.folio || !usuario) return false;
+  if (usuario.rol === 'admin') return true;
+  return usuario.rol === 'cliente' && envio.cliente_id === usuario.id && envio.estado !== 'anulado';
+}
+
 // Representación pública para la API según el rol (el repartidor no ve montos).
 export function presentar(envio, usuario) {
   const salida = {
     ...envio,
     mapas: enlacesMapa({ calle: envio.calle, numero: envio.numero, comuna: envio.comuna_nombre, region: envio.region, lat: envio.lat, lon: envio.lon }),
     qr_url: envio.folio ? urlQr(envio) : null,
+    ticket_url: puedeVerTicket(usuario, envio) ? firmarTicket(envio.id, usuario.id) : null,
     // Dónde retirar el paquete (dirección del remitente).
     mapas_retiro: envio.retiro_calle
       ? enlacesMapa({ calle: envio.retiro_calle, numero: envio.retiro_numero, comuna: envio.retiro_comuna_nombre, region: envio.retiro_region })

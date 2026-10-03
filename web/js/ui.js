@@ -63,7 +63,10 @@ export function modal(contenido, { onClose, fijo = false } = {}) {
   $('.cerrar', fondo)?.addEventListener('click', cerrar);
   document.addEventListener('keydown', esc);
   $('#modal-raiz').append(fondo);
-  $('input, select, textarea, button:not(.cerrar)', fondo)?.focus();
+  // En pantallas táctiles no se enfoca un campo al abrir: el teclado aparecía solo y tapaba la hoja.
+  const tactil = window.matchMedia?.('(pointer: coarse)').matches;
+  if (tactil) { const caja = $('.modal', fondo); caja.tabIndex = -1; caja.focus({ preventScroll: true }); }
+  else $('input, select, textarea, button:not(.cerrar)', fondo)?.focus();
   return { el: fondo, cerrar };
 }
 
@@ -94,7 +97,8 @@ export function marcarErrores(form, detalles = {}) {
     campo.append(s);
     primero ||= input;
   }
-  primero?.focus();
+  // El campo con error queda al centro: con focus() solo, en el celular podía quedar bajo la barra superior o la de botones.
+  if (primero) { primero.scrollIntoView({ block: 'center', behavior: 'smooth' }); primero.focus({ preventScroll: true }); }
   return Boolean(primero);
 }
 
