@@ -1,9 +1,10 @@
 // Service worker mínimo: permite instalar la app (PWA) y abrir la interfaz sin conexión.
 // Los datos (API) siempre se piden a la red: nunca se sirven envíos desde caché.
-const CACHE = 'envios-v16';
+const CACHE = 'envios-v17';
 const BASE = ['./', 'index.html', 'css/app.css', 'config.js', 'js/app.js', 'js/api.js', 'js/ui.js',
   'js/vistas/comun.js', 'js/vistas/cliente.js', 'js/vistas/envios.js', 'js/vistas/repartidor.js', 'js/vistas/admin.js',
-  'js/vistas/publico.js', 'js/vistas/cuenta.js', 'js/sin-conexion.js', 'icons/icono.svg', 'fonts/plus-jakarta-sans.woff2', 'manifest.webmanifest'];
+  'js/vistas/publico.js', 'js/vistas/cuenta.js', 'js/sin-conexion.js', 'icons/icono.svg', 'fonts/plus-jakarta-sans.woff2', 'manifest.webmanifest',
+  'vendor/jsQR.js'];
 
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(BASE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {

@@ -453,9 +453,9 @@ function padFirma(canvas, alFirmar) {
 }
 
 // ================= Escanear la etiqueta (pedido 03-10) =================
-// La cámara lee el QR de la etiqueta (lector del navegador, sin librerías externas). Si el teléfono no tiene
-// lector (iPhone con Safari), se escribe el folio. Un envío por retirar se marca retirado ahí mismo; uno en ruta
-// abre su detalle para entregarlo con foto, GPS y firma.
+// La cámara lee el QR de la etiqueta: con el lector del navegador si lo tiene y, si no (iPhone) o no lee (algunos
+// Android), con jsQR, incluido en la app (pedido 07-10). Sin cámara o sin permiso, se escribe el folio.
+// Un envío por retirar se marca retirado ahí mismo; uno en ruta abre su detalle para entregarlo con foto, GPS y firma.
 function escanearEtiqueta(alTerminar) {
   let stream = null;
   let activo = true;
@@ -500,32 +500,89 @@ function escanearEtiqueta(alTerminar) {
     } catch (err) { errorToast(err); }
   };
   (async () => {
-    if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia) {
       $('.escaner', m.el).hidden = true;
-      estado('Este teléfono no puede leer el QR desde la app: escribe el folio que aparece en la etiqueta.');
+      estado('Este navegador no da acceso a la cámara: escribe el folio que aparece en la etiqueta.');
       return;
     }
     try {
-      const formatos = await window.BarcodeDetector.getSupportedFormats?.() || ['qr_code'];
-      if (!formatos.includes('qr_code')) throw new Error('sin lector de QR');
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      // Cámara trasera en buena resolución: el QR de una etiqueta térmica es chico.
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
       if (!activo) { detener(); return; }
+      const pista = stream.getVideoTracks()[0];
+      const capacidades = pista.getCapabilities?.() || {};
+      if (capacidades.focusMode?.includes('continuous')) pista.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+      // Linterna en los teléfonos que la permiten (bodegas o noche).
+      if (capacidades.torch) {
+        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'btn sec chico', textContent: 'Linterna' });
+        let prendida = false;
+        b.onclick = () => { prendida = !prendida; pista.applyConstraints({ advanced: [{ torch: prendida }] }).catch(() => {}); };
+        $('#estado-cam', m.el).after(b);
+      }
       const video = $('#cam', m.el);
       video.srcObject = stream;
       await video.play();
-      estado('Buscando el código QR…');
+      estado('Buscando el código QR… acércalo hasta que llene el recuadro.');
+      // Dos lectores: el del navegador (rápido, no existe en iPhone y en algunos Android no lee nada) y jsQR, que
+      // funciona en cualquier teléfono. Se prueban los dos en cada cuadro hasta que uno encuentre el código.
+      const detector = await lectorDelNavegador();
+      const jsQR = await cargarJsQR().catch(() => null);
+      if (!detector && !jsQR) throw new Error('sin lector de QR');
+      const lienzo = document.createElement('canvas');
+      const ctx = lienzo.getContext('2d', { willReadFrequently: true });
       const leer = async () => {
         if (!activo) return;
-        if (!ocupado && video.readyState >= 2) {
-          try { const [codigo] = await detector.detect(video); if (codigo?.rawValue) await buscarToken(codigo.rawValue); } catch { /* cuadro sin QR */ }
+        if (!ocupado && video.readyState >= 2 && video.videoWidth) {
+          let texto = null;
+          if (detector) {
+            try { texto = (await detector.detect(video))[0]?.rawValue || null; } catch { /* cuadro sin QR */ }
+          }
+          if (!texto && jsQR) {
+            // Se lee el centro del cuadro (donde está el recuadro guía), achicado para que sea rápido.
+            const lado = Math.min(video.videoWidth, video.videoHeight);
+            const destino = Math.min(lado, 720);
+            lienzo.width = destino;
+            lienzo.height = destino;
+            ctx.drawImage(video, (video.videoWidth - lado) / 2, (video.videoHeight - lado) / 2, lado, lado, 0, 0, destino, destino);
+            texto = jsQR(ctx.getImageData(0, 0, destino, destino).data, destino, destino, { inversionAttempts: 'attemptBoth' })?.data || null;
+          }
+          if (texto) {
+            navigator.vibrate?.(80);
+            await buscarToken(texto);
+          }
         }
-        if (activo) setTimeout(leer, 250);
+        if (activo) setTimeout(leer, 200);
       };
       leer();
     } catch (err) {
+      detener();
       $('.escaner', m.el).hidden = true;
-      estado(err?.name === 'NotAllowedError' ? 'No diste permiso para usar la cámara: escribe el folio de la etiqueta.' : 'No se pudo abrir la cámara: escribe el folio de la etiqueta.');
+      estado(err?.name === 'NotAllowedError' ? 'No diste permiso para usar la cámara: actívalo en los permisos del navegador o escribe el folio de la etiqueta.'
+        : 'No se pudo leer con la cámara: escribe el folio de la etiqueta.');
     }
   })();
+}
+
+// Lector de QR del navegador, solo si existe y de verdad soporta QR (en algunos Android existe pero no lee nada).
+async function lectorDelNavegador() {
+  if (!('BarcodeDetector' in window)) return null;
+  try {
+    const formatos = await window.BarcodeDetector.getSupportedFormats?.();
+    if (formatos && !formatos.includes('qr_code')) return null;
+    return new window.BarcodeDetector({ formats: ['qr_code'] });
+  } catch { return null; }
+}
+
+// jsQR (vendor/jsQR.js) se descarga solo la primera vez que se escanea.
+let cargaJsQR = null;
+function cargarJsQR() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  cargaJsQR ||= new Promise((ok, mal) => {
+    const s = Object.assign(document.createElement('script'), { src: 'vendor/jsQR.js', async: true });
+    s.onload = () => (window.jsQR ? ok(window.jsQR) : mal(new Error('jsQR no cargó')));
+    s.onerror = () => { cargaJsQR = null; mal(new Error('jsQR no cargó')); };
+    document.head.append(s);
+  });
+  return cargaJsQR;
 }
