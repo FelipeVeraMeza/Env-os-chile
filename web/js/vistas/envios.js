@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
-  $, $$, abrirBlob, badge, badgePago, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
+  $, $$, abrirBlob, badge, badgePago, PAGO_TXT, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, comunasCobertura, fechaRetiroTexto, itemEnvio, opcionesComunas, retiroTexto, textoPaquete } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
@@ -10,8 +10,11 @@ import { detalleRepartidor } from './repartidor.js';
 export async function registro() {
   const vista = $('#vista');
   const rol = app.usuario.rol;
-  const f = { q: '', estado: '', pagina: 1, repartidor_id: '', desde: '', hasta: '' };
-  const repartidores = rol === 'admin' ? await get('/api/usuarios/repartidores') : [];
+  const f = { q: '', estado: '', pagina: 1, repartidor_id: '', cliente_id: '', estado_pago: '', desde: '', hasta: '' };
+  // Administración filtra por cliente y por estado del pago (pedido 07-10: aprobar los comprobantes de un cliente de una vez).
+  const [repartidores, clientes] = rol === 'admin'
+    ? await Promise.all([get('/api/usuarios/repartidores'), get('/api/usuarios?rol=cliente').then((l) => l.filter((u) => !u.correo.startsWith('qa-')))])
+    : [[], []];
 
   const qs = () => new URLSearchParams(Object.entries({ ...f, limite: 20 }).filter(([, v]) => v !== '' && v !== null)).toString();
 
@@ -20,10 +23,12 @@ export async function registro() {
       <p>Busca por folio, nombre, teléfono, calle o comuna.</p></div>
       ${rol !== 'repartidor' ? html`<div class="fila">${rol === 'admin' ? html`<button class="btn sec" id="etiquetas-dia">Etiquetas del día</button>` : ''}<button class="btn sec" id="exportar">Exportar a Excel (CSV)</button><a class="btn" href="#/nuevo">${icono('nuevo')} Nuevo envío</a></div>` : ''}</div>
     <form class="card" id="filtros" style="margin-bottom:16px">
-      <div class="grid ${rol === 'admin' ? 'g4' : 'g3'}">
+      <div class="grid g3">
         <label class="campo">Buscar<input type="search" name="q" placeholder="ENV-2026-…, nombre, teléfono"></label>
         <label class="campo">Estado<select name="estado"><option value="">Todos</option>${Object.entries(ESTADOS).filter(([k]) => k !== 'borrador').map(([k, v]) => html`<option value="${k}">${v}</option>`)}</select></label>
         ${rol === 'admin' ? html`<label class="campo">Repartidor<select name="repartidor_id"><option value="">Todos</option><option value="sin">Sin asignar</option>${repartidores.map((r) => html`<option value="${r.id}">${r.nombre}</option>`)}</select></label>` : ''}
+        ${rol === 'admin' ? html`<label class="campo">Cliente<select name="cliente_id"><option value="">Todos</option>${clientes.map((c) => html`<option value="${c.id}">${c.nombre}</option>`)}</select></label>
+        <label class="campo">Pago<select name="estado_pago"><option value="">Todos</option>${Object.entries(PAGO_TXT).map(([k, v]) => html`<option value="${k}">${v}</option>`)}</select></label>` : ''}
         <div class="grid g2"><label class="campo">Desde<input type="date" name="desde"></label><label class="campo">Hasta<input type="date" name="hasta" max="${hoyISO()}"></label></div>
       </div>
     </form>
@@ -115,7 +120,7 @@ export async function detalle(id) {
 
   montar(vista, html`
     <div class="encabezado">
-      <div><a href="#/envios" class="sub volver">← Volver</a>
+      <div><a href="#/envios" class="btn sec volver" id="volver">← Volver</a>
         <h1 class="mono">${e.folio || 'Borrador'}</h1>
         <div class="fila">${badge(e.estado)} ${badgePago(e.estado_pago)} ${e.horario_especial ? html`<span class="badge e-en_ruta">Horario ${e.franja_horaria}</span>` : ''}
           <span class="sub">Intentos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
@@ -253,6 +258,8 @@ function enlazarAcciones(e, recargar) {
     };
   });
   $('#repetir')?.addEventListener('click', () => { app.repetir = e; ir('#/nuevo'); });
+  // Volver a la página anterior (inicio, carrito, lista…); si se abrió el enlace directo, a la lista de envíos.
+  $('#volver')?.addEventListener('click', (ev) => { if (history.length > 1) { ev.preventDefault(); history.back(); } });
   $('#cambiar-destino')?.addEventListener('click', () => cambiarDestino(e, recargar));
   $('#reagendar-retiro')?.addEventListener('click', () => reagendarRetiro(e, recargar));
   $('#eliminar-anulado')?.addEventListener('click', async (ev) => {
@@ -336,7 +343,7 @@ function tarjetaTransferencia(e, esAdmin) {
       ${esAdmin
         ? html`<p class="sub">El cliente subió el comprobante el ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}. Revísalo contra la cartola antes de aprobar.</p>
           <button class="btn" id="revisar-comprobante" style="margin-top:10px">Revisar comprobante</button>`
-        : html`<div class="aviso">Recibimos tu comprobante el ${fechaHora(c.creado_en)}. <b>Administración lo está revisando</b>: cuando lo apruebe el repartidor podrá retirar tu envío.</div>
+        : html`<div class="aviso">Recibimos tu comprobante el ${fechaHora(c.creado_en)}. <b>Está pendiente de aprobación</b>: cuando administración lo apruebe el repartidor podrá retirar tu envío.</div>
           <a class="sub" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Ver el comprobante enviado</a>`}
     </div>`;
   }
@@ -450,7 +457,7 @@ export function subirComprobante(envio, alTerminar) {
       if (f.referencia.value.trim()) fd.append('referencia', f.referencia.value.trim());
       await enviarForm(`/api/envios/${envio.id}/comprobante`, fd);
       m.cerrar();
-      toast('Comprobante enviado: queda pendiente de revisión', 'ok');
+      toast('Comprobante enviado: queda pendiente de aprobación', 'ok');
       alTerminar?.();
     } catch (err) { marcarErrores(f, err.detalles); errorToast(err); btn.disabled = false; }
   };

@@ -436,7 +436,8 @@ input[type="file"]::file-selector-button {
 /* Botón "Copiar" junto a los datos de la transferencia */
 .copiar { font: inherit; font-size: .78rem; font-weight: 700; color: var(--magenta-200); background: rgba(224, 33, 138, .14); border: 1px solid rgba(224, 33, 138, .45);
   border-radius: 8px; padding: 4px 10px; margin-left: 6px; cursor: pointer; vertical-align: middle; min-height: 30px; }
-.volver { display: inline-flex; align-items: center; min-height: 40px; text-decoration: none; }
+/* Volver más notorio (pedido 07-10): botón con borde, no un texto chico. */
+.volver { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-bottom: 10px; font-size: 1rem; text-decoration: none; }
 .campo, .item-envio { scroll-margin: 96px 0 170px; }
 
 /* Tablas que en el celular se muestran como tarjetas */

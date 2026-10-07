@@ -24,7 +24,7 @@ import { requiereRol } from '../middleware/auth.js';
 export const envios = Router();
 
 const MIME_IMAGEN = ['image/jpeg', 'image/png', 'image/webp'];
-const ESTADOS_PAGO = { pendiente: 'Pendiente', en_revision: 'En revisión', pagado: 'Pagado', reembolsado: 'Reembolsado' };
+const ESTADOS_PAGO = { pendiente: 'Pendiente', en_revision: 'Pendiente de aprobación', pagado: 'Pagado', reembolsado: 'Reembolsado' };
 // Fotos y boletas que un envío puede acumular (evita llenar el almacenamiento subiendo archivos sin fin).
 const MAX_ADJUNTOS = 20;
 // Estados en que el envío sigue en la ruta de un repartidor.

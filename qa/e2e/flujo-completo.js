@@ -94,7 +94,7 @@ try {
     await c.click('#f-comprobante button');
     await c.waitForURL(/#\/envio\/\d+$/);
     envioId = Number(c.url().match(/envio\/(\d+)/)[1]);
-    await c.locator('.badge', { hasText: 'Pago en revisión' }).first().waitFor();
+    await c.locator('.badge', { hasText: 'Pendiente de aprobación' }).first().waitFor();
     await foto(c, 'cliente-comprobante-en-revision');
   });
 

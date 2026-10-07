@@ -268,7 +268,7 @@ test('CP-218 · QA-30/QA-42 · CSV con el estado de pago legible y cabeceras exp
   const r = await peticion('GET', '/api/envios/exportar.csv', { sesion: esc.cliente, crudo: true });
   assert.equal(r.status, 200);
   const texto = await r.text();
-  assert.match(texto, /"(Pendiente|Pagado|En revisión|Reembolsado)"/);
+  assert.match(texto, /"(Pendiente|Pagado|Pendiente de aprobación|Reembolsado)"/);
   assert.doesNotMatch(texto, /"en_revision"|"pendiente"/);
   const cors = await fetch(`${API}/api/health`, { headers: { Origin: 'http://localhost:5173' } });
   assert.match(cors.headers.get('access-control-expose-headers') || '', /Content-Disposition/);

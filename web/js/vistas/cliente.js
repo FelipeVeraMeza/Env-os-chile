@@ -31,7 +31,7 @@ export async function inicio() {
     ${r.por_pagar ? html`<div class="aviso magenta fila entre" style="margin-bottom:16px"><span><b>Tienes ${r.por_pagar} envío(s) pendientes de pago (${clp(r.monto_por_pagar)}).</b> El repartidor solo puede retirar envíos pagados, y los que sigan sin pagar ${app.conf.operacion.horas_sin_pago || 24} horas después de creados se anulan solos.${r.proximo_vence_en ? html` <b>El primero se anula el ${fechaHora(r.proximo_vence_en)}.</b>` : ''}</span>
       <a class="btn chico" href="#/carrito">Pagar todos con una transferencia</a></div>` : ''}
     ${avisoHorarioRetiro()}
-    ${r.en_revision ? html`<div class="aviso" style="margin-bottom:16px"><b>${r.en_revision} comprobante(s) de transferencia en revisión.</b> El repartidor retira cuando administración apruebe el pago.</div>` : ''}
+    ${r.en_revision ? html`<div class="aviso" style="margin-bottom:16px"><b>${r.en_revision} comprobante(s) de transferencia pendiente(s) de aprobación.</b> El repartidor retira cuando administración apruebe el pago.</div>` : ''}
     <div class="card">
       <div class="card-titulo"><h2>Envíos recientes</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
       <div class="lista-envios">${items.length ? items.map((e) => itemEnvio(e)) : vacio('Aún no tienes envíos.', html`<a class="btn" href="#/nuevo">Crear mi primer envío</a>`)}</div>
@@ -78,7 +78,7 @@ export async function carrito() {
         <button class="btn grande ancho" id="pagar-carrito" style="margin-top:14px">Enviar comprobante</button>
         <p class="muted" style="margin-top:8px">Administración revisa el comprobante: al aprobarlo, todos los envíos marcados quedan pagados y listos para retirar.</p>
       </form>` : html`<div class="card">${vacio('No tienes envíos pendientes de pago.', html`<a class="btn" href="#/nuevo">Crear un envío</a>`)}</div>`}
-    ${enRevision.items.length ? html`<div class="card"><h2>En revisión</h2><p class="sub">Ya enviaste el comprobante de estos envíos: administración lo está revisando.</p>
+    ${enRevision.items.length ? html`<div class="card"><h2>Pendientes de aprobación</h2><p class="sub">Ya enviaste el comprobante de estos envíos: falta que administración lo apruebe.</p>
       <div class="lista-envios">${enRevision.items.map((e) => itemEnvio(e))}</div></div>` : ''}`);
 
   const f = $('#f-carrito');
@@ -108,7 +108,7 @@ export async function carrito() {
       fd.append('archivo', archivo.type.startsWith('image/') ? await comprimirFoto(archivo, 2000, 0.85) : archivo);
       if (f.referencia.value.trim()) fd.append('referencia', f.referencia.value.trim());
       await enviarForm('/api/envios/comprobante-lote', fd);
-      toast(`Comprobante enviado por ${sel.length} envío(s): queda pendiente de revisión`, 'ok');
+      toast(`Comprobante enviado por ${sel.length} envío(s): queda pendiente de aprobación`, 'ok');
       carrito();
     } catch (err) { marcarErrores(f, err.detalles); errorToast(err); btn.disabled = false; }
   };

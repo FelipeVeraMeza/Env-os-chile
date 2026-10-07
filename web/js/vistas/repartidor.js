@@ -185,7 +185,7 @@ export async function detalleRepartidor(id) {
   const segundosDesdeLlegada = () => (e.llegada_en ? Math.floor((Date.now() - new Date(e.llegada_en).getTime()) / 1000) : null);
 
   montar(vista, html`
-    <a href="#/ruta" class="sub" style="text-decoration:none">← Mi ruta</a>
+    <a href="#/ruta" class="btn sec volver">← Mi ruta</a>
     ${offline ? avisoSinSenal() : ''}
     <div class="encabezado" style="margin-top:6px"><div><h1 class="mono">${e.folio}</h1>
       <div class="fila">${badge(e.estado)} ${e.estado_pago === 'pagado' ? html`<span class="badge e-pagado">Pagado</span>` : html`<span class="badge e-pendiente">Pago pendiente</span>`}
