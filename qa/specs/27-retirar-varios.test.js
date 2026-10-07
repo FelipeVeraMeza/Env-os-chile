@@ -51,3 +51,22 @@ test('CP-272 · Todo o nada: uno ya retirado, ajeno o sin pagar no deja retirar 
   assert.equal((await retirar([])).status, 422);
   assert.equal((await retirar([b.id])).status, 200);
 });
+
+test('CP-273 · Tomar varios disponibles de una vez; el que ya tomó otro se informa y no se pisa', async () => {
+  const pagado = async () => {
+    const c = await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id), confirmar: true } });
+    await pagarPorTransferencia(esc, c.datos.id);
+    return c.datos;
+  };
+  const [a, b, c] = [await pagado(), await pagado(), await pagado()];
+  assert.equal((await peticion('POST', `/api/envios/${c.id}/tomar`, { sesion: esc.repartidorB })).status, 200, 'otro repartidor toma c');
+  assert.equal((await peticion('POST', '/api/envios/tomar-varios', { sesion: esc.cliente, json: { envio_ids: [a.id] } })).status, 403);
+  const r = await peticion('POST', '/api/envios/tomar-varios', { sesion: esc.repartidor, json: { envio_ids: [a.id, b.id, c.id] } });
+  assert.equal(r.status, 200, JSON.stringify(r.datos));
+  assert.equal(r.datos.tomados, 2);
+  assert.deepEqual(r.datos.no_disponibles, [c.id]);
+  assert.equal((await peticion('GET', `/api/envios/${c.id}`, { sesion: esc.admin })).datos.repartidor_id, esc.repartidorB.usuario.id, 'c sigue con el otro');
+  const d = (await peticion('GET', `/api/envios/${a.id}`, { sesion: esc.repartidor })).datos;
+  assert.equal(d.estado, 'asignado');
+  assert.equal((await peticion('POST', '/api/envios/retirar-varios', { sesion: esc.repartidor, json: { envio_ids: [a.id, b.id] } })).status, 200, 'y luego los retira de una vez');
+});

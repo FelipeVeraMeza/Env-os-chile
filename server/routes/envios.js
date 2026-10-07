@@ -386,6 +386,26 @@ envios.post('/:id/tomar', requiereRol('repartidor', 'admin'), ruta(async (req, r
   res.json(presentar(await cargarEnvio(id), req.usuario));
 }));
 
+// Tomar varios disponibles de una vez (pedido 07-10). Si otro repartidor tomó alguno al mismo tiempo, ese se salta
+// y se informa: los demás quedan tomados igual (cada uno con su propia condición de "sin asignar").
+envios.post('/tomar-varios', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.envio_ids) ? req.body.envio_ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw falla(422, 'Elige al menos un envío', { envio_ids: 'Obligatorio' });
+  if (ids.length > 100) throw falla(422, 'Máximo 100 envíos de una vez', { envio_ids: 'Demasiados' });
+  const conf = await leerConfig();
+  if (req.usuario.rol === 'repartidor' && !conf.operacion.autoasignacion) throw falla(403, 'Administración asigna los envíos: espera a que te asignen uno');
+  const tomados = await transaccion(async (db) => {
+    const { rows } = await db.query(
+      `UPDATE envio e SET repartidor_id = $1, estado = 'asignado', actualizado_en = now() WHERE e.id = ANY($2) AND ${SIN_ASIGNAR} RETURNING e.id, e.folio`,
+      [req.usuario.id, ids]);
+    for (const e of rows) await registrarEstado(db, { envioId: e.id, anterior: 'creado', nuevo: 'asignado', usuarioId: req.usuario.id, motivo: 'Tomado por el repartidor' });
+    return rows;
+  });
+  for (const e of tomados) await auditar(req, 'tomar', 'envio', e.id, { varios: ids.length });
+  const tomadosIds = new Set(tomados.map((e) => e.id));
+  res.json({ tomados: tomados.length, folios: tomados.map((e) => e.folio), no_disponibles: ids.filter((id) => !tomadosIds.has(id)) });
+}));
+
 // El repartidor ordena su ruta del día (RF-60). Solo puede ordenar envíos que tiene asignados.
 envios.put('/ruta/orden', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [];

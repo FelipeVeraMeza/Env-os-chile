@@ -183,14 +183,16 @@ export async function ruta() {
     ${offline ? '' : html`<div class="grid g2" style="margin-bottom:16px">
       <button class="btn grande" id="escanear">Escanear etiqueta (QR)</button>
       <button class="btn sec grande" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente</button></div>`}
-    ${!offline && listosRetirar.length ? html`<div class="grid g2" style="margin-bottom:16px;grid-template-columns:minmax(0,2fr) minmax(0,1fr)">
-      <button class="btn blanco grande" id="retirar-todos">📦 Ya retiré todos (${listosRetirar.length})</button>
+    ${!offline && aRetirar.length ? html`<div class="grid g2" style="margin-bottom:16px;grid-template-columns:minmax(0,2fr) minmax(0,1fr)">
+      <button class="btn blanco grande" id="retirar-todos" ${listosRetirar.length ? '' : html`disabled`}>📦 Ya retiré todos (${listosRetirar.length})</button>
       <button class="btn sec grande" id="retirar-paquetes">Elegir cuáles</button></div>
-      ${aRetirar.length > listosRetirar.length ? html`<p class="muted" style="margin:-8px 0 16px">${aRetirar.length - listosRetirar.length} por retirar quedan fuera: sin pagar o con retiro agendado para otro día.</p>` : ''}` : ''}
+      ${aRetirar.length > listosRetirar.length ? html`<p class="muted" style="margin:-8px 0 16px">${aRetirar.length - listosRetirar.length} de ${aRetirar.length} por retirar no se pueden marcar todavía: sin pagar o con retiro agendado para otro día.</p>` : ''}`
+    : !offline && disponibles.items.length ? html`<div class="aviso" style="margin-bottom:16px">Para marcar paquetes retirados, primero tómalos: toca <b>Tomar todos</b> en "Disponibles para tomar" (más abajo). Después aparece <b>Ya retiré todos</b>.</div>` : ''}
     <div class="card"><div class="card-titulo"><h2>En ruta</h2>${botonesMaps(enRuta.map(lugarEntrega))}</div>
       ${enRuta.length > 1 ? html`<p class="sub" style="margin-bottom:10px">Entrega en este orden: primero el 1.º y al final el último. Toca "Ordenar ruta automáticamente" para recalcularlo desde donde estás.</p>` : ''}<div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
     <div class="card"><div class="card-titulo"><h2>Por retirar / reintentar</h2>${botonesMaps(porRetirar.filter((e) => !retiroOtroDia(e)).map(lugarParada))}</div><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
-    ${disponibles.autoasignacion || esAdmin ? html`<div class="card"><div class="card-titulo"><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
+    ${disponibles.autoasignacion || esAdmin ? html`<div class="card"><div class="card-titulo"><div><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
+      ${!offline && disponibles.total > 1 ? html`<button class="btn chico" id="tomar-todos">Tomar todos (${Math.min(disponibles.total, 100)})</button>` : ''}</div>
       <div class="lista-envios" id="lista-disponibles">${disponibles.items.length ? disponibles.items.slice(0, 10).map(libre) : vacio('No hay envíos nuevos por tomar.')}</div>
       ${disponibles.total > 10 ? html`<button class="btn sec ancho" id="ver-disponibles" style="margin-top:12px">Ver los ${disponibles.total - 10} restantes</button>` : ''}</div>`
     : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
@@ -243,6 +245,19 @@ export async function ruta() {
     };
   });
   enlazarTomar();
+  // Tomar todos los disponibles de una vez (pedido 07-10), hasta 100. Si otro repartidor tomó alguno, se avisa.
+  $('#tomar-todos')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const n = Math.min(disponibles.total, 100);
+    if (!(await confirmar(`¿Tomar los ${n} envíos disponibles?`, 'Pasan a tu ruta como "Por retirar".', 'Tomar todos'))) return;
+    btn.disabled = true;
+    try {
+      const todos = disponibles.total > disponibles.items.length ? (await get('/api/envios/disponibles?limite=500')).items : disponibles.items;
+      const r = await post('/api/envios/tomar-varios', { envio_ids: todos.slice(0, 100).map((e) => e.id) });
+      toast(r.no_disponibles.length ? `Tomaste ${r.tomados}. ${r.no_disponibles.length} ya los había tomado otro repartidor.` : `Tomaste ${r.tomados} envío(s): están en "Por retirar"`, 'ok');
+      ruta();
+    } catch (err) { errorToast(err); ruta(); }
+  });
 }
 
 // ================= Detalle para el repartidor: acciones grandes para usar en la calle =================
