@@ -2,7 +2,7 @@ import { app } from '../app.js';
 import { get, patch, post, put } from '../api.js';
 import { $, $$, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 import { limpiarCacheComunas } from './comun.js';
-import { revisarComprobante } from './envios.js';
+import { aprobarPagoCliente, revisarComprobante } from './envios.js';
 
 // Si los datos no se pueden cargar (p. ej. un rango con "desde" posterior a "hasta"), se explica y se ofrece volver al
 // período por defecto. Antes la pantalla quedaba cargando para siempre.
@@ -476,14 +476,15 @@ export async function cobranza(rango = {}) {
   const desde = rango.desde || `${hoy.slice(0, 8)}01`;
   const hasta = rango.hasta || hoy;
   montar(vista, esqueleto(4));
-  let r; let pagos; let est; let comprobantes; let venc;
+  let r; let pagos; let est; let comprobantes; let venc; let porCliente;
   try {
-    [r, pagos, est, comprobantes, venc] = await Promise.all([
+    [r, pagos, est, comprobantes, venc, porCliente] = await Promise.all([
       get(`/api/cobranza/resumen?desde=${desde}&hasta=${hasta}`),
       get('/api/cobranza/pagos'),
       get(`/api/cobranza/estimar${rango.envios_mes ? `?envios_mes=${rango.envios_mes}` : ''}`),
       get('/api/cobranza/comprobantes'),
       get('/api/envios/vencimientos'),
+      get('/api/cobranza/por-cliente'),
     ]);
   } catch (err) { return errorRango(vista, err, () => cobranza()); }
   // Recordatorio al cliente por WhatsApp (mensaje listo; se envía con un toque desde el teléfono de administración).
@@ -512,6 +513,16 @@ export async function cobranza(rango = {}) {
       <div class="kpi"><div class="etiqueta">Por cobrar</div><div class="valor">${clp(r.por_cobrar.monto)}</div><div class="nota">${r.por_cobrar.envios} envíos sin pagar${r.por_cobrar.envios ? ` · el más antiguo hace ${r.por_cobrar.dias_mas_antiguo} día(s)` : ''}</div></div>
       <div class="kpi"><div class="etiqueta">Abonos por llegar</div><div class="valor">${clp(r.por_conciliar.monto_esperado)}</div><div class="nota">${r.por_conciliar.pagos} pagos${r.por_conciliar.atrasados ? ` · ${r.por_conciliar.atrasados} atrasado(s)` : ''}</div></div>
     </div>
+    <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Por cobrar, agrupado por cliente</h2><span class="sub">${porCliente.length ? `${porCliente.length} cliente(s)` : ''}</span></div>
+      ${porCliente.length ? html`<p class="sub" style="margin-bottom:10px">Si un cliente pagó muchos envíos con una sola transferencia, apruébalos todos de una vez.</p>
+        <div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table class="tabla-cards"><thead><tr><th>Cliente</th><th class="num">Por pagar</th><th class="num">Pendientes de aprobación</th><th class="num">Total</th><th>Acción</th></tr></thead>
+        <tbody>${porCliente.map((c) => html`<tr>
+          <td data-label="Cliente"><b>${c.cliente_nombre}</b><div class="sub">${c.envios.length} envío(s)</div></td>
+          <td data-label="Por pagar" class="num">${c.por_pagar ? `${c.por_pagar} · ${clp(c.monto_por_pagar)}` : '—'}</td>
+          <td data-label="Pendientes de aprobación" class="num">${c.en_revision ? html`<b>${c.en_revision} · ${clp(c.monto_en_revision)}</b><div class="sub">${c.comprobantes} comprobante(s)</div>` : '—'}</td>
+          <td data-label="Total" class="num"><b>${clp(c.total)}</b></td>
+          <td data-label="Acción"><div class="fila"><button class="btn chico" data-aprobar-cliente="${c.cliente_id}">Aprobar pago</button><a class="btn sec chico" href="#/envios" data-ver-cliente="${c.cliente_id}">Ver envíos</a></div></td>
+        </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay envíos por cobrar ✔</p>`}</div>
     <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Comprobantes de transferencia por revisar</h2><span class="sub">${comprobantes.length ? `${comprobantes.length} · ${clp(r.en_revision.monto)}` : ''}</span></div>
       ${comprobantes.length ? html`<p class="sub" style="margin-bottom:10px">El envío no se asigna ni se retira hasta que apruebes su pago. Compara cada comprobante con la cartola del banco.</p>
         <div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table class="tabla-cards"><thead><tr><th>Enviado</th><th>Folio</th><th>Cliente</th><th class="num">Monto</th><th>N° operación</th><th>Acción</th></tr></thead>
@@ -571,6 +582,11 @@ export async function cobranza(rango = {}) {
       try { await post(`/api/envios/${e.id}/reactivar`); toast(`${e.folio} reactivado`, 'ok'); cobranza({ desde, hasta }); } catch (err) { errorToast(err); b.disabled = false; }
     };
   });
+  $$('[data-aprobar-cliente]').forEach((b) => {
+    b.onclick = () => aprobarPagoCliente(porCliente.find((c) => String(c.cliente_id) === b.dataset.aprobarCliente), () => cobranza({ desde, hasta }));
+  });
+  // "Ver envíos" abre el listado ya filtrado por ese cliente.
+  $$('[data-ver-cliente]').forEach((a) => { a.onclick = () => { app.filtroCliente = a.dataset.verCliente; }; });
   $$('[data-revisar-comprobante]').forEach((b) => {
     b.onclick = () => revisarComprobante(comprobantes.find((c) => String(c.id) === b.dataset.revisarComprobante), () => cobranza({ desde, hasta }));
   });

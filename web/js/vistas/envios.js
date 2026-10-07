@@ -10,7 +10,7 @@ import { detalleRepartidor } from './repartidor.js';
 export async function registro() {
   const vista = $('#vista');
   const rol = app.usuario.rol;
-  const f = { q: '', estado: '', pagina: 1, repartidor_id: '', cliente_id: '', estado_pago: '', desde: '', hasta: '' };
+  const f = { q: '', estado: '', pagina: 1, repartidor_id: '', cliente_id: rol === 'admin' ? app.filtroCliente || '' : '', estado_pago: '', desde: '', hasta: '' };
   // Administración filtra por cliente y por estado del pago (pedido 07-10: aprobar los comprobantes de un cliente de una vez).
   const [repartidores, clientes] = rol === 'admin'
     ? await Promise.all([get('/api/usuarios/repartidores'), get('/api/usuarios?rol=cliente').then((l) => l.filter((u) => !u.correo.startsWith('qa-')))])
@@ -32,10 +32,25 @@ export async function registro() {
         <div class="grid g2"><label class="campo">Desde<input type="date" name="desde"></label><label class="campo">Hasta<input type="date" name="hasta" max="${hoyISO()}"></label></div>
       </div>
     </form>
+    <div id="pago-cliente"></div>
     <div id="resultado">${esqueleto(4)}</div>`);
 
+  // Desde Cobranza ("Ver envíos" de un cliente) la lista llega filtrada por ese cliente.
+  app.filtroCliente = null;
+  if (f.cliente_id && $('#filtros select[name="cliente_id"]')) $('#filtros select[name="cliente_id"]').value = f.cliente_id;
   app.refrescar = () => cargar();
+  // Con un cliente elegido, sus envíos por pagar quedan agrupados en un resumen con "Aprobar pago" (pedido 07-10).
+  async function resumenCliente() {
+    const caja = $('#pago-cliente');
+    if (rol !== 'admin' || !f.cliente_id) return montar(caja, '');
+    const c = (await get('/api/cobranza/por-cliente').catch(() => [])).find((x) => String(x.cliente_id) === String(f.cliente_id));
+    if (!c) return montar(caja, '');
+    montar(caja, html`<div class="aviso magenta fila entre" style="margin-bottom:16px"><span><b>${c.cliente_nombre}: ${c.envios.length} envío(s) por cobrar · ${clp(c.total)}.</b>${c.en_revision ? ` ${c.en_revision} pendiente(s) de aprobación con ${c.comprobantes} comprobante(s).` : ''} Apruébalos de una vez si pagó con una sola transferencia.</span>
+      <button class="btn chico" id="aprobar-cliente">Aprobar pago</button></div>`);
+    $('#aprobar-cliente').onclick = () => aprobarPagoCliente(c, () => cargar());
+  }
   async function cargar() {
+    resumenCliente();
     try {
       const r = await get(`/api/envios?${qs()}`);
       const paginas = Math.max(1, Math.ceil(r.total / r.limite));
@@ -353,6 +368,61 @@ function tarjetaTransferencia(e, esAdmin) {
       ${esAdmin ? '' : html`<p class="sub" style="margin-top:10px">Revisa el motivo y sube un comprobante nuevo con el botón <b>Pagar con transferencia</b>.</p>`}</div>`;
   }
   return '';
+}
+
+// ================= Aprobar de una vez el pago de muchos envíos de un cliente (pedido 07-10) =================
+// c: un cliente de /api/cobranza/por-cliente. Todos vienen marcados; los de un mismo comprobante (carrito) se marcan juntos.
+export async function aprobarPagoCliente(c, alTerminar) {
+  const comprobantes = (await get('/api/cobranza/comprobantes').catch(() => []))
+    .filter((x) => (x.envios || [{ envio_id: x.envio_id }]).some((v) => c.envios.some((e) => e.id === v.envio_id)));
+  const m = modal(html`<h2>Aprobar pago de ${c.cliente_nombre}</h2>
+    <p class="sub">Marca los envíos que paga la transferencia. Los que tienen comprobante se aprueban con él; los demás quedan pagados por transferencia con el N° de operación.</p>
+    ${comprobantes.length ? html`<div class="fila" style="margin:10px 0">${comprobantes.map((x, i) => html`<a class="btn sec chico" href="${archivo(x.comprobante_url)}" target="_blank" rel="noopener">Ver comprobante ${comprobantes.length > 1 ? i + 1 : ''} (${clp(x.monto)})</a>`)}</div>`
+      : html`<div class="aviso" style="margin:10px 0">Este cliente no subió comprobante: revisa la transferencia en la cartola antes de aprobar.</div>`}
+    <form class="pila" id="f-varios" novalidate>
+      <div class="fila entre"><label class="interruptor"><input type="checkbox" id="todos" checked> Todos</label><span class="sub" id="cuenta-varios"></span></div>
+      <div class="lista-envios" style="max-height:40vh;overflow:auto">${c.envios.map((e) => html`<label class="item-envio" style="cursor:pointer">
+        <div><span class="folio">${e.folio}</span><div class="sub">${fechaHora(e.creado_en)}${e.grupo ? ' · con comprobante' : ''}</div></div>
+        <div class="der"><span class="monto">${clp(e.monto)}</span>${badgePago(e.estado_pago)}
+          <input type="checkbox" name="envio" value="${e.id}" data-monto="${e.monto}" data-grupo="${e.grupo || ''}" checked style="width:22px;min-height:22px"></div>
+      </label>`)}</div>
+      <div class="fila entre"><span class="sub">Total de la transferencia</span><div class="monto-grande" id="total-varios"></div></div>
+      <label class="campo">N° de operación <small>(según la cartola)</small><input name="referencia" maxlength="60" value="${c.envios.find((e) => e.referencia)?.referencia || ''}"></label>
+      <button class="btn grande" id="aprobar-varios">Aprobar pago</button>
+    </form>`);
+  const f = $('#f-varios', m.el);
+  const casillas = $$('input[name="envio"]', f);
+  const actualizar = () => {
+    const sel = casillas.filter((x) => x.checked);
+    const total = sel.reduce((s, x) => s + Number(x.dataset.monto), 0);
+    $('#total-varios', m.el).textContent = clp(total);
+    $('#cuenta-varios', m.el).textContent = `${sel.length} de ${casillas.length} envío(s)`;
+    $('#todos', m.el).checked = sel.length === casillas.length;
+    const b = $('#aprobar-varios', m.el);
+    b.disabled = !sel.length;
+    b.textContent = sel.length ? `Aprobar pago de ${sel.length} envío(s) · ${clp(total)}` : 'Marca al menos un envío';
+  };
+  f.addEventListener('change', (ev) => {
+    if (ev.target.id === 'todos') casillas.forEach((x) => { x.checked = ev.target.checked; });
+    // Un comprobante paga todo su carrito: sus envíos se marcan o desmarcan juntos.
+    else if (ev.target.dataset.grupo) casillas.filter((x) => x.dataset.grupo === ev.target.dataset.grupo).forEach((x) => { x.checked = ev.target.checked; });
+    actualizar();
+  });
+  actualizar();
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const ids = casillas.filter((x) => x.checked).map((x) => Number(x.value));
+    const total = casillas.filter((x) => x.checked).reduce((s, x) => s + Number(x.dataset.monto), 0);
+    if (!(await confirmar(`¿Aprobar el pago de ${ids.length} envío(s)?`, `${c.cliente_nombre} · ${clp(total)}. Quedan pagados y listos para asignar y retirar.`, 'Aprobar'))) return;
+    const btn = $('#aprobar-varios', m.el);
+    btn.disabled = true;
+    try {
+      const r = await post('/api/cobranza/aprobar-varios', { envio_ids: ids, referencia: f.referencia.value });
+      m.cerrar();
+      toast(`Pago aprobado: ${r.envio_ids.length} envío(s) de ${c.cliente_nombre} por ${clp(r.total)}`, 'ok');
+      alTerminar?.();
+    } catch (err) { errorToast(err); btn.disabled = false; }
+  };
 }
 
 // ================= Cambiar destino y reagendar retiro (pedido 07-10) =================

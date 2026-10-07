@@ -174,10 +174,63 @@ async function pagoEnRevision(db, pagoId) {
 }
 
 export async function aprobarComprobante(pagoId, { referencia, usuarioId }) {
+  return transaccion((db) => aprobarComprobanteEn(db, pagoId, { referencia, usuarioId }));
+}
+
+// Lo mismo dentro de una transacción ya abierta (la aprobación de varios envíos de una vez).
+async function aprobarComprobanteEn(db, pagoId, { referencia, usuarioId }) {
+  const envioIds = [];
+  for (const id of await pagosDelLote(db, pagoId)) envioIds.push(await aprobarUno(db, id, { referencia, usuarioId }));
+  return envioIds;
+}
+
+// Pago que administración registra a mano (transferencia vista en la cartola, efectivo): queda verificado a su nombre.
+// El envío debe estar bloqueado (FOR UPDATE) y con el pago pendiente.
+export async function registrarPagoManual(db, envio, { medio, referencia, usuarioId }) {
+  const { rows: [p] } = await db.query(
+    `INSERT INTO pago (envio_id, proveedor, medio, monto, estado, token, referencia, transaccion_id, verificacion, verificado_en,
+       verificado_por, comision_estimada, neto_estimado, creado_por)
+     VALUES ($1, 'manual', $2, $3, 'aprobado', $4, $5, NULL, 'manual', now(), $6, 0, $3, $6) RETURNING id`,
+    [envio.id, medio, envio.tarifa_total, crypto.randomBytes(18).toString('base64url'), referencia, usuarioId]);
+  await registrarEventoPago(db, { pagoId: p.id, tipo: 'verificacion', estado: 'aprobado', monto: envio.tarifa_total, datos: { medio, referencia }, usuarioId });
+  await db.query(
+    `UPDATE envio SET estado_pago = 'pagado', pago_medio = $1, pago_referencia = $2, pagado_en = now(), actualizado_en = now() WHERE id = $3`,
+    [medio, referencia, envio.id]);
+  await cerrarCobrosAbiertos(db, envio.id);
+}
+
+// Un cliente hace muchos envíos y los paga con UNA transferencia (pedido 07-10): administración aprueba todos de una vez.
+// Los que tienen comprobante en revisión se aprueban con su comprobante (y con él todo su carrito); los que no, quedan
+// pagados por transferencia con el N° de operación indicado. Todo o nada: si uno no se puede, no se aprueba ninguno.
+export const MAX_APROBAR_VARIOS = 100;
+export async function aprobarVarios(envioIds, { referencia, usuarioId }) {
+  const ids = [...new Set(envioIds)].sort((a, b) => a - b);
+  if (!ids.length) throw falla(422, 'Elige al menos un envío', { envio_ids: 'Obligatorio' });
+  if (ids.length > MAX_APROBAR_VARIOS) throw falla(422, `Máximo ${MAX_APROBAR_VARIOS} envíos de una vez`, { envio_ids: 'Demasiados' });
   return transaccion(async (db) => {
-    const envioIds = [];
-    for (const id of await pagosDelLote(db, pagoId)) envioIds.push(await aprobarUno(db, id, { referencia, usuarioId }));
-    return envioIds;
+    const { rows } = await db.query(
+      `SELECT e.id, e.folio, e.cliente_id, e.estado, e.estado_pago, e.tarifa_total,
+         (SELECT p.id FROM pago p WHERE p.envio_id = e.id AND p.estado = 'en_revision' LIMIT 1) AS pago_en_revision
+       FROM envio e WHERE e.id = ANY($1) ORDER BY e.id FOR UPDATE OF e`, [ids]);
+    if (rows.length !== ids.length) throw falla(404, 'Algún envío no existe. Recarga la lista.');
+    if (new Set(rows.map((e) => e.cliente_id)).size > 1) throw falla(422, 'Aprueba de una vez solo envíos de un mismo cliente');
+    const malos = rows.filter((e) => ['borrador', 'anulado'].includes(e.estado) || !['pendiente', 'en_revision'].includes(e.estado_pago));
+    if (malos.length) throw falla(409, `Estos envíos ya no están por pagar: ${malos.map((e) => e.folio).join(', ')}. Recarga la lista.`, { envios_no_pendientes: malos.map((e) => e.id) });
+    if (rows.some((e) => !(e.tarifa_total > 0))) throw falla(409, 'Hay envíos sin monto a pagar');
+    const pagados = new Set();
+    let conComprobante = 0;
+    for (const e of rows) {
+      if (pagados.has(e.id)) continue; // ya quedó pagado con el comprobante de su carrito
+      if (e.pago_en_revision) {
+        for (const id of await aprobarComprobanteEn(db, e.pago_en_revision, { referencia, usuarioId })) pagados.add(id);
+        conComprobante += 1;
+      } else {
+        await registrarPagoManual(db, e, { medio: 'transferencia', referencia, usuarioId });
+        pagados.add(e.id);
+      }
+    }
+    const { rows: [t] } = await db.query('SELECT COALESCE(sum(tarifa_total), 0)::int AS total FROM envio WHERE id = ANY($1)', [[...pagados]]);
+    return { envio_ids: [...pagados], total: t.total, comprobantes_aprobados: conComprobante };
   });
 }
 

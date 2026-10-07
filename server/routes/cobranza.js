@@ -4,7 +4,7 @@ import { auditar, falla, idNumerico, rangoFechas, ruta } from '../lib/http.js';
 import { compararProveedores, PROVEEDORES_PAGO, SIN_ABONO, validarConciliacion } from '../lib/cobranza.js';
 import { leerConfig } from '../lib/configuracion.js';
 import { firmarEnlace } from '../lib/archivos.js';
-import { aprobarComprobante, avisarRevisionComprobante, rechazarComprobante, registrarEventoPago } from '../lib/pagos.js';
+import { aprobarComprobante, aprobarVarios, avisarRevisionComprobante, rechazarComprobante, registrarEventoPago } from '../lib/pagos.js';
 import { validarMotivoRechazo } from '../lib/reglas.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
 
@@ -81,6 +81,44 @@ cobranza.get('/comprobantes', ruta(async (req, res) => {
     }
   }
   res.json([...grupos.values()]);
+}));
+
+// Por cobrar agrupado por cliente (pedido 07-10): un cliente con 30 envíos del día los paga con una transferencia y
+// administración los aprueba de una vez. Cada cliente trae sus envíos por pagar o pendientes de aprobación.
+cobranza.get('/por-cliente', ruta(async (req, res) => {
+  const { rows } = await query(
+    `SELECT e.id, e.folio, e.estado_pago, e.tarifa_total, e.creado_en, e.cliente_id, u.nombre AS cliente_nombre, u.telefono AS cliente_telefono,
+       p.id AS pago_id, p.lote, p.referencia, p.creado_en AS comprobante_en
+     FROM envio e JOIN usuario u ON u.id = e.cliente_id
+     LEFT JOIN pago p ON p.envio_id = e.id AND p.estado = 'en_revision'
+     WHERE e.estado_pago IN ('pendiente', 'en_revision') AND e.estado NOT IN ('borrador', 'anulado') AND e.tarifa_total > 0
+     ORDER BY u.nombre, e.creado_en, e.id LIMIT 2000`);
+  const clientes = new Map();
+  for (const e of rows) {
+    let c = clientes.get(e.cliente_id);
+    if (!c) {
+      c = { cliente_id: e.cliente_id, cliente_nombre: e.cliente_nombre, cliente_telefono: e.cliente_telefono, por_pagar: 0, monto_por_pagar: 0,
+        en_revision: 0, monto_en_revision: 0, comprobantes: new Set(), envios: [] };
+      clientes.set(e.cliente_id, c);
+    }
+    if (e.estado_pago === 'pendiente') { c.por_pagar += 1; c.monto_por_pagar += e.tarifa_total; }
+    else { c.en_revision += 1; c.monto_en_revision += e.tarifa_total; if (e.pago_id) c.comprobantes.add(e.lote || `pago-${e.pago_id}`); }
+    c.envios.push({ id: e.id, folio: e.folio, estado_pago: e.estado_pago, monto: e.tarifa_total, creado_en: e.creado_en, pago_id: e.pago_id, grupo: e.pago_id ? (e.lote || `pago-${e.pago_id}`) : null, referencia: e.referencia });
+  }
+  // Primero los que tienen comprobantes esperando aprobación; luego los de mayor monto.
+  const lista = [...clientes.values()].map((c) => ({ ...c, comprobantes: c.comprobantes.size, total: c.monto_por_pagar + c.monto_en_revision }))
+    .sort((a, b) => b.en_revision - a.en_revision || b.total - a.total);
+  res.json(lista);
+}));
+
+cobranza.post('/aprobar-varios', ruta(async (req, res) => {
+  const ids = (Array.isArray(req.body?.envio_ids) ? req.body.envio_ids : String(req.body?.envio_ids || '').split(','))
+    .map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0);
+  const referencia = String(req.body?.referencia || '').trim().slice(0, 60) || null;
+  const r = await aprobarVarios(ids, { referencia, usuarioId: req.usuario.id });
+  for (const envioId of r.envio_ids) await auditar(req, 'aprobar_varios', 'envio', envioId, { referencia, envios: r.envio_ids.length });
+  avisarRevisionComprobante(r.envio_ids, { aprobado: true }).catch((err) => console.error('[correo]', err.message));
+  res.json(r);
 }));
 
 cobranza.post('/comprobantes/:id/aprobar', ruta(async (req, res) => {

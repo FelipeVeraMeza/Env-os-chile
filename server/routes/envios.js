@@ -17,7 +17,7 @@ import { optimizarRuta } from '../lib/rutas.js';
 import { INICIO_PLAZO, PREFIJO_VENCIDO } from '../lib/vencimientos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarEtiquetasPdf, generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
-import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, cerrarCobrosAbiertos, iniciarPago, registrarComprobante, registrarComprobanteLote, registrarEventoPago } from '../lib/pagos.js';
+import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, cerrarCobrosAbiertos, iniciarPago, registrarComprobante, registrarComprobanteLote, registrarEventoPago, registrarPagoManual } from '../lib/pagos.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
 
@@ -807,17 +807,7 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
     const { rows: [vigente] } = await db.query(
       "SELECT id FROM envio WHERE id = $1 AND estado_pago = 'pendiente' AND estado NOT IN ('borrador', 'anulado') FOR UPDATE", [envio.id]);
     exigirSinConflicto({ rowCount: vigente ? 1 : 0 });
-    // Administración declara que revisó el pago (cartola, efectivo recibido): queda verificado a su nombre.
-    const { rows: [p] } = await db.query(
-      `INSERT INTO pago (envio_id, proveedor, medio, monto, estado, token, referencia, transaccion_id, verificacion, verificado_en,
-         verificado_por, comision_estimada, neto_estimado, creado_por)
-       VALUES ($1, 'manual', $2, $3, 'aprobado', $4, $5, NULL, 'manual', now(), $6, 0, $3, $6) RETURNING id`,
-      [envio.id, medio, envio.tarifa_total, crypto.randomBytes(18).toString('base64url'), referencia, req.usuario.id]);
-    await registrarEventoPago(db, { pagoId: p.id, tipo: 'verificacion', estado: 'aprobado', monto: envio.tarifa_total, datos: { medio, referencia }, usuarioId: req.usuario.id });
-    await db.query(
-      `UPDATE envio SET estado_pago = 'pagado', pago_medio = $1, pago_referencia = $2, pagado_en = now(), actualizado_en = now() WHERE id = $3`,
-      [medio, referencia, envio.id]);
-    await cerrarCobrosAbiertos(db, envio.id);
+    await registrarPagoManual(db, envio, { medio, referencia, usuarioId: req.usuario.id });
   });
   await auditar(req, 'pago_manual', 'envio', envio.id, { medio, referencia });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
@@ -830,7 +820,7 @@ envios.post('/:id/pago-manual', requiereRol('admin'), ruta(async (req, res) => {
 envios.post('/comprobante-lote', requiereRol('admin', 'cliente'), subida.single('archivo'), ruta(async (req, res) => {
   const ids = [...new Set(String(req.body.envio_ids || '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n > 0))];
   if (!ids.length) throw falla(422, 'Elige al menos un envío para pagar', { envio_ids: 'Obligatorio' });
-  if (ids.length > 50) throw falla(422, 'Máximo 50 envíos por pago', { envio_ids: 'Demasiados' });
+  if (ids.length > 100) throw falla(422, 'Máximo 100 envíos por pago', { envio_ids: 'Demasiados' });
   const lista = [];
   for (const id of ids) {
     const envio = await cargarEnvio(id);
