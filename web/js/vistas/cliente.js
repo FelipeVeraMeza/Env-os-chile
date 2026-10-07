@@ -19,7 +19,7 @@ export async function inicio() {
       <p>Crea tu envío en menos de un minuto. Dentro de Santiago <b>${clp(app.conf.tarifas.base)}</b> hasta ${app.conf.tarifas.peso_estandar_kg} kg y ${app.conf.tarifas.dim_estandar_cm}×${app.conf.tarifas.dim_estandar_cm}×${app.conf.tarifas.dim_estandar_cm} cm, sin importar la cantidad de bultos.${app.conf.operacion.punto_courier ? ' También llevamos tus paquetes a puntos Blue Express, Starken y otros.' : ''}</p>
       <div class="fila" style="margin-top:16px">
         <a class="btn blanco grande" href="#/nuevo">${icono('nuevo')} Nuevo envío</a>
-        <a class="btn sec grande" href="#/seguimiento">Seguir un folio</a>
+        <a class="btn sec grande" href="#/seguimiento">Seguimiento de envío</a>
       </div>
     </section>
     <div class="grid g4" style="margin-bottom:20px">
@@ -30,11 +30,18 @@ export async function inicio() {
     </div>
     ${r.por_pagar ? html`<div class="aviso magenta fila entre" style="margin-bottom:16px"><span><b>Tienes ${r.por_pagar} envío(s) pendientes de pago (${clp(r.monto_por_pagar)}).</b> El repartidor solo puede retirar envíos pagados, y los que sigan sin pagar ${app.conf.operacion.horas_sin_pago || 24} horas después de creados se anulan solos.${r.proximo_vence_en ? html` <b>El primero se anula el ${fechaHora(r.proximo_vence_en)}.</b>` : ''}</span>
       <a class="btn chico" href="#/carrito">Pagar todos con una transferencia</a></div>` : ''}
+    ${avisoHorarioRetiro()}
     ${r.en_revision ? html`<div class="aviso" style="margin-bottom:16px"><b>${r.en_revision} comprobante(s) de transferencia en revisión.</b> El repartidor retira cuando administración apruebe el pago.</div>` : ''}
     <div class="card">
       <div class="card-titulo"><h2>Envíos recientes</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
       <div class="lista-envios">${items.length ? items.map((e) => itemEnvio(e)) : vacio('Aún no tienes envíos.', html`<a class="btn" href="#/nuevo">Crear mi primer envío</a>`)}</div>
     </div>`);
+}
+
+// Horario de retiro (pedido 07-10): visible al crear un envío y en el inicio. Lo edita administración en Tarifas y reglas.
+function avisoHorarioRetiro() {
+  const texto = app.conf.operacion?.horario_retiro;
+  return texto ? html`<div class="aviso horario-retiro" style="margin-bottom:16px">🕘 <b>Horario de retiro:</b> ${texto}</div>` : '';
 }
 
 // ================= Carrito: varios envíos se pagan con UNA transferencia y un solo comprobante =================
@@ -177,6 +184,7 @@ export async function nuevo() {
       ${esAdmin ? html`<label class="campo" style="margin-bottom:16px">Cliente dueño del envío
         <select name="cliente_id" id="sel-cliente">${clientes.map((c) => html`<option value="${c.id}" ${c.id === w.clienteId ? html`selected` : ''}>${c.nombre}</option>`)}</select></label>` : ''}
       <p class="sub" style="margin-bottom:12px">¿Dónde pasamos a <b>retirar</b> el paquete? El repartidor irá a esta dirección.</p>
+      ${avisoHorarioRetiro()}
       <div class="grid g2">
         <label class="campo">Calle *<input name="calle" value="${r.calle || ''}" autocomplete="address-line1" data-mapa="mapa-retiro"></label>
         <div class="grid g2"><label class="campo">Número *<input name="numero" value="${r.numero || ''}" inputmode="numeric" data-mapa="mapa-retiro"></label>
@@ -191,7 +199,7 @@ export async function nuevo() {
   function pasoDestinatario() {
     return html`
       <div class="segmentos" style="margin-bottom:16px">
-        <button type="button" data-modo="libreta" class="${w.modoDest === 'libreta' ? 'activo' : ''}" ${libreta.length ? '' : html`disabled`}>De mi libreta (${libreta.length})</button>
+        <button type="button" data-modo="libreta" class="${w.modoDest === 'libreta' ? 'activo' : ''}" ${libreta.length ? '' : html`disabled`}>Guardados (${libreta.length})</button>
         <button type="button" data-modo="nuevo" class="${w.modoDest === 'nuevo' ? 'activo' : ''}">Nuevo destinatario</button>
       </div>
       ${w.modoDest === 'libreta' ? html`
@@ -207,7 +215,7 @@ export async function nuevo() {
           <label class="campo">Correo <small>(opcional)</small><input name="correo" type="email" value="${w.nuevoDest.correo || ''}"></label>
           <label class="campo">RUT <small>(opcional)</small><input name="rut" value="${w.nuevoDest.rut || ''}" placeholder="12.345.678-5"></label>
         </div>
-        <p class="muted" style="margin-top:10px">El destinatario queda guardado en tu libreta con todas sus direcciones.</p>`}`;
+        <p class="muted" style="margin-top:10px">El destinatario queda en Guardados con todas sus direcciones.</p>`}`;
   }
 
   function pasoDestino() {
@@ -270,7 +278,7 @@ export async function nuevo() {
         <h3>Seguro del envío</h3>
         <div class="grid g2">
           <label class="campo">Valor declarado (CLP)<input name="valor_declarado" type="number" min="0" step="1" value="${p.valor_declarado || ''}" placeholder="0"><small>Tope de la indemnización en caso de pérdida o daño</small></label>
-          <label class="campo">Boleta de compra <small>(obligatoria para cobrar el seguro)</small><input type="file" name="boleta" accept="application/pdf,image/*">
+          <label class="campo">Boleta de compra <small>(obligatoria para la gestión del seguro)</small><input type="file" name="boleta" accept="application/pdf,image/*">
             <small>${w.boleta ? `Adjunta: ${w.boleta.name}` : 'PDF o foto. Puedes adjuntarla ahora o al reclamar.'}</small></label>
         </div>
       </div>
@@ -297,7 +305,7 @@ export async function nuevo() {
           ${w.tipo_destino === 'punto_courier' ? html`<b>${w.courier.courier_punto}</b><br>` : ''}${dir.calle} ${dir.numero}${dir.depto ? ', ' + dir.depto : ''} · <b>${dir.comuna_nombre}</b></div>
         <div><div class="muted">Retiro</div>${w.retiro.calle} ${w.retiro.numero}${w.retiro.depto ? ', ' + w.retiro.depto : ''} · <b>${nombreComuna(w.retiro.comuna_id)}</b></div>
         <div><div class="muted">Paquete</div>${p.descripcion_producto ? `${p.descripcion_producto} · ` : ''}${textoPaquete({ ...p, bultos: p.bultos || 1 })}</div>
-        <div><div class="muted">Seguro</div>${Number(p.valor_declarado) > 0 ? html`Valor declarado ${clp(p.valor_declarado)} · ${w.boleta ? html`boleta adjunta ✔` : html`<span style="color:var(--alerta)">sin boleta (la necesitarás para cobrar el seguro)</span>`}` : 'Sin valor declarado'}</div>
+        <div><div class="muted">Seguro</div>${Number(p.valor_declarado) > 0 ? html`Valor declarado ${clp(p.valor_declarado)} · ${w.boleta ? html`boleta adjunta ✔` : html`<span style="color:var(--alerta)">sin boleta (la necesitarás para la gestión del seguro)</span>`}` : 'Sin valor declarado'}</div>
         ${p.horario_especial ? html`<div><div class="muted">Horario especial</div>${p.franja_horaria}</div>` : ''}
       </div>
       <div class="card" style="box-shadow:none">
@@ -379,7 +387,7 @@ export async function nuevo() {
       if (!w.retiro.comuna_id) e.comuna_id = 'Selecciona la comuna';
     }
     if (w.paso === P.destinatario) {
-      if (w.modoDest === 'libreta' && !w.destinatario) { toast('Selecciona un destinatario de tu libreta', 'error'); return false; }
+      if (w.modoDest === 'libreta' && !w.destinatario) { toast('Selecciona un destinatario de Guardados', 'error'); return false; }
       if (w.modoDest === 'nuevo') {
         if (!w.nuevoDest.nombre?.trim()) e.nombre = 'Nombre obligatorio';
         if (!/^(\+?56)?\s*9?\s*\d{4}\s*\d{4}$/.test((w.nuevoDest.telefono || '').replace(/\s+/g, ' ').trim())) e.telefono = 'Formato +56 9 XXXX XXXX';
@@ -506,8 +514,8 @@ export async function nuevo() {
           <div class="aviso magenta">Imprime la etiqueta y pégala en el paquete. Paga ahora: con el pago aprobado el repartidor puede retirar tu envío. <b>Si no pagas en ${app.conf.operacion.horas_sin_pago || 24} horas, el envío se anula solo.</b></div>
           ${app.conf.pagos.en_linea ? html`<button class="btn grande ancho" id="pagar">Pagar ${clp(envio.tarifa_total)}</button>` : ''}
           <button class="btn ${app.conf.pagos.en_linea ? 'sec' : 'grande'} ancho" id="transferir">Pagar ${clp(envio.tarifa_total)} con transferencia (subir comprobante)</button>
-          ${envio.ticket_url ? html`<div class="grid g2"><a class="btn sec" id="t80" href="${urlApi()}${envio.ticket_url}&formato=80mm" target="_blank" rel="noopener">Etiqueta 80 mm (PDF)</a>
-            <a class="btn sec" id="ta4" href="${urlApi()}${envio.ticket_url}&formato=a4" target="_blank" rel="noopener">Etiqueta A4 (PDF)</a></div>` : ''}
+          ${envio.ticket_url ? html`<div class="grid g2"><a class="btn blanco" id="t80" href="${urlApi()}${envio.ticket_url}&formato=80mm" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta 80 mm (PDF)</a>
+            <a class="btn blanco" id="ta4" href="${urlApi()}${envio.ticket_url}&formato=a4" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta A4 (PDF)</a></div>` : ''}
           <a class="btn sec ancho" href="#/carrito">Pagar varios envíos juntos (carrito)</a>
           <a class="btn sec ancho" href="${wa}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
           <div class="grid g2"><a class="btn azul" href="#/envio/${envio.id}">Ver detalle</a><a class="btn sec" href="#/nuevo" id="otro">Crear otro envío</a></div>
@@ -530,7 +538,7 @@ export async function libreta() {
   montar(vista, esqueleto(3));
   const [lista, comunas] = await Promise.all([get('/api/destinatarios'), comunasCobertura()]);
   montar(vista, html`
-    <div class="encabezado"><div><h1>Destinatarios</h1><p>Tu libreta: cada destinatario puede tener varias direcciones (por si se cambia de casa).</p></div>
+    <div class="encabezado"><div><h1>Guardados</h1><p>Tus destinatarios guardados: cada uno puede tener varias direcciones (por si se cambia de casa).</p></div>
       <button class="btn" id="nuevo-dest">${icono('nuevo')} Nuevo destinatario</button></div>
     ${lista.length ? html`<div class="grid g2">${lista.map((d) => html`
       <div class="card" style="margin:0">
@@ -542,7 +550,7 @@ export async function libreta() {
               <button class="btn peligro chico" data-quitar="${d.id}:${di.id}" aria-label="Quitar dirección">Quitar</button></div>
           </div>`)}</div>
         <button class="btn sec chico" style="margin-top:12px" data-agregar="${d.id}">+ Agregar dirección</button>
-      </div>`)}</div>` : html`<div class="card">${vacio('Tu libreta está vacía. Los destinatarios se guardan solos al crear un envío.')}</div>`}`);
+      </div>`)}</div>` : html`<div class="card">${vacio('Aún no tienes destinatarios guardados. Se guardan solos al crear un envío.')}</div>`}`);
 
   const formDireccion = (destId) => {
     const m = modal(html`<h2>Nueva dirección</h2><form class="pila" id="f-dir" novalidate>

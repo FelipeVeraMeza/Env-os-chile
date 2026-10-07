@@ -1,14 +1,45 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, put } from '../api.js';
 import {
-  $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, html, modal, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
+  $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, hoyISO, html, modal, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { avisoWhatsapp, direccionTexto, retiroTexto, textoPaquete } from './comun.js';
+import { avisoWhatsapp, direccionTexto, fechaRetiroTexto, retiroTexto, textoPaquete } from './comun.js';
 import { enviarPendientes, entregaPendiente, guardarCopia, guardarEntrega, leerCopia } from '../sin-conexion.js';
 
 // Sin señal se muestra lo último que se vio con conexión (y se avisa).
 const sinSenal = (err) => err?.status === 0;
 const avisoSinSenal = () => html`<div class="aviso alerta" style="margin-bottom:12px"><b>Sin conexión.</b> Ves lo último que se cargó con señal. Las entregas que hagas se guardan en el teléfono y se envían solas al volver internet.</div>`;
+
+// ---------- Ruta completa en Google Maps (pedido 07-10) ----------
+// Abre Maps con todas las paradas en el orden de la lista; sin origen, Maps parte desde donde está el teléfono.
+// Un enlace de Maps acepta hasta 9 paradas intermedias: con más, la ruta se divide en tramos de 10 paradas.
+const POR_TRAMO = 10;
+const lugarEntrega = (e) => (e.lat != null && e.lon != null ? `${e.lat},${e.lon}` : `${e.calle} ${e.numero}, ${e.comuna_nombre}, Chile`);
+const lugarRetiro = (e) => `${e.retiro_calle} ${e.retiro_numero}, ${e.retiro_comuna_nombre}, Chile`;
+// Por retirar se va a la dirección de retiro; un reintento ya está retirado y va a la de entrega.
+const lugarParada = (e) => (e.estado === 'asignado' && e.retiro_calle ? lugarRetiro(e) : lugarEntrega(e));
+// Retiro reagendado para otro día: no entra en la ruta de hoy.
+const retiroOtroDia = (e) => e.estado === 'asignado' && e.retiro_fecha && e.retiro_fecha > hoyISO();
+
+export function tramosGoogleMaps(lugares) {
+  const unicos = lugares.filter((l, i) => l !== lugares[i - 1]); // varios paquetes en la misma dirección = una parada
+  const tramos = [];
+  for (let i = 0; i < unicos.length; i += POR_TRAMO) {
+    const t = unicos.slice(i, i + POR_TRAMO);
+    const u = new URLSearchParams({ api: '1', travelmode: 'driving', destination: t.at(-1) });
+    if (i) u.set('origin', unicos[i - 1]); // el tramo siguiente parte donde terminó el anterior
+    if (t.length > 1) u.set('waypoints', t.slice(0, -1).join('|'));
+    tramos.push({ url: `https://www.google.com/maps/dir/?${u}`, desde: i + 1, hasta: i + t.length });
+  }
+  return tramos;
+}
+
+function botonesMaps(lugares) {
+  const tramos = tramosGoogleMaps(lugares);
+  if (!tramos.length) return '';
+  if (tramos.length === 1) return html`<a class="btn chico" href="${tramos[0].url}" target="_blank" rel="noopener">Abrir ruta en Google Maps</a>`;
+  return html`<div class="fila">${tramos.map((t, n) => html`<a class="btn chico" href="${t.url}" target="_blank" rel="noopener">Maps tramo ${n + 1} (paradas ${t.desde}–${t.hasta})</a>`)}</div>`;
+}
 
 // ================= Ruta del día =================
 export async function ruta() {
@@ -54,10 +85,18 @@ export async function ruta() {
     return html`<div class="flechas-ruta"><button class="btn-icono" data-mover="${e.id}" data-paso="-1" aria-label="Subir parada ${i + 1}" ${i === 0 ? html`disabled` : ''}>▲</button>
     <span class="sub">${i + 1}</span><button class="btn-icono" data-mover="${e.id}" data-paso="1" aria-label="Bajar parada ${i + 1}" ${i === lista.length - 1 ? html`disabled` : ''}>▼</button></div>`;
   };
+  // Qué paquete va primero y cuál al final (pedido 07-10).
+  const ordinal = (e) => {
+    const l = seccionDe(e.id);
+    const i = l.indexOf(e.id);
+    if (l.length < 2) return '';
+    return i === l.length - 1 ? `${i + 1}.º · último` : `${i + 1}.º`;
+  };
   const tarjeta = (e) => html`<div class="parada">${flechas(e)}<a class="item-envio" href="${enlace(e)}">
-    <div><div class="fila"><span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
+    <div><div class="fila">${ordinal(e) ? html`<span class="badge orden-ruta">${ordinal(e)}</span>` : ''}<span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
       ${e.tipo_destino === 'punto_courier' ? html`<span class="badge e-asignado">${e.courier_empresa}</span>` : ''}</div>
       ${e.estado !== 'en_ruta' && e.retiro_calle ? html`<div class="sub">Retirar en: <b>${retiroTexto(e)}</b></div>` : ''}
+      ${e.estado === 'asignado' && e.retiro_fecha ? html`<div class="aviso alerta" style="margin-top:6px;padding:6px 10px">Retiro reagendado: <b>${fechaRetiroTexto(e)}</b></div>` : ''}
       <div style="font-size:1.05rem;font-weight:700">${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}</div>
       <div class="dir">${e.comuna_nombre.toUpperCase()} · ${e.destinatario_nombre}</div></div>
     <div class="der">${badge(e.estado)}${e.estado_pago !== 'pagado' ? html`<span class="badge e-pendiente">Sin pagar</span>` : ''}${e.intentos ? html`<span class="sub">Intento ${e.intentos + 1}/${app.conf.operacion.intentos_max}</span>` : ''}</div>
@@ -78,8 +117,9 @@ export async function ruta() {
     ${offline ? '' : html`<div class="grid g2" style="margin-bottom:16px">
       <button class="btn grande" id="escanear">Escanear etiqueta (QR)</button>
       <button class="btn sec grande" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente</button></div>`}
-    <div class="card"><h2>En ruta</h2><div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
-    <div class="card"><h2>Por retirar / reintentar</h2><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
+    <div class="card"><div class="card-titulo"><h2>En ruta</h2>${botonesMaps(enRuta.map(lugarEntrega))}</div>
+      ${enRuta.length > 1 ? html`<p class="sub" style="margin-bottom:10px">Entrega en este orden: primero el 1.º y al final el último. Toca "Ordenar ruta automáticamente" para recalcularlo desde donde estás.</p>` : ''}<div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
+    <div class="card"><div class="card-titulo"><h2>Por retirar / reintentar</h2>${botonesMaps(porRetirar.filter((e) => !retiroOtroDia(e)).map(lugarParada))}</div><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
     ${disponibles.autoasignacion || esAdmin ? html`<div class="card"><div class="card-titulo"><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
       <div class="lista-envios" id="lista-disponibles">${disponibles.items.length ? disponibles.items.slice(0, 10).map(libre) : vacio('No hay envíos nuevos por tomar.')}</div>
       ${disponibles.total > 10 ? html`<button class="btn sec ancho" id="ver-disponibles" style="margin-top:12px">Ver los ${disponibles.total - 10} restantes</button>` : ''}</div>`
@@ -155,6 +195,7 @@ export async function detalleRepartidor(id) {
       <div style="font-size:1.2rem;font-weight:800">${e.retiro_calle} ${e.retiro_numero}${e.retiro_depto ? ', ' + e.retiro_depto : ''}</div>
       <div style="font-size:1.3rem;font-weight:900">${String(e.retiro_comuna_nombre || '').toUpperCase()}</div>
       ${e.retiro_referencia ? html`<p class="sub">Ref.: ${e.retiro_referencia}</p>` : ''}
+      ${antesDeRetirar && e.retiro_fecha ? html`<div class="aviso alerta" style="margin-top:8px">El cliente reagendó el retiro para el <b>${fechaRetiroTexto(e)}</b>.</div>` : ''}
       <p>Remitente: <b>${e.cliente_nombre}</b>${e.cliente_telefono ? html` · <a href="tel:${e.cliente_telefono.replace(/\s/g, '')}">${e.cliente_telefono}</a>` : ''}</p>
       ${antesDeRetirar && e.mapas_retiro ? html`<div class="grid g2" style="margin-top:10px">
         <a class="btn blanco" href="${e.mapas_retiro.google}" target="_blank" rel="noopener">Ir a retirar (Google Maps)</a>

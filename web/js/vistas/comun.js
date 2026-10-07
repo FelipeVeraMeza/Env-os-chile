@@ -39,6 +39,12 @@ export function retiroTexto(e) {
   return `${e.retiro_calle} ${e.retiro_numero}${e.retiro_depto ? `, ${e.retiro_depto}` : ''} · ${e.retiro_comuna_nombre || ''}`;
 }
 
+// Día de retiro elegido al reagendar ("martes 14 de octubre"); sin fecha, rige el horario de retiro normal.
+export function fechaRetiroTexto(e) {
+  if (!e.retiro_fecha) return '';
+  return new Date(`${String(e.retiro_fecha).slice(0, 10)}T12:00:00Z`).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+}
+
 // Tamaño declarado ("Estándar" / "Sobredimensionado") o, en envíos antiguos, peso y medidas.
 export function textoPaquete(e) {
   const t = app.conf.tarifas;

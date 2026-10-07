@@ -227,10 +227,12 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--magenta-500); 
 .btn:hover { filter: brightness(1.08); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); box-shadow: none; }
-.btn.sec { background: var(--superficie-2); border-color: var(--borde); box-shadow: none; }
+/* Secundarios más visibles (pedido 07-10, p. ej. "Etiqueta 80 mm"): fondo más claro, borde marcado y sombra. */
+.btn.sec { background: rgba(255, 255, 255, .16); border: 1.5px solid rgba(248, 184, 218, .55); box-shadow: 0 4px 14px rgba(0, 0, 0, .28); }
+.btn.sec:hover { background: rgba(255, 255, 255, .24); border-color: var(--magenta-200); filter: none; }
 .btn.blanco { background: var(--blanco); color: var(--azul-900); box-shadow: 0 8px 20px rgba(0, 0, 0, .2); }
 .btn.azul { background: var(--azul-700); box-shadow: 0 8px 20px rgba(21, 55, 214, .4); }
-.btn.peligro { background: rgba(255, 107, 138, .16); border-color: rgba(255, 107, 138, .5); color: #ffd1dc; box-shadow: none; }
+.btn.peligro { background: rgba(255, 107, 138, .22); border: 1.5px solid rgba(255, 107, 138, .7); color: #ffd1dc; box-shadow: none; }
 .btn.grande { min-height: 58px; font-size: 1.05rem; border-radius: 16px; padding: 0 26px; }
 .btn.chico { min-height: 36px; padding: 0 12px; font-size: .85rem; border-radius: 10px; }
 .btn.ancho { width: 100%; }
@@ -492,3 +494,5 @@ input[type="file"]::file-selector-button {
 .flechas-ruta .btn-icono { width: 36px; height: 36px; font-size: .8rem; }
 /* Flecha de orden de ruta sin efecto (primera o última parada de su sección). */
 .flechas-ruta .btn-icono:disabled { opacity: .3; cursor: default; }
+/* Orden de entrega en la ruta del repartidor (pedido 07-10): 1.º … último. */
+.badge.orden-ruta { background: var(--degradado-btn); color: var(--blanco); font-weight: 800; }

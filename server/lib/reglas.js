@@ -71,6 +71,8 @@ export const CONFIG_POR_DEFECTO = {
     autoasignacion: true,
     // Envío a puntos de otras compañías (Blue Express, Starken…): en pausa por pedido del cliente (30-09).
     punto_courier: false,
+    // Horario de retiro que ve el cliente al crear un envío y en su inicio (pedido 07-10). Se edita en Tarifas y reglas.
+    horario_retiro: 'Agenda hasta las 23:59 y retiramos tu paquete al día siguiente entre las 9:00 y las 13:00 hrs.',
   },
   ticket: {
     pie: 'Conserve este ticket. Consultas y reclamos indicando el folio.',
@@ -114,6 +116,63 @@ export function validarMotivoRechazo(motivo) {
   if (!texto) throw new ErrorNegocio(422, 'Indica el motivo del rechazo', { motivo: 'Obligatorio: el cliente lo verá' });
   if (texto.length > 300) throw new ErrorNegocio(422, 'El motivo puede tener hasta 300 caracteres', { motivo: 'Máximo 300 caracteres' });
   return texto;
+}
+
+// ---------- Cambio de destino y reagendar el retiro (pedido 07-10) ----------
+
+// Antes de que el repartidor retire el paquete (después ya va en camino a la dirección de la etiqueta).
+export const ESTADOS_ANTES_DEL_RETIRO = ['creado', 'asignado'];
+export const MAX_CAMBIOS_CLIENTE = 3; // cambios de destino y reagendamientos que el cliente hace solo; después, administración
+export const DIAS_MAX_REAGENDAR = 14;
+
+const pesos = (n) => `$${Number(n).toLocaleString('es-CL')}`;
+
+function exigirAntesDelRetiro(envio, que) {
+  if (ESTADOS_ANTES_DEL_RETIRO.includes(envio.estado)) return;
+  if (['borrador', 'anulado'].includes(envio.estado)) throw new ErrorNegocio(409, `Este envío no está activo: no se puede ${que}`);
+  throw new ErrorNegocio(409, `El repartidor ya retiró el paquete: ya no se puede ${que}`);
+}
+
+// Se puede cambiar la dirección de destino mientras el paquete no se retira, aunque ya esté pagado. Pagado, el monto
+// no cambia: la nueva dirección no puede costar más (salvo que lo decida administración). Por pagar, la tarifa se actualiza.
+export function validarCambioDestino(envio, nuevaTarifa, { rol = 'cliente' } = {}) {
+  exigirAntesDelRetiro(envio, 'cambiar el destino');
+  if (envio.tipo_destino && envio.tipo_destino !== 'domicilio') throw new ErrorNegocio(409, 'Solo se cambia el destino de los envíos a domicilio');
+  if (envio.estado_pago === 'en_revision') throw new ErrorNegocio(409, 'Hay un comprobante de transferencia en revisión: espera a que administración lo revise para cambiar el destino');
+  if (rol !== 'admin' && (envio.destino_cambiado || 0) >= MAX_CAMBIOS_CLIENTE) {
+    throw new ErrorNegocio(409, `Ya cambiaste el destino ${MAX_CAMBIOS_CLIENTE} veces: pide a administración el cambio`);
+  }
+  const pagado = envio.estado_pago === 'pagado';
+  if (pagado && rol !== 'admin' && nuevaTarifa > envio.tarifa_total) {
+    throw new ErrorNegocio(409, `La nueva dirección cuesta ${pesos(nuevaTarifa)} y pagaste ${pesos(envio.tarifa_total)}: elige otra dirección o pide el cambio a administración`, { comuna_id: 'Tarifa mayor a lo pagado' });
+  }
+  return { actualizarTarifa: !pagado };
+}
+
+// Suma días a una fecha 'AAAA-MM-DD' (sin horas: no le afectan los cambios de horario).
+export function sumarDias(fecha, dias) {
+  const d = new Date(`${fecha}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+// Reagendar el retiro: el cliente elige otro día, desde mañana hasta 14 días más (el horario es el de retiro, 9 a 13 hrs).
+// El repartidor que lo tomó lo sigue teniendo y ve la nueva fecha. `hoy` es la fecha de Chile ('AAAA-MM-DD').
+export function validarReagendarRetiro(envio, fecha, { hoy, rol = 'cliente' }) {
+  exigirAntesDelRetiro(envio, 'reagendar el retiro');
+  const f = String(fecha ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || Number.isNaN(Date.parse(`${f}T00:00:00Z`)) || new Date(`${f}T00:00:00Z`).toISOString().slice(0, 10) !== f) {
+    throw new ErrorNegocio(422, 'Elige el día del retiro', { fecha: 'Fecha inválida' });
+  }
+  const minimo = sumarDias(hoy, 1);
+  const maximo = sumarDias(hoy, DIAS_MAX_REAGENDAR);
+  if (f < minimo) throw new ErrorNegocio(422, 'El retiro se agenda desde mañana', { fecha: 'Desde mañana' });
+  if (f > maximo) throw new ErrorNegocio(422, `El retiro se puede reagendar hasta ${DIAS_MAX_REAGENDAR} días adelante`, { fecha: `Hasta ${DIAS_MAX_REAGENDAR} días` });
+  if (envio.retiro_fecha && String(envio.retiro_fecha).slice(0, 10) === f) throw new ErrorNegocio(422, 'El retiro ya está agendado para ese día', { fecha: 'Mismo día' });
+  if (rol !== 'admin' && (envio.retiro_reagendado || 0) >= MAX_CAMBIOS_CLIENTE) {
+    throw new ErrorNegocio(409, `Ya reagendaste el retiro ${MAX_CAMBIOS_CLIENTE} veces: pide a administración el cambio`);
+  }
+  return f;
 }
 
 export class ErrorNegocio extends Error {
@@ -409,7 +468,7 @@ export function validarReclamo({ envio, boleta, datos, reclamosPrevios = [], aho
   }
 
   const errores = {};
-  if (!boleta) errores.boleta = 'La boleta es obligatoria para cobrar el seguro';
+  if (!boleta) errores.boleta = 'La boleta es obligatoria para la gestión del seguro';
   else if (!MIME_BOLETA.includes(boleta.mime)) errores.boleta = 'La boleta debe ser PDF, JPG, PNG o WebP';
 
   if (!MOTIVOS_RECLAMO[datos.motivo]) errores.motivo = 'Selecciona el motivo';

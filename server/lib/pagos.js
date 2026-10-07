@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
-import { transaccion, uno } from '../db/pool.js';
+import { config } from '../config.js';
+import { query, transaccion, uno } from '../db/pool.js';
 import { estimarCosto, fechaAbonoEstimada, PROVEEDORES_PAGO, verificarConfirmacion } from './cobranza.js';
 import { leerConfig } from './configuracion.js';
+import { correoConfigurado, enviarCorreo } from './correo.js';
 import { ErrorNegocio } from './reglas.js';
 import { registrarEvento } from './seguridad.js';
 
@@ -205,6 +207,35 @@ export async function rechazarComprobante(pagoId, { motivo, usuarioId }) {
     for (const id of await pagosDelLote(db, pagoId)) envioIds.push(await rechazarUno(db, id, { motivo, usuarioId }));
     return envioIds;
   });
+}
+
+// Aviso por correo al cliente cuando administración revisa su comprobante (solo con SMTP configurado). Un carrito
+// manda un solo correo con todos sus folios. Si el correo falla, la revisión ya quedó hecha: solo se registra.
+export async function avisarRevisionComprobante(envioIds, { aprobado, motivo }) {
+  if (!correoConfigurado() || !envioIds?.length) return 0;
+  const conf = await leerConfig();
+  const { rows } = await query(
+    `SELECT u.correo, u.nombre, array_agg(e.folio ORDER BY e.id) AS folios, array_agg(e.id ORDER BY e.id) AS ids, sum(e.tarifa_total)::int AS total
+       FROM envio e JOIN usuario u ON u.id = e.cliente_id
+      WHERE e.id = ANY($1) AND u.correo IS NOT NULL GROUP BY u.correo, u.nombre`, [envioIds]);
+  let enviados = 0;
+  for (const c of rows) {
+    const folios = c.folios.join(', ');
+    const monto = `$${Number(c.total).toLocaleString('es-CL')}`;
+    const enlace = `${config.publicBaseUrl}/#/${c.ids.length === 1 ? `envio/${c.ids[0]}` : aprobado ? 'envios' : 'carrito'}`;
+    const texto = aprobado
+      ? `Hola ${c.nombre}:\n\nAprobamos tu transferencia de ${monto}. ${c.folios.length > 1 ? `Los envíos ${folios} quedaron pagados` : `El envío ${folios} quedó pagado`} y el repartidor ya puede retirarlo.\n\nVer en la app: ${enlace}\n`
+      : `Hola ${c.nombre}:\n\nNo pudimos aprobar el comprobante de transferencia de ${c.folios.length > 1 ? `los envíos ${folios}` : `tu envío ${folios}`} (${monto}).\n\nMotivo: ${motivo}\n\nSube un comprobante nuevo desde la app (Por pagar): ${enlace}\nRecuerda que un envío sin pagar se anula solo ${config.horasSinPago} horas después de creado.\n`;
+    try {
+      await enviarCorreo({
+        para: c.correo,
+        asunto: aprobado ? `${conf.negocio.nombre}: pago aprobado (${folios})` : `${conf.negocio.nombre}: comprobante rechazado (${folios})`,
+        texto,
+      });
+      enviados += 1;
+    } catch (err) { console.error(`[correo] no se pudo avisar la revisión de ${folios}:`, err.message); }
+  }
+  return enviados;
 }
 
 async function rechazarUno(db, pagoId, { motivo, usuarioId }) {

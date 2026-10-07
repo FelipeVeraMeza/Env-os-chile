@@ -53,7 +53,7 @@ const entrar = conLogin ? `
   <b>Cerrar sesión en mis otros dispositivos</b> (por ejemplo si perdiste el teléfono o entraste en un computador ajeno) y <b>Cerrar sesión</b>.
   Al cambiar la contraseña también se cierran tus sesiones en otros dispositivos.</p>
   ${par(img('cuenta', 'Menú Mi cuenta', 'movil'), img('obligatorio', 'Primer ingreso: crear la contraseña propia', 'movil'))}
-  ${nota('El <b>seguimiento por folio</b> no necesita sesión: el enlace "Seguir un envío con su folio" está en la misma pantalla de ingreso.')}
+  ${nota('El <b>seguimiento por folio</b> no necesita sesión: el enlace "Seguimiento de envío" está en la misma pantalla de ingreso.')}
   ${nota('Las cuentas las crea el administrador (sección <b>Usuarios</b>). No hay registro público.')}`
   : `
   <h2 id="entrar">1.3 Cómo entrar (versión de demostración)</h2>
@@ -131,7 +131,7 @@ ${tabla(['Regla', 'Detalle'], [
   ['Foto y GPS', 'Toda entrega exige <b>foto</b>' + (op.gps_obligatorio ? ' y <b>ubicación GPS</b>' : '') + '.'],
   ['Espera máxima', `Tras pulsar "Llegué", el repartidor espera hasta <b>${op.espera_max_min} minutos</b>; recién ahí puede usar el motivo "espera excedida".`],
   ['Intentos', `Máximo <b>${op.intentos_max} intentos</b> de entrega; después corresponde devolver.`],
-  ['Seguro', 'Para cobrar el seguro la <b>boleta de compra es obligatoria</b>; el monto no supera el valor declarado ni la boleta.'],
+  ['Seguro', 'Para la gestión del seguro la <b>boleta de compra es obligatoria</b>; el monto no supera el valor declarado ni la boleta.'],
   ['Privacidad', 'El repartidor no ve montos; el seguimiento público no muestra nombres ni teléfonos; las fotos no guardan la ubicación del teléfono.'],
 ])}
 
@@ -151,7 +151,7 @@ ${par(img('c-nuevo-1', 'Paso 1: destinatario nuevo', 'movil'), img('c-nuevo-2', 
 <h3>Paso 3 · Paquete</h3>
 <p>Describe el producto e indica <b>bultos</b>, <b>peso por bulto</b> (kg) y <b>medidas</b> en centímetros enteros. La tarifa se calcula al instante.
 En <b>Seguro del envío</b> escribe el <b>valor declarado</b> (tope de la indemnización) y, si la tienes, adjunta la <b>boleta de compra</b>
-(la necesitarás para cobrar el seguro; también puedes subirla después). Marca <b>Envío especial por horario</b> si necesitas una franja (+${clp(t.recargo_horario_especial)}).
+(la necesitarás para la gestión del seguro; también puedes subirla después). Marca <b>Envío especial por horario</b> si necesitas una franja (+${clp(t.recargo_horario_especial)}).
 Opcional: foto del paquete y observaciones (por ejemplo "frágil").</p>
 <h3>Paso 4 · Confirmar</h3>
 <p>Revisa el resumen y la tarifa y pulsa <b>Confirmar envío</b>. Se asigna el folio y aparece la pantalla de éxito.</p>

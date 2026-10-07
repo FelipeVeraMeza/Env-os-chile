@@ -4,7 +4,7 @@ import { auditar, falla, idNumerico, rangoFechas, ruta } from '../lib/http.js';
 import { compararProveedores, PROVEEDORES_PAGO, SIN_ABONO, validarConciliacion } from '../lib/cobranza.js';
 import { leerConfig } from '../lib/configuracion.js';
 import { firmarEnlace } from '../lib/archivos.js';
-import { aprobarComprobante, rechazarComprobante, registrarEventoPago } from '../lib/pagos.js';
+import { aprobarComprobante, avisarRevisionComprobante, rechazarComprobante, registrarEventoPago } from '../lib/pagos.js';
 import { validarMotivoRechazo } from '../lib/reglas.js';
 import { autenticar, requiereRol } from '../middleware/auth.js';
 
@@ -88,6 +88,8 @@ cobranza.post('/comprobantes/:id/aprobar', ruta(async (req, res) => {
   const referencia = String(req.body?.referencia || '').trim().slice(0, 60) || null;
   const envioIds = await aprobarComprobante(id, { referencia, usuarioId: req.usuario.id });
   for (const envioId of envioIds) await auditar(req, 'aprobar_comprobante', 'envio', envioId, { pago_id: id, referencia });
+  // El correo al cliente no se espera: un SMTP lento no hace esperar a administración.
+  avisarRevisionComprobante(envioIds, { aprobado: true }).catch((err) => console.error('[correo]', err.message));
   res.json({ estado: 'aprobado', envio_id: envioIds[0], envio_ids: envioIds });
 }));
 
@@ -96,6 +98,7 @@ cobranza.post('/comprobantes/:id/rechazar', ruta(async (req, res) => {
   const motivo = validarMotivoRechazo(req.body?.motivo);
   const envioIds = await rechazarComprobante(id, { motivo, usuarioId: req.usuario.id });
   for (const envioId of envioIds) await auditar(req, 'rechazar_comprobante', 'envio', envioId, { pago_id: id, motivo });
+  avisarRevisionComprobante(envioIds, { aprobado: false, motivo }).catch((err) => console.error('[correo]', err.message));
   res.json({ estado: 'rechazado', envio_id: envioIds[0], envio_ids: envioIds });
 }));
 

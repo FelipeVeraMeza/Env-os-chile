@@ -13,6 +13,14 @@ function errorRango(vista, err, reintentar) {
   errorToast(err);
 }
 
+// Solo se paga por transferencia: sin banco y N° de cuenta el cliente no sabe dónde transferir. Se avisa en el
+// panel y en Cobranza hasta que administración los cargue en Ajustes.
+function avisoCuentaTransferencia() {
+  const t = app.conf.transferencia || {};
+  if (t.banco && t.numero_cuenta) return '';
+  return html`<a class="aviso alerta" href="#/ajustes" style="display:block;margin-bottom:16px;color:inherit;text-decoration:none"><b>Falta la cuenta para transferencias.</b> Los clientes pagan solo por transferencia y hoy no ven a qué cuenta transferir: carga el banco y el N° de cuenta → Ir a Ajustes</a>`;
+}
+
 // ================= Panel de ganancias =================
 export async function panel(rango = {}) {
   const vista = $('#vista');
@@ -20,15 +28,17 @@ export async function panel(rango = {}) {
   const desde = rango.desde || `${hoy.slice(0, 8)}01`;
   const hasta = rango.hasta || hoy;
   montar(vista, esqueleto(4));
-  let g; let pendientes; let reclamosAbiertos; let comprobantes;
+  let g; let pendientes; let reclamosAbiertos; let comprobantes; let usuariosLista;
   try {
-    [g, pendientes, reclamosAbiertos, comprobantes] = await Promise.all([
+    [g, pendientes, reclamosAbiertos, comprobantes, usuariosLista] = await Promise.all([
       get(`/api/reportes/ganancias?desde=${desde}&hasta=${hasta}`),
       get('/api/envios?estado=creado&repartidor_id=sin&limite=5'),
       get('/api/reclamos?estado=solicitado'),
       get('/api/cobranza/comprobantes').catch(() => []),
+      app.conf.auth_mode === 'jwt' ? get('/api/usuarios').catch(() => []) : [],
     ]);
   } catch (err) { return errorRango(vista, err, () => panel()); }
+  const pidieronClave = usuariosLista.filter((u) => u.pidio_clave_en && u.activo);
   const estados = Object.fromEntries(g.por_estado.map((r) => [r.estado, r.n]));
 
   montar(vista, html`
@@ -38,6 +48,8 @@ export async function panel(rango = {}) {
         <label class="campo">Hasta<input type="date" name="hasta" value="${hasta}" max="${hoy}"></label>
         <div class="fila" style="align-self:flex-end"><button type="button" class="btn sec chico" data-r="hoy">Hoy</button><button type="button" class="btn sec chico" data-r="mes">Mes</button></div>
       </form></div>
+    ${avisoCuentaTransferencia()}
+    ${pidieronClave.length ? html`<a class="aviso magenta" href="#/usuarios" style="display:block;margin-bottom:16px;color:inherit;text-decoration:none"><b>${pidieronClave.length} persona(s) pidieron recuperar su contraseña</b> (${pidieronClave.map((u) => u.nombre).join(', ')}). Envíales el enlace por WhatsApp → Ir a Usuarios</a>` : ''}
     ${comprobantes.length ? html`<a class="aviso magenta" href="#/cobranza" style="display:block;margin-bottom:16px;color:inherit;text-decoration:none"><b>${comprobantes.length} comprobante(s) de transferencia por revisar.</b> Esos envíos no se pueden asignar ni retirar hasta que apruebes el pago → Ir a Cobranza</a>` : ''}
     <div class="grid g4">
       <div class="kpi destacado"><div class="etiqueta">Ganancia neta</div><div class="valor">${clp(g.neto)}</div><div class="nota">${fecha(g.desde)} – ${fecha(g.hasta)}</div></div>
@@ -155,7 +167,8 @@ export async function tarifas() {
         <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="punto_courier" ${op.punto_courier ? html`checked` : ''}> Envío a puntos de otras compañías (Blue Express, Starken…)</label>
         <p class="muted">Desactivado = en pausa: los clientes solo pueden elegir entrega a domicilio.</p>
         <p class="muted">La foto de entrega es siempre obligatoria.</p>
-        <button class="btn" style="margin-top:6px">Guardar reglas</button>
+        <label class="campo" style="margin-top:10px">Horario de retiro <small>(lo ve el cliente al crear un envío y en su inicio)</small><input name="horario_retiro" maxlength="200" value="${op.horario_retiro || ''}"></label>
+        <button class="btn" style="margin-top:10px">Guardar reglas</button>
       </form>
     </div>
     <div class="card">
@@ -215,15 +228,17 @@ export async function usuarios() {
   montar(vista, esqueleto(3));
   const conSesion = app.conf.auth_mode === 'jwt';
   const lista = (await get('/api/usuarios')).filter((u) => !u.correo.startsWith('qa-'));
+  const pidieron = lista.filter((u) => u.pidio_clave_en && u.activo);
   montar(vista, html`
     <div class="encabezado"><div><h1>Usuarios</h1><p>Tres perfiles: administrador (también puede repartir), cliente y repartidor. Los clientes se registran solos; aquí puedes cambiar el perfil de cada uno.${conSesion ? ' Cada persona entra con su correo y contraseña.' : ''}</p></div>
       <button class="btn" id="nuevo-u">${icono('nuevo')} Nuevo usuario</button></div>
+    ${conSesion && pidieron.length ? html`<div class="aviso magenta" style="margin-bottom:16px"><b>${pidieron.length} persona(s) pidieron recuperar su contraseña:</b> ${pidieron.map((u) => u.nombre).join(', ')}. Toca <b>Enlace</b> en su fila y envíaselo por WhatsApp.${app.conf.recuperacion_por_correo ? '' : ' (El correo automático no está configurado: por eso no les llegó nada.)'}</div>` : ''}
     <div class="tabla-wrap"><table class="tabla-cards"><thead><tr><th>Nombre y correo</th><th>Perfil</th><th>Teléfono</th><th>Último acceso</th><th>Estado</th><th></th></tr></thead>
       <tbody>${lista.map((u) => html`<tr><td data-label="Nombre"><b>${u.nombre}</b>${u.id === app.usuario.id ? html` <span class="muted">(tú)</span>` : ''}<div class="sub">${u.correo}</div></td>
         <td data-label="Perfil">${u.id === app.usuario.id ? html`<span class="badge e-en_ruta">${ROL[u.rol]}</span>`
           : html`<select data-rol="${u.id}" aria-label="Perfil de ${u.nombre}" style="min-height:36px;padding:4px 8px">${Object.entries(ROL).map(([k, v]) => html`<option value="${k}" ${u.rol === k ? html`selected` : ''}>${v}</option>`)}</select>`}</td>
         <td data-label="Teléfono">${u.telefono || '—'}</td>
-        <td data-label="Último acceso" class="sub">${u.ultimo_acceso ? fechaHora(u.ultimo_acceso) : 'Nunca'}${!u.tiene_clave ? html`<div><span class="badge e-pendiente">Sin contraseña</span></div>` : u.debe_cambiar_clave ? html`<div class="muted">Debe cambiar su clave</div>` : ''}</td>
+        <td data-label="Último acceso" class="sub">${u.ultimo_acceso ? fechaHora(u.ultimo_acceso) : 'Nunca'}${u.pidio_clave_en && u.activo ? html`<div><span class="badge e-pendiente">Pidió nueva contraseña</span></div>` : ''}${!u.tiene_clave ? html`<div><span class="badge e-pendiente">Sin contraseña</span></div>` : u.debe_cambiar_clave ? html`<div class="muted">Debe cambiar su clave</div>` : ''}</td>
         <td data-label="Estado">${u.activo ? html`<span class="badge e-entregado">Activo</span>` : html`<span class="badge e-anulado">Inactivo</span>`}</td>
         <td data-label=""><div class="fila"><button class="btn sec chico" data-clave="${u.id}">Contraseña</button>
           ${conSesion && u.activo ? html`<button class="btn sec chico" data-enlace="${u.id}" title="Enlace de un solo uso para que la persona cree su contraseña">Enlace</button>` : ''}
@@ -322,6 +337,7 @@ const ACCIONES = {
   llegada: 'Marcó llegada', adjuntar: 'Adjuntó archivo', iniciar_pago: 'Inició pago', pago_manual: 'Registró pago manual',
   revisar: 'Revisó reclamo', pagar: 'Pagó reclamo', pago_aprobado: 'Pago aprobado', pago_rechazado: 'Pago rechazado', login: 'Inició sesión', qr_escaneado: 'QR escaneado',
   comprobante_pago: 'Subió comprobante de transferencia', aprobar_comprobante: 'Aprobó comprobante', rechazar_comprobante: 'Rechazó comprobante',
+  ocultar_anulado: 'Cliente eliminó el anulado de su lista',
 };
 export async function ajustes() {
   const vista = $('#vista');
@@ -489,6 +505,7 @@ export async function cobranza(rango = {}) {
         <label class="campo">Desde<input type="date" name="desde" value="${desde}" max="${hoy}"></label>
         <label class="campo">Hasta<input type="date" name="hasta" value="${hasta}" max="${hoy}"></label>
       </form></div>
+    ${avisoCuentaTransferencia()}
     <div class="grid g4">
       <div class="kpi destacado"><div class="etiqueta">Cobrado (verificado)</div><div class="valor">${clp(r.cobrado.bruto)}</div><div class="nota">${r.cobrado.pagos} pagos · neto ${clp(r.cobrado.neto)}${r.reembolsos?.monto ? ` · reembolsado ${clp(r.reembolsos.monto)}` : ''}</div></div>
       <div class="kpi"><div class="etiqueta">Comisiones de pago</div><div class="valor">${clp(r.cobrado.comision)}</div><div class="nota">${r.cobrado.bruto ? ((r.cobrado.comision / r.cobrado.bruto) * 100).toFixed(2) : '0.00'}% de lo cobrado</div></div>

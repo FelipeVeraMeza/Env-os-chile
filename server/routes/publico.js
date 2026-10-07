@@ -16,7 +16,9 @@ seguimiento.get('/:folio', ruta(async (req, res) => {
             e.horario_especial, e.franja_horaria, c.nombre AS comuna
      FROM envio e JOIN comuna c ON c.id = e.comuna_id WHERE e.folio = $1`, [folio]);
   if (!e) throw falla(404, 'No encontramos un envío con ese folio');
-  const { rows } = await query('SELECT estado_nuevo AS estado, fecha FROM envio_estado WHERE envio_id = $1 ORDER BY fecha, id', [e.id]);
+  // Sin los avisos que no cambian el estado (cambio de destino, retiro reagendado): no son públicos.
+  const { rows } = await query(
+    'SELECT estado_nuevo AS estado, fecha FROM envio_estado WHERE envio_id = $1 AND estado_anterior IS DISTINCT FROM estado_nuevo ORDER BY fecha, id', [e.id]);
   const conf = await leerConfig();
   delete e.id;
   res.json({ ...e, estado_label: ESTADOS[e.estado], intentos_max: conf.operacion.intentos_max, historial: rows.map((h) => ({ ...h, label: ESTADOS[h.estado] })) });

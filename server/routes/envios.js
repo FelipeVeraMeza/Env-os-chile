@@ -6,7 +6,8 @@ import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, patronBusque
 import { leerConfig } from '../lib/configuracion.js';
 import {
   calcularTarifa, normalizarRut, normalizarTelefono, rolPuedeTransicionar, validarDestinatario, validarDestino, vistaDisponible,
-  validarDireccion, validarPaquete, validarRetiro, validarSubidaComprobante, validarTransicion, validarUbicacion, ESTADOS, LIMITES, MIME_COMPROBANTE, TAMANOS,
+  validarCambioDestino, validarDireccion, validarPaquete, validarReagendarRetiro, validarRetiro, validarSubidaComprobante, validarTransicion, validarUbicacion,
+  ESTADOS, LIMITES, MIME_COMPROBANTE, TAMANOS,
 } from '../lib/reglas.js';
 import {
   cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, puedeVerTicket, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
@@ -244,6 +245,8 @@ async function confirmar(db, envioId, usuarioId) {
 // Listado con búsqueda, filtros y paginación (RF-27 a RF-29).
 const TZ = "AT TIME ZONE 'America/Santiago'";
 const hoyChile = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+// Cuándo se anuló el envío (último cambio a "anulado" en su historial).
+const ANULADO_EN = "COALESCE((SELECT max(h.fecha) FROM envio_estado h WHERE h.envio_id = e.id AND h.estado_nuevo = 'anulado'), e.actualizado_en)";
 
 function filtrosListado(req) {
   const q = req.query;
@@ -251,7 +254,11 @@ function filtrosListado(req) {
   const params = [];
   const p = (v) => { params.push(v); return `$${params.length}`; };
   const idFiltro = (v, nombre) => { const n = Number(v); if (!Number.isInteger(n) || n <= 0) throw falla(400, `${nombre} inválido`); return n; };
-  if (req.usuario.rol === 'cliente') cond.push(`e.cliente_id = ${p(req.usuario.id)}`);
+  if (req.usuario.rol === 'cliente') {
+    cond.push(`e.cliente_id = ${p(req.usuario.id)}`);
+    // Los anulados desaparecen de la cuenta del cliente 24 h después de anularse, o antes si los elimina (pedido 07-10).
+    cond.push(`NOT (e.estado = 'anulado' AND (e.oculto_cliente_en IS NOT NULL OR ${ANULADO_EN} < now() - interval '24 hours'))`);
+  }
   if (req.usuario.rol === 'repartidor') cond.push(`e.repartidor_id = ${p(req.usuario.id)}`);
   if (q.estado) cond.push(`e.estado = ANY(${p(String(q.estado).split(','))})`);
   if (q.estado_pago) cond.push(`e.estado_pago = ${p(String(q.estado_pago))}`);
@@ -408,7 +415,7 @@ envios.post('/ruta/optimizar', requiereRol('repartidor', 'admin'), ruta(async (r
   const lon = Number(req.body?.lon);
   const inicio = req.body?.lat != null && req.body?.lon != null && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? [lat, lon] : null;
   const { rows } = await query(
-    `SELECT e.id, e.estado, di.lat, di.lon, di.calle, c.nombre AS comuna, e.retiro_calle, rc.nombre AS retiro_comuna
+    `SELECT e.id, e.estado, di.lat, di.lon, di.calle, c.nombre AS comuna, e.retiro_calle, rc.nombre AS retiro_comuna, e.retiro_fecha
        FROM envio e JOIN direccion di ON di.id = e.direccion_id JOIN comuna c ON c.id = e.comuna_id
        LEFT JOIN comuna rc ON rc.id = e.retiro_comuna_id
       WHERE e.repartidor_id = $1 AND e.estado = ANY($2) ORDER BY e.id LIMIT 200`, [req.usuario.id, EN_RUTA_REPARTIDOR]);
@@ -416,9 +423,13 @@ envios.post('/ruta/optimizar', requiereRol('repartidor', 'admin'), ruta(async (r
   const parada = (e) => (e.estado === 'asignado' && e.retiro_calle
     ? { id: e.id, comuna: e.retiro_comuna, calle: e.retiro_calle }
     : { id: e.id, lat: e.lat, lon: e.lon, comuna: e.comuna, calle: e.calle });
+  // Los retiros reagendados para otro día (pedido 07-10) no entran en la ruta de hoy: van al final, por fecha.
+  const hoy = hoyChile();
+  const otroDia = (e) => e.estado === 'asignado' && e.retiro_fecha && e.retiro_fecha > hoy;
   const ids = [
     ...optimizarRuta(rows.filter((e) => e.estado === 'en_ruta').map(parada), inicio),
-    ...optimizarRuta(rows.filter((e) => e.estado !== 'en_ruta').map(parada), inicio),
+    ...optimizarRuta(rows.filter((e) => e.estado !== 'en_ruta' && !otroDia(e)).map(parada), inicio),
+    ...rows.filter(otroDia).sort((a, b) => a.retiro_fecha.localeCompare(b.retiro_fecha) || a.id - b.id).map((e) => e.id),
   ];
   if (ids.length) await guardarOrden(ids, req.usuario.id);
   res.json({ ok: true, ids, con_gps: Boolean(inicio) });
@@ -553,10 +564,122 @@ envios.post('/:id/reactivar', requiereRol('admin'), ruta(async (req, res) => {
   if (envio.estado_pago !== 'pendiente') throw falla(409, 'El pago de este envío ya no está pendiente');
   await transaccion(async (db) => {
     exigirSinConflicto(await db.query(
-      "UPDATE envio SET estado = 'creado', reactivado_en = now(), aviso_vencimiento_en = NULL, actualizado_en = now() WHERE id = $1 AND estado = 'anulado'", [envio.id]));
+      "UPDATE envio SET estado = 'creado', reactivado_en = now(), aviso_vencimiento_en = NULL, oculto_cliente_en = NULL, actualizado_en = now() WHERE id = $1 AND estado = 'anulado'", [envio.id]));
     await registrarEstado(db, { envioId: envio.id, anterior: 'anulado', nuevo: 'creado', motivo: `Reactivado por administración: tiene ${config.horasSinPago} horas más para pagar`, usuarioId: req.usuario.id });
   });
   await auditar(req, 'reactivar', 'envio', envio.id);
+  res.json(presentar(await cargarEnvio(envio.id), req.usuario));
+}));
+
+// El cliente elimina de su cuenta un envío anulado (pedido 07-10). Solo se oculta: administración lo sigue viendo.
+envios.post('/:id/ocultar', requiereRol('cliente'), ruta(async (req, res) => {
+  const envio = await envioAccesible(req);
+  if (envio.estado !== 'anulado') throw falla(409, 'Solo se pueden eliminar los envíos anulados');
+  await query('UPDATE envio SET oculto_cliente_en = now() WHERE id = $1 AND oculto_cliente_en IS NULL', [envio.id]);
+  await auditar(req, 'ocultar_anulado', 'envio', envio.id);
+  res.json({ ok: true });
+}));
+
+// ---------- Cambiar el destino antes del retiro (pedido 07-10) ----------
+// El cliente (o administración) elige otra dirección guardada del mismo destinatario o escribe una nueva. Se puede aunque
+// el envío esté pagado, mientras el repartidor no haya retirado el paquete. Queda en el historial y hay que reimprimir la etiqueta.
+const clpTexto = (n) => `$${Number(n).toLocaleString('es-CL')}`;
+const textoDireccion = (d, comuna) => `${d.calle} ${d.numero}${d.depto ? `, ${d.depto}` : ''}, ${comuna}`;
+
+envios.post('/:id/cambiar-destino', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
+  const envio = await envioAccesible(req);
+  const b = req.body || {};
+  const conf = await leerConfig();
+  const rol = req.usuario.rol;
+  // Primero lo que no depende de la dirección nueva (estado, pago, cambios hechos): se responde sin pedir datos de más.
+  validarCambioDestino(envio, 0, { rol });
+
+  let nueva = null; // dirección guardada elegida
+  let coords = null;
+  let comunaId;
+  if (b.direccion_id) {
+    nueva = await uno('SELECT * FROM direccion WHERE id = $1 AND destinatario_id = $2 AND activa', [Number(b.direccion_id) || 0, envio.destinatario_id]);
+    if (!nueva) throw falla(422, 'Esa dirección no es de este destinatario', { direccion_id: 'Dirección no encontrada' });
+    if (nueva.id === envio.direccion_id) throw falla(422, 'El envío ya va a esa dirección', { direccion_id: 'Es la dirección actual' });
+    comunaId = nueva.comuna_id;
+  } else {
+    const d = b.direccion && typeof b.direccion === 'object' ? b.direccion : {};
+    const errores = prefijar('direccion', validarDireccion(d));
+    try { coords = validarUbicacion({ lat: d.lat, lon: d.lon }, false); } catch { errores['direccion.lat'] = 'Coordenadas GPS inválidas'; }
+    exigirSinErrores(errores);
+    comunaId = Number(d.comuna_id);
+  }
+  const comuna = await tarifaDeComuna(Number(comunaId));
+  if (!comuna) throw falla(422, 'Comuna inexistente', { 'direccion.comuna_id': 'Comuna inexistente' });
+  if (!comuna.en_cobertura) throw falla(422, `${comuna.nombre} está fuera de la zona de cobertura`, { 'direccion.comuna_id': 'Fuera de cobertura' });
+  // Misma comuna: el precio no cambia. Otra comuna: se recalcula con la tarifa de la nueva (mismos recargos del paquete).
+  const tarifa = Number(comunaId) === envio.comuna_id
+    ? { tarifa_base: envio.tarifa_base, recargo_bultos: envio.recargo_bultos, recargo_sobredimension: envio.recargo_sobredimension, recargo_horario: envio.recargo_horario, tarifa_total: envio.tarifa_total }
+    : calcularTarifa(envio, conf.tarifas, comuna.tarifa);
+
+  const resultado = await transaccion(async (db) => {
+    // Se relee bloqueado: si mientras tanto el repartidor lo retiró o cambió el pago, se aplica la regla con lo actual.
+    const { rows: [actual] } = await db.query('SELECT * FROM envio WHERE id = $1 FOR UPDATE', [envio.id]);
+    const { actualizarTarifa } = validarCambioDestino(actual, tarifa.tarifa_total, { rol });
+    let direccionId = nueva?.id;
+    if (!direccionId) {
+      const d = b.direccion;
+      const { rows: [igual] } = await db.query(
+        `SELECT id FROM direccion WHERE destinatario_id = $1 AND activa AND comuna_id = $2 AND lower(btrim(calle)) = lower($3)
+           AND lower(btrim(numero)) = lower($4) AND lower(COALESCE(btrim(depto), '')) = lower($5) ORDER BY id LIMIT 1`,
+        [actual.destinatario_id, Number(comunaId), String(d.calle).trim(), String(d.numero).trim(), String(d.depto || '').trim()]);
+      if (igual?.id === actual.direccion_id) throw falla(422, 'El envío ya va a esa dirección', { 'direccion.calle': 'Es la dirección actual' });
+      if (igual) direccionId = igual.id;
+      else {
+        const { rows: [creada] } = await db.query(
+          `INSERT INTO direccion (destinatario_id, calle, numero, depto, referencia, comuna_id, lat, lon)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+          [actual.destinatario_id, String(d.calle).trim(), String(d.numero).trim(), String(d.depto || '').trim() || null,
+            String(d.referencia || '').trim() || null, Number(comunaId), coords?.lat ?? null, coords?.lon ?? null]);
+        direccionId = creada.id;
+      }
+    }
+    const { rows: [anterior] } = await db.query(
+      'SELECT di.calle, di.numero, di.depto, c.nombre AS comuna FROM direccion di JOIN comuna c ON c.id = di.comuna_id WHERE di.id = $1', [actual.direccion_id]);
+    const { rows: [nuevaDir] } = await db.query(
+      'SELECT di.calle, di.numero, di.depto, c.nombre AS comuna FROM direccion di JOIN comuna c ON c.id = di.comuna_id WHERE di.id = $1', [direccionId]);
+    const cambiaMonto = actualizarTarifa && tarifa.tarifa_total !== actual.tarifa_total;
+    await db.query(
+      `UPDATE envio SET direccion_id = $1, comuna_id = $2, destino_cambiado = destino_cambiado + 1, orden_ruta = NULL, actualizado_en = now()
+         ${actualizarTarifa ? ', tarifa_base = $4, recargo_sobredimension = $5, recargo_horario = $6, tarifa_total = $7' : ''}
+       WHERE id = $3`,
+      actualizarTarifa
+        ? [direccionId, Number(comunaId), actual.id, tarifa.tarifa_base, tarifa.recargo_sobredimension, tarifa.recargo_horario, tarifa.tarifa_total]
+        : [direccionId, Number(comunaId), actual.id]);
+    // Un cobro abierto por el monto anterior ya no sirve.
+    if (cambiaMonto) await cerrarCobrosAbiertos(db, actual.id, 'Cambió la dirección de destino y con ella el monto');
+    const motivo = `Destino cambiado: ${textoDireccion(anterior, anterior.comuna)} → ${textoDireccion(nuevaDir, nuevaDir.comuna)}`
+      + (cambiaMonto ? ` (nuevo monto ${clpTexto(tarifa.tarifa_total)})` : '');
+    await registrarEstado(db, { envioId: actual.id, anterior: actual.estado, nuevo: actual.estado, motivo, usuarioId: req.usuario.id });
+    return { cambiaMonto, antes: actual.tarifa_total };
+  });
+  await auditar(req, 'cambiar_destino', 'envio', envio.id, { direccion_id: Number(b.direccion_id) || null, monto_anterior: resultado.antes });
+  res.json({ ...presentar(await cargarEnvio(envio.id), req.usuario), cambio_monto: resultado.cambiaMonto });
+}));
+
+// ---------- Reagendar el retiro (pedido 07-10) ----------
+// Con el repartidor ya asignado (o antes), el cliente elige otro día de retiro. El repartidor lo sigue teniendo y ve la fecha.
+const fechaLarga = (f) => new Date(`${f}T12:00:00Z`).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+
+envios.post('/:id/reagendar-retiro', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
+  const envio = await envioAccesible(req);
+  const rol = req.usuario.rol;
+  validarReagendarRetiro(envio, req.body?.fecha, { hoy: hoyChile(), rol });
+  const fecha = await transaccion(async (db) => {
+    const { rows: [actual] } = await db.query('SELECT * FROM envio WHERE id = $1 FOR UPDATE', [envio.id]);
+    const f = validarReagendarRetiro(actual, req.body?.fecha, { hoy: hoyChile(), rol });
+    await db.query(
+      'UPDATE envio SET retiro_fecha = $1, retiro_reagendado = retiro_reagendado + 1, orden_ruta = NULL, actualizado_en = now() WHERE id = $2', [f, actual.id]);
+    const horario = (await leerConfig()).operacion.horario_retiro ? ' en el horario de retiro' : '';
+    await registrarEstado(db, { envioId: actual.id, anterior: actual.estado, nuevo: actual.estado, motivo: `Retiro reagendado para el ${fechaLarga(f)}${horario}`, usuarioId: req.usuario.id });
+    return f;
+  });
+  await auditar(req, 'reagendar_retiro', 'envio', envio.id, { fecha });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));
 

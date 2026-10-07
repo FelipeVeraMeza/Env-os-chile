@@ -3,7 +3,7 @@ import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
   $, $$, abrirBlob, badge, badgePago, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { avisoWhatsapp, itemEnvio, retiroTexto, textoPaquete } from './comun.js';
+import { avisoWhatsapp, comunasCobertura, fechaRetiroTexto, itemEnvio, opcionesComunas, retiroTexto, textoPaquete } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
 
 // ================= Registro de envíos (búsqueda, filtros, exportación) =================
@@ -61,7 +61,9 @@ export async function registro() {
 // pago manual o en línea, reembolso). Antes el historial no mostraba cuándo ni cómo se pagó el envío.
 const MEDIO_TXT = { transferencia: 'transferencia', efectivo: 'efectivo', otro: 'otro medio', en_linea: 'pago en línea' };
 function lineaDeTiempo(e) {
-  const filas = e.historial.map((h) => ({ fecha: h.fecha, titulo: ESTADOS[h.estado_nuevo], detalle: h.motivo, quien: h.usuario_nombre || 'Sistema' }));
+  // Cambio de destino y retiro reagendado quedan en el historial sin cambiar el estado (pedido 07-10).
+  const titulo = (h) => (h.estado_anterior === h.estado_nuevo ? (/^Destino/.test(h.motivo || '') ? 'Destino cambiado' : /^Retiro/.test(h.motivo || '') ? 'Retiro reagendado' : 'Cambio en el envío') : ESTADOS[h.estado_nuevo]);
+  const filas = e.historial.map((h) => ({ fecha: h.fecha, titulo: titulo(h), detalle: h.motivo, quien: h.usuario_nombre || 'Sistema' }));
   for (const p of e.pagos || []) {
     const medio = MEDIO_TXT[p.medio] || p.medio || p.proveedor;
     if (p.comprobante_adjunto_id) filas.push({ fecha: p.creado_en, titulo: 'Comprobante de transferencia enviado', detalle: p.referencia ? `N° ${p.referencia}` : null, clase: 'pago' });
@@ -97,6 +99,11 @@ export async function detalle(id) {
   const reactivable = esAdmin && e.estado === 'anulado' && e.estado_pago === 'pendiente' && ultimaAnulacion && !ultimaAnulacion.usuario_id
     && /^Anulado automáticamente/.test(ultimaAnulacion.motivo || '');
   const repetible = e.folio && ['admin', 'cliente'].includes(app.usuario.rol);
+  // El cliente puede quitar de su cuenta un envío anulado; igual desaparece solo 24 h después (pedido 07-10).
+  const eliminable = app.usuario.rol === 'cliente' && e.estado === 'anulado';
+  // Antes de que el repartidor retire el paquete se puede cambiar el destino (aunque esté pagado) y reagendar el retiro (pedido 07-10).
+  const antesDelRetiro = ['admin', 'cliente'].includes(app.usuario.rol) && ['creado', 'asignado'].includes(e.estado);
+  const puedeCambiarDestino = antesDelRetiro && e.tipo_destino === 'domicilio' && e.estado_pago !== 'en_revision';
   // Enlace firmado que entrega el servidor: el botón abre el PDF directo (también en el celular y en la app instalada).
   const enlaceTicket = (formato) => `${urlApi()}${e.ticket_url}&formato=${formato}`;
   const porPagar = e.estado_pago === 'pendiente' && !['borrador', 'anulado'].includes(e.estado);
@@ -113,14 +120,16 @@ export async function detalle(id) {
         <div class="fila">${badge(e.estado)} ${badgePago(e.estado_pago)} ${e.horario_especial ? html`<span class="badge e-en_ruta">Horario ${e.franja_horaria}</span>` : ''}
           <span class="sub">Intentos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
       <div class="fila">
-        ${e.ticket_url ? html`<a class="btn sec" href="${enlaceTicket('80mm')}" target="_blank" rel="noopener">Etiqueta 80 mm</a><a class="btn sec" href="${enlaceTicket('a4')}" target="_blank" rel="noopener">Etiqueta A4</a>` : ''}
+        ${e.ticket_url ? html`<a class="btn blanco" href="${enlaceTicket('80mm')}" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta 80 mm</a><a class="btn blanco" href="${enlaceTicket('a4')}" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta A4</a>` : ''}
         ${reactivable ? html`<button class="btn" id="reactivar">Reactivar envío</button>` : ''}
         ${repetible ? html`<button class="btn sec" id="repetir">Repetir envío</button>` : ''}
+        ${eliminable ? html`<button class="btn peligro" id="eliminar-anulado">Eliminar de mis envíos</button>` : ''}
         ${porPagar && app.conf.pagos.en_linea ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn sec" id="transferir">Pagar con transferencia</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
         ${porPagar && !app.conf.pagos.en_linea ? html`<button class="btn" id="transferir">Pagar ${clp(e.tarifa_total)} con transferencia</button>` : ''}
       </div>
     </div>
     ${e.vence_en ? html`<div class="aviso alerta" style="margin-top:12px">Si no se paga antes del <b>${fechaHora(e.vence_en)}</b>, el envío se anula solo.</div>` : ''}
+    ${eliminable ? html`<div class="aviso" style="margin-top:12px">Este envío está anulado: desaparece de tu lista 24 horas después de anularse, o puedes eliminarlo ahora.</div>` : ''}
     ${reactivable ? html`<div class="aviso" style="margin-top:12px">Este envío se anuló solo por falta de pago. Puedes reactivarlo: tendrá ${app.conf.operacion.horas_sin_pago || 24} horas más para pagarse.</div>` : ''}
     ${!['anulado', 'devuelto'].includes(e.estado) ? html`<div class="progreso-envio">${PROGRESO.map(([, t], i) => html`<div class="${i < nivel ? 'on' : ''}">${t}</div>`)}</div>` : ''}
     <div class="grid g2" style="margin-top:18px;align-items:start">
@@ -128,6 +137,8 @@ export async function detalle(id) {
         ${e.retiro_calle ? html`<div class="card">
           <div class="card-titulo"><h2>Retiro</h2>${e.mapas_retiro ? html`<div class="fila"><a class="btn sec chico" href="${e.mapas_retiro.google}" target="_blank" rel="noopener">Google Maps</a><a class="btn sec chico" href="${e.mapas_retiro.waze}" target="_blank" rel="noopener">Waze</a></div>` : ''}</div>
           <p>${retiroTexto(e)}</p>${e.retiro_referencia ? html`<p class="sub">Ref.: ${e.retiro_referencia}</p>` : ''}
+          ${e.retiro_fecha ? html`<div class="aviso" style="margin-top:8px">Retiro agendado para el <b>${fechaRetiroTexto(e)}</b>${app.conf.operacion.horario_retiro ? ' (horario de retiro)' : ''}.</div>` : ''}
+          ${antesDelRetiro ? html`<button class="btn sec chico" id="reagendar-retiro" style="margin-top:10px">Reagendar retiro</button>` : ''}
         </div>` : ''}
         <div class="card">
           <div class="card-titulo"><h2>Destino</h2><div class="fila"><a class="btn sec chico" href="${e.mapas.google}" target="_blank" rel="noopener">Google Maps</a><a class="btn sec chico" href="${e.mapas.waze}" target="_blank" rel="noopener">Waze</a></div></div>
@@ -136,6 +147,7 @@ export async function detalle(id) {
           <p>${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}<br><b style="font-size:1.2rem">${e.comuna_nombre}</b> <span class="muted">· ${e.region}</span></p>
           ${e.folio && e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar al destinatario por WhatsApp</a>` : ''}
           ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}
+          ${puedeCambiarDestino ? html`<button class="btn sec chico" id="cambiar-destino" style="margin-top:10px">Cambiar dirección de destino</button>` : ''}
           ${esAdmin ? html`<p class="muted">Cliente: ${e.cliente_nombre}</p>` : ''}
         </div>
         <div class="card">
@@ -241,6 +253,13 @@ function enlazarAcciones(e, recargar) {
     };
   });
   $('#repetir')?.addEventListener('click', () => { app.repetir = e; ir('#/nuevo'); });
+  $('#cambiar-destino')?.addEventListener('click', () => cambiarDestino(e, recargar));
+  $('#reagendar-retiro')?.addEventListener('click', () => reagendarRetiro(e, recargar));
+  $('#eliminar-anulado')?.addEventListener('click', async (ev) => {
+    if (!(await confirmar('¿Eliminar este envío?', `${e.folio} está anulado y dejará de aparecer en tu lista.`, 'Eliminar'))) return;
+    ev.target.disabled = true;
+    try { await post(`/api/envios/${e.id}/ocultar`); toast('Envío eliminado de tu lista', 'ok'); ir('#/envios'); } catch (err) { errorToast(err); ev.target.disabled = false; }
+  });
   $('#reactivar')?.addEventListener('click', async (ev) => {
     if (!(await confirmar('¿Reactivar el envío?', `${e.folio} vuelve a quedar creado y tiene ${app.conf.operacion.horas_sin_pago || 24} horas más para pagarse.`, 'Reactivar'))) return;
     ev.target.disabled = true;
@@ -327,6 +346,75 @@ function tarjetaTransferencia(e, esAdmin) {
       ${esAdmin ? '' : html`<p class="sub" style="margin-top:10px">Revisa el motivo y sube un comprobante nuevo con el botón <b>Pagar con transferencia</b>.</p>`}</div>`;
   }
   return '';
+}
+
+// ================= Cambiar destino y reagendar retiro (pedido 07-10) =================
+// Otra dirección guardada del mismo destinatario o una nueva. Pagado, el monto no cambia (la nueva no puede costar más).
+async function cambiarDestino(e, alTerminar) {
+  const esAdmin = app.usuario.rol === 'admin';
+  const [lista, comunas] = await Promise.all([get(`/api/destinatarios${esAdmin ? `?cliente_id=${e.cliente_id}` : ''}`), comunasCobertura()]);
+  const otras = (lista.find((d) => d.id === e.destinatario_id)?.direcciones || []).filter((d) => d.id !== e.direccion_id);
+  const m = modal(html`<h2>Cambiar dirección de destino</h2>
+    <p class="sub">Envío <b class="mono">${e.folio}</b> para <b>${e.destinatario_nombre}</b>. Se puede cambiar hasta que el repartidor retire el paquete.
+      ${e.estado_pago === 'pagado' ? ' Ya está pagado: el monto no cambia, y la nueva dirección no puede costar más.' : ''}</p>
+    <form class="pila" id="f-destino" novalidate>
+      ${otras.length ? html`<label class="campo">Dirección guardada<select name="direccion_id"><option value="">Escribir una dirección nueva…</option>
+        ${otras.map((d) => html`<option value="${d.id}">${d.calle} ${d.numero}${d.depto ? `, ${d.depto}` : ''} · ${d.comuna_nombre}</option>`)}</select></label>` : ''}
+      <div id="dir-nueva" class="pila">
+        <label class="campo">Calle *<input name="calle" autocomplete="address-line1"></label>
+        <div class="grid g2"><label class="campo">Número *<input name="numero" inputmode="numeric"></label><label class="campo">Depto / casa<input name="depto"></label></div>
+        <label class="campo">Comuna *<select name="comuna_id">${opcionesComunas(comunas, '')}</select></label>
+        <label class="campo">Referencia<input name="referencia"></label>
+      </div>
+      <button class="btn grande">Guardar nuevo destino</button>
+      <p class="muted">Después de cambiarlo, vuelve a imprimir la etiqueta: la anterior tiene la dirección antigua.</p>
+    </form>`);
+  const f = $('#f-destino', m.el);
+  const alternar = () => { $('#dir-nueva', m.el).hidden = Boolean(f.direccion_id?.value); };
+  f.direccion_id?.addEventListener('change', alternar);
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const d = datosForm(f);
+    const cuerpo = d.direccion_id ? { direccion_id: Number(d.direccion_id) }
+      : { direccion: { calle: d.calle, numero: d.numero, depto: d.depto, referencia: d.referencia, comuna_id: d.comuna_id ? Number(d.comuna_id) : null } };
+    const btn = $('button', f);
+    btn.disabled = true;
+    try {
+      const r = await post(`/api/envios/${e.id}/cambiar-destino`, cuerpo);
+      m.cerrar();
+      toast(r.cambio_monto ? `Destino cambiado. Nuevo monto a pagar: ${clp(r.tarifa_total)}. Reimprime la etiqueta.` : 'Destino cambiado. Reimprime la etiqueta.', 'ok');
+      alTerminar?.();
+    } catch (err) {
+      // Los errores vienen como "direccion.calle": se marcan en el campo del formulario.
+      marcarErrores(f, Object.fromEntries(Object.entries(err.detalles || {}).map(([k, v]) => [k.replace(/^direccion\./, ''), v])));
+      errorToast(err);
+      btn.disabled = false;
+    }
+  };
+}
+
+// El cliente elige otro día de retiro (desde mañana hasta 14 días); el repartidor que lo tomó lo sigue teniendo.
+function reagendarRetiro(e, alTerminar) {
+  const dia = (n) => { const d = new Date(`${hoyISO()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const m = modal(html`<h2>Reagendar retiro</h2>
+    <p class="sub">Envío <b class="mono">${e.folio}</b>.${e.repartidor_nombre ? ` Lo tiene ${e.repartidor_nombre}: verá la nueva fecha en su ruta.` : ''}</p>
+    ${app.conf.operacion.horario_retiro ? html`<div class="aviso" style="margin:10px 0">🕘 ${app.conf.operacion.horario_retiro}</div>` : ''}
+    <form class="pila" id="f-reagendar" novalidate>
+      <label class="campo">Nuevo día de retiro<input type="date" name="fecha" min="${dia(1)}" max="${dia(14)}" value="${e.retiro_fecha && e.retiro_fecha > dia(0) ? '' : dia(1)}"></label>
+      <button class="btn grande">Reagendar</button>
+    </form>`);
+  const f = $('#f-reagendar', m.el);
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const btn = $('button', f);
+    btn.disabled = true;
+    try {
+      await post(`/api/envios/${e.id}/reagendar-retiro`, { fecha: f.fecha.value });
+      m.cerrar();
+      toast('Retiro reagendado', 'ok');
+      alTerminar?.();
+    } catch (err) { marcarErrores(f, err.detalles); errorToast(err); btn.disabled = false; }
+  };
 }
 
 export function subirComprobante(envio, alTerminar) {
@@ -460,8 +548,8 @@ function formReclamo(e, boletas, alTerminar) {
     const file = f.boleta.files[0];
     if (!file) fd.delete('boleta');
     if (!file && !fd.get('boleta_adjunto_id')) {
-      marcarErrores(f, { boleta: 'La boleta es obligatoria para cobrar el seguro' });
-      return toast('Adjunta la boleta: es obligatoria para cobrar el seguro', 'error');
+      marcarErrores(f, { boleta: 'La boleta es obligatoria para la gestión del seguro' });
+      return toast('Adjunta la boleta: es obligatoria para la gestión del seguro', 'error');
     }
     try { const r = await enviarForm(`/api/reclamos/envio/${e.id}`, fd); m.cerrar(); toast(`Reclamo ${r.numero} enviado`, 'ok'); alTerminar(); }
     catch (err) { marcarErrores(f, err.detalles); errorToast(err); }

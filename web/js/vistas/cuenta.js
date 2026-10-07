@@ -38,7 +38,7 @@ export function ingreso() {
     <div class="fila entre" style="margin-top:14px">
       <a href="#/recuperar">¿Olvidaste tu contraseña?</a>
       ${op.registro_clientes ? html`<a href="#/registro">Crear cuenta de cliente</a>` : ''}
-      <a href="#/seguimiento">Seguir un envío</a>
+      <a href="#/seguimiento">Seguimiento de envío</a>
     </div>`));
   $('#f-login').onsubmit = (e) => {
     e.preventDefault();
@@ -77,7 +77,10 @@ export function recuperar() {
     </form><div id="res-recuperar"></div><p class="sub" style="margin-top:12px"><a href="#/">Volver a ingresar</a></p>`));
   $('#f-recuperar').onsubmit = (e) => {
     e.preventDefault();
-    enviar(e.target, '/api/auth/recuperar', datosForm(e.target), (r) => montar($('#res-recuperar'), html`<div class="aviso" style="margin-top:12px">${r.mensaje}</div>`));
+    // Sin correo automático, el teléfono de la empresa (Ajustes) da una vía directa para pedir el enlace.
+    const fono = String(app.conf.negocio?.telefono || '').replace(/\D/g, '');
+    enviar(e.target, '/api/auth/recuperar', datosForm(e.target), (r) => montar($('#res-recuperar'), html`<div class="aviso" style="margin-top:12px">${r.mensaje}</div>
+      ${!app.conf.recuperacion_por_correo && fono ? html`<a class="btn sec ancho" style="margin-top:10px" target="_blank" rel="noopener" href="https://wa.me/${fono}?text=${encodeURIComponent(`Hola, olvidé mi contraseña de ${app.conf.negocio.nombre}. Mi correo es ${e.target.correo.value.trim()}`)}">Escribir por WhatsApp</a>` : ''}`));
   };
 }
 

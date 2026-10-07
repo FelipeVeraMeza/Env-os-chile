@@ -16,7 +16,7 @@ const MENUS = {
     ['#/nuevo', 'nuevo', 'Nuevo envío'],
     ['#/envios', 'envios', 'Mis envíos'],
     ['#/carrito', 'cobranza', 'Por pagar'],
-    ['#/libreta', 'libreta', 'Destinatarios'],
+    ['#/libreta', 'libreta', 'Guardados'],
     ['#/reclamos', 'seguro', 'Seguros', 'solo-escritorio'],
     ['#/seguimiento', 'seguimiento', 'Seguimiento', 'solo-escritorio'],
   ],
@@ -174,7 +174,7 @@ function pantallaLogin(mensaje) {
     </form>
     <div class="fila entre" style="margin-top:16px"><a href="#/recuperar">¿Olvidaste tu contraseña?</a>
       ${app.conf.operacion?.registro_clientes ? html`<a href="#/registro">Crear cuenta de cliente</a>` : ''}</div>
-    <div class="pie"><a href="#/seguimiento">Seguir un envío con su folio →</a></div>
+    <div class="pie"><a href="#/seguimiento">Seguimiento de envío →</a></div>
   </div></div>`);
   const f = $('#f-login');
   const clave = $('input[name="password"]', f);

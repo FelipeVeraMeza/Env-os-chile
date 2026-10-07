@@ -130,7 +130,7 @@ auth.post('/recuperar', limiteRecuperar, ruta(async (req, res) => {
     ok: true,
     mensaje: correoConfigurado()
       ? 'Si el correo está registrado, te enviamos un enlace para crear una nueva contraseña.'
-      : 'Pide a administración un enlace para restablecer tu contraseña.',
+      : 'Listo: avisamos a administración. Si el correo está registrado, te enviarán por WhatsApp un enlace para crear una nueva contraseña.',
   });
 }));
 
@@ -191,8 +191,13 @@ usuarios.get('/', requiereRol('admin'), ruta(async (req, res) => {
   const params = [];
   let where = '';
   if (ROLES.includes(req.query.rol)) { params.push(req.query.rol); where = 'WHERE rol = $1'; }
+  // pidio_clave_en: pidió recuperar su contraseña en las últimas 48 h y aún no la cambia. Sin correo configurado
+  // administración no se enteraba: ahora lo ve aquí y le manda el enlace por WhatsApp.
   const { rows } = await query(`SELECT id, nombre, correo, rol, telefono, rut, activo, creado_en, ultimo_acceso, debe_cambiar_clave,
-    password_hash IS NOT NULL AS tiene_clave FROM usuario ${where} ORDER BY rol, nombre`, params);
+    password_hash IS NOT NULL AS tiene_clave,
+    (SELECT max(ev.fecha) FROM evento_seguridad ev WHERE ev.tipo = 'recuperacion_solicitada' AND ev.usuario_id = usuario.id
+       AND ev.fecha > now() - interval '2 days' AND (usuario.password_cambiado_en IS NULL OR ev.fecha > usuario.password_cambiado_en)) AS pidio_clave_en
+    FROM usuario ${where} ORDER BY rol, nombre`, params);
   res.json(rows);
 }));
 
