@@ -23,7 +23,7 @@ export const fechaHora = (d) => (d ? new Date(d).toLocaleString('es-CL', { day: 
 export const hoyISO = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
 
 export const ESTADOS = {
-  borrador: 'Borrador', creado: 'Creado', asignado: 'Asignado', en_ruta: 'En ruta', entregado: 'Entregado',
+  borrador: 'Borrador', creado: 'Creado', asignado: 'Por retirar', en_ruta: 'En ruta', entregado: 'Entregado',
   fallido: 'Fallido', reagendado: 'Reagendado', devuelto: 'Devuelto', anulado: 'Anulado',
 };
 export const badge = (estado, texto) => html`<span class="badge e-${estado}">${texto || ESTADOS[estado] || estado}</span>`;

@@ -6,7 +6,7 @@ export const ROLES = ['admin', 'cliente', 'repartidor'];
 export const ESTADOS = {
   borrador: 'Borrador',
   creado: 'Creado',
-  asignado: 'Asignado',
+  asignado: 'Por retirar', // tiene repartidor y falta que retire el paquete (pedido 07-10: antes "Asignado")
   en_ruta: 'Retirado / En ruta',
   entregado: 'Entregado',
   fallido: 'Fallido',

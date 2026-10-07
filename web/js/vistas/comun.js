@@ -96,4 +96,4 @@ export function itemEnvio(e, { montos = true } = {}) {
   </a>`;
 }
 
-const ESTADO_TXT = { borrador: 'Borrador', creado: 'Creado', asignado: 'Asignado', en_ruta: 'En ruta', entregado: 'Entregado', fallido: 'Fallido', reagendado: 'Reagendado', devuelto: 'Devuelto', anulado: 'Anulado' };
+const ESTADO_TXT = { borrador: 'Borrador', creado: 'Creado', asignado: 'Por retirar', en_ruta: 'En ruta', entregado: 'Entregado', fallido: 'Fallido', reagendado: 'Reagendado', devuelto: 'Devuelto', anulado: 'Anulado' };

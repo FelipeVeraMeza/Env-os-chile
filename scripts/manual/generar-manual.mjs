@@ -105,7 +105,7 @@ ${entrar}
 ${tabla(['Estado', 'Qué significa', 'Quién lo cambia'], [
   ['<span class="chip g">Borrador</span>', 'Envío guardado sin confirmar (no tiene folio).', 'Cliente / administración'],
   ['<span class="chip">Creado</span>', 'Confirmado, con folio ENV-AAAA-NNNNNN. Falta pagar y/o asignar repartidor.', 'Cliente al confirmar'],
-  ['<span class="chip">Asignado</span>', 'Tiene repartidor (lo tomó él o lo asignó administración).', 'Repartidor (Tomar) o administración'],
+  ['<span class="chip">Por retirar</span>', 'Tiene repartidor (lo tomó él o lo asignó administración) y falta que retire el paquete.', 'Repartidor (Tomar) o administración'],
   ['<span class="chip m">En ruta</span>', 'El repartidor lo retiró. <b>Solo es posible si está pagado.</b>', 'Repartidor'],
   ['<span class="chip v">Entregado</span>', 'Entregado con foto obligatoria y GPS.', 'Repartidor'],
   ['<span class="chip n">Fallido</span>', 'No se pudo entregar (con motivo). Suma un intento.', 'Repartidor'],
@@ -204,7 +204,7 @@ ${img('r-ruta', 'Mi ruta con envíos en ruta, por retirar y disponibles para tom
 ${nota('Los envíos sin pagar no aparecen como disponibles. Si administración desactiva la opción de tomar envíos, el repartidor solo ve los que le asignan.')}
 <h2 id="r-retirar">4.2 Retirar</h2>
 <p>Abre el envío: ve el folio, la dirección en grande, la comuna, el destinatario con su teléfono (se puede llamar tocándolo), el paquete,
-avisos de horario especial o punto courier y los botones <b>Ir con Google Maps</b> e <b>Ir con Waze</b>. Pulsa <b>Retirar y salir a ruta</b>.</p>
+avisos de horario especial o punto courier y los botones <b>Ir con Google Maps</b> e <b>Ir con Waze</b>. Pulsa <b>Paquete retirado</b>.</p>
 ${par(img('r-asignado', 'Envío por retirar', 'movil'), img('r-en-ruta', 'Envío en ruta: Llegué, Entregar o No se pudo entregar', 'movil'))}
 <h2 id="r-entregar">4.3 Llegar y entregar</h2>
 ${pasos([

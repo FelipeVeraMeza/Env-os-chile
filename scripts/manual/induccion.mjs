@@ -112,7 +112,7 @@ ${pasos([
 ${img('r-ruta', 'Mi ruta con envíos disponibles para tomar', 'movil')}`)}
 ${ejercicio('Ejercicio 4.2 · Retirar, llegar y entregar', `
 ${pasos([
-  'Abre el envío y pulsa <b>Retirar y salir a ruta</b>. Usa <b>Ir con Google Maps</b> o <b>Ir con Waze</b>.',
+  'Abre el envío y pulsa <b>Paquete retirado</b>. Usa <b>Ir con Google Maps</b> o <b>Ir con Waze</b>.',
   `Al llegar pulsa <b>Llegué al destino</b>: empieza el contador de ${op.espera_max_min} minutos.`,
   'Pulsa <b>Entregar</b>, toma la <b>foto</b> de la entrega, espera "Ubicación lista", escribe quién recibe y pulsa <b>Confirmar entrega</b>.',
 ])}

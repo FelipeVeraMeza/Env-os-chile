@@ -10,6 +10,68 @@ import { enviarPendientes, entregaPendiente, guardarCopia, guardarEntrega, leerC
 const sinSenal = (err) => err?.status === 0;
 const avisoSinSenal = () => html`<div class="aviso alerta" style="margin-bottom:12px"><b>Sin conexión.</b> Ves lo último que se cargó con señal. Las entregas que hagas se guardan en el teléfono y se envían solas al volver internet.</div>`;
 
+// ---------- Retirar varios paquetes de una vez (pedido 07-10) ----------
+// Todos los paquetes por retirar, agrupados por dirección de retiro, con el total. Vienen marcados los pagados y de hoy;
+// el repartidor desmarca lo que no recibió y toca "Paquetes retirados".
+function retirarPaquetes(lista, alTerminar) {
+  const grupos = new Map();
+  for (const e of lista) {
+    const clave = e.retiro_calle ? retiroTexto(e) : 'Sin dirección de retiro';
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(e);
+  }
+  const retirable = (e) => e.estado_pago === 'pagado';
+  const marcado = (e) => retirable(e) && !retiroOtroDia(e);
+  const m = modal(html`<h2>Retirar paquetes</h2>
+    <p class="sub">${lista.length} paquete(s) por retirar en ${grupos.size} dirección(es). Desmarca los que no te entregaron.</p>
+    <form class="pila" id="f-retirar" novalidate>
+      ${[...grupos].map(([direccion, envios], g) => html`<div class="card" style="margin:0">
+        <div class="card-titulo"><div><b>${direccion}</b><div class="sub">${envios.length} paquete(s)${envios[0].cliente_nombre ? ` · ${envios[0].cliente_nombre}` : ''}</div></div>
+          <label class="interruptor"><input type="checkbox" data-grupo-todos="${g}" ${envios.some(marcado) ? html`checked` : ''}> Todos</label></div>
+        <div class="lista-envios">${envios.map((e) => html`<label class="item-envio" style="cursor:${retirable(e) ? 'pointer' : 'default'}">
+          <div><span class="folio">${e.folio}</span><div class="dir">Para ${e.destinatario_nombre} · ${e.comuna_nombre}</div><div class="sub">${textoPaquete(e)}</div>
+            ${retiroOtroDia(e) ? html`<span class="badge e-pendiente">Retiro agendado: ${fechaRetiroTexto(e)}</span>` : ''}
+            ${retirable(e) ? '' : html`<span class="badge e-anulado">Sin pagar: no se puede retirar</span>`}</div>
+          <div class="der"><input type="checkbox" name="envio" value="${e.id}" data-grupo="${g}" ${marcado(e) ? html`checked` : ''} ${retirable(e) ? '' : html`disabled`} aria-label="Retiré ${e.folio}" style="width:24px;min-height:24px"></div>
+        </label>`)}</div></div>`)}
+      <div class="fila entre"><span class="sub">Total a retirar</span><b id="total-retirar" style="font-size:1.3rem"></b></div>
+      <button class="btn grande" id="confirmar-retiro">Paquetes retirados</button>
+    </form>`);
+  const f = $('#f-retirar', m.el);
+  const casillas = $$('input[name="envio"]', f);
+  const actualizar = () => {
+    const n = casillas.filter((x) => x.checked).length;
+    $('#total-retirar', m.el).textContent = `${n} de ${lista.length} paquete(s)`;
+    const b = $('#confirmar-retiro', m.el);
+    b.disabled = !n;
+    b.textContent = n ? `Paquetes retirados (${n})` : 'Marca al menos un paquete';
+    $$('[data-grupo-todos]', f).forEach((t) => {
+      const del = casillas.filter((x) => x.dataset.grupo === t.dataset.grupoTodos && !x.disabled);
+      t.checked = del.length > 0 && del.every((x) => x.checked);
+    });
+  };
+  f.addEventListener('change', (ev) => {
+    if (ev.target.dataset.grupoTodos !== undefined) {
+      casillas.filter((x) => x.dataset.grupo === ev.target.dataset.grupoTodos && !x.disabled).forEach((x) => { x.checked = ev.target.checked; });
+    }
+    actualizar();
+  });
+  actualizar();
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const ids = casillas.filter((x) => x.checked).map((x) => Number(x.value));
+    if (!(await confirmar(`¿Retiraste ${ids.length} paquete(s)?`, 'Quedan "En ruta" para entregarlos.', 'Sí, los retiré'))) return;
+    const b = $('#confirmar-retiro', m.el);
+    b.disabled = true;
+    try {
+      const r = await post('/api/envios/retirar-varios', { envio_ids: ids });
+      m.cerrar();
+      toast(`${r.retirados} paquete(s) retirados. ¡Buen viaje!`, 'ok');
+      alTerminar?.();
+    } catch (err) { errorToast(err); b.disabled = false; }
+  };
+}
+
 // ---------- Ruta completa en Google Maps (pedido 07-10) ----------
 // Abre Maps con todas las paradas en el orden de la lista; sin origen, Maps parte desde donde está el teléfono.
 // Un enlace de Maps acepta hasta 9 paradas intermedias: con más, la ruta se divide en tramos de 10 paradas.
@@ -67,6 +129,8 @@ export async function ruta() {
   const [activos, hechos, disponibles] = datos;
   const enRuta = activos.items.filter((e) => e.estado === 'en_ruta');
   const porRetirar = activos.items.filter((e) => e.estado !== 'en_ruta');
+  // Paquetes que todavía hay que ir a buscar (no los reintentos, que ya están en manos del repartidor).
+  const aRetirar = porRetirar.filter((e) => e.estado === 'asignado');
   // Orden de la ruta (RF-60): flechas para subir o bajar cada parada dentro de su sección (en ruta / por retirar);
   // cada sección se numera desde 1. Antes la numeración era una sola y saltaba (1, 3, 4 arriba y 2 abajo).
   const secciones = [enRuta.map((e) => e.id), porRetirar.map((e) => e.id)];
@@ -117,6 +181,7 @@ export async function ruta() {
     ${offline ? '' : html`<div class="grid g2" style="margin-bottom:16px">
       <button class="btn grande" id="escanear">Escanear etiqueta (QR)</button>
       <button class="btn sec grande" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente</button></div>`}
+    ${!offline && aRetirar.length ? html`<button class="btn blanco grande ancho" id="retirar-paquetes" style="margin-bottom:16px">📦 Retirar paquetes · ${aRetirar.length} por retirar</button>` : ''}
     <div class="card"><div class="card-titulo"><h2>En ruta</h2>${botonesMaps(enRuta.map(lugarEntrega))}</div>
       ${enRuta.length > 1 ? html`<p class="sub" style="margin-bottom:10px">Entrega en este orden: primero el 1.º y al final el último. Toca "Ordenar ruta automáticamente" para recalcularlo desde donde estás.</p>` : ''}<div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
     <div class="card"><div class="card-titulo"><h2>Por retirar / reintentar</h2>${botonesMaps(porRetirar.filter((e) => !retiroOtroDia(e)).map(lugarParada))}</div><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
@@ -126,6 +191,7 @@ export async function ruta() {
     : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
   $$('[data-mover]').forEach((b) => { b.onclick = () => mover(Number(b.dataset.mover), Number(b.dataset.paso)); });
   $('#escanear')?.addEventListener('click', () => escanearEtiqueta(ruta));
+  $('#retirar-paquetes')?.addEventListener('click', () => retirarPaquetes(aRetirar, ruta));
   // Ordena la ruta sola desde donde está el repartidor (si el teléfono da la ubicación; si no, desde el centro).
   $('#optimizar')?.addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
@@ -238,7 +304,7 @@ export async function detalleRepartidor(id) {
     const pagado = e.estado_pago === 'pagado';
     montar(acciones, html`<div class="card">
       ${pagado ? '' : html`<div class="aviso alerta" style="margin-bottom:12px">Este envío <b>no está pagado</b>: no se puede retirar hasta que el cliente pague.</div>`}
-      <button class="btn grande ancho" id="retirar" ${pagado ? '' : html`disabled`}>Retirar y salir a ruta</button></div>`);
+      <button class="btn grande ancho" id="retirar" ${pagado ? '' : html`disabled`}>Paquete retirado</button></div>`);
     $('#retirar').onclick = async () => {
       try { await post(`/api/envios/${id}/estado`, { estado: 'en_ruta' }); toast('Envío retirado. ¡Buen viaje!', 'ok'); recargar(); } catch (err) { errorToast(err); }
     };

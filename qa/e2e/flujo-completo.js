@@ -105,7 +105,7 @@ try {
     await a.click('#f-revision button[data-decision="aprobar"]');
     await a.locator('#asignar').waitFor();
     await a.selectOption('#asignar', String(repartidor.perfil.id));
-    await a.locator('.badge', { hasText: 'Asignado' }).first().waitFor();
+    await a.locator('.badge', { hasText: 'Por retirar' }).first().waitFor();
     await foto(a, 'admin-asignado');
   });
 

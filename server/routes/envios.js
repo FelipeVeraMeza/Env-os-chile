@@ -410,6 +410,34 @@ function guardarOrden(ids, repartidorId) {
 
 // Ordena la ruta sola (pedido 03-10): desde donde está el repartidor (GPS del teléfono, opcional) hacia la parada
 // más cercana. Igual que la pantalla: primero lo que va en ruta (a entregar) y después lo por retirar o reintentar.
+// Retirar varios paquetes de una vez (pedido 07-10): el repartidor llega al retiro, ve todos los que tiene ahí y los
+// marca retirados juntos. Solo los suyos, por retirar y pagados. Todo o nada: si uno no se puede, no se marca ninguno.
+envios.post('/retirar-varios', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.envio_ids) ? req.body.envio_ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw falla(422, 'Marca al menos un paquete', { envio_ids: 'Obligatorio' });
+  if (ids.length > 100) throw falla(422, 'Máximo 100 paquetes de una vez', { envio_ids: 'Demasiados' });
+  const conf = await leerConfig();
+  const folios = await transaccion(async (db) => {
+    const { rows } = await db.query('SELECT * FROM envio WHERE id = ANY($1) ORDER BY id FOR UPDATE', [ids]);
+    if (rows.length !== ids.length) throw falla(404, 'Algún paquete no existe. Recarga la ruta.');
+    const ajenos = rows.filter((e) => e.repartidor_id !== req.usuario.id);
+    if (ajenos.length) throw falla(404, 'Algún paquete no está en tu ruta. Recarga la ruta.');
+    const malos = rows.filter((e) => e.estado !== 'asignado' || e.estado_pago !== 'pagado');
+    if (malos.length) {
+      throw falla(409, `Estos paquetes no se pueden retirar (ya retirados o sin pagar): ${malos.map((e) => e.folio).join(', ')}. Recarga la ruta.`, { envios_no_retirables: malos.map((e) => e.id) });
+    }
+    for (const e of rows) {
+      validarTransicion({ actual: e.estado, nuevo: 'en_ruta', estadoPago: e.estado_pago, intentos: e.intentos, config: conf });
+      await db.query("UPDATE envio SET estado = 'en_ruta', actualizado_en = now() WHERE id = $1", [e.id]);
+      await registrarEstado(db, { envioId: e.id, anterior: e.estado, nuevo: 'en_ruta', usuarioId: req.usuario.id,
+        motivo: rows.length > 1 ? `Retirado junto con ${rows.length} paquetes` : null });
+    }
+    return rows.map((e) => e.folio);
+  });
+  for (const id of ids) await auditar(req, 'cambiar_estado', 'envio', id, { de: 'asignado', a: 'en_ruta', retiro_varios: ids.length });
+  res.json({ ok: true, retirados: folios.length, folios });
+}));
+
 envios.post('/ruta/optimizar', requiereRol('repartidor', 'admin'), ruta(async (req, res) => {
   const lat = Number(req.body?.lat);
   const lon = Number(req.body?.lon);

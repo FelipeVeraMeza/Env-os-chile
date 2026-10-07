@@ -110,7 +110,7 @@ function lineaDeTiempo(e) {
   return filas.map((f, i) => ({ ...f, i })).sort((a, b) => new Date(a.fecha) - new Date(b.fecha) || a.i - b.i);
 }
 
-const PROGRESO = [['creado', 'Creado'], ['pagado', 'Pagado'], ['asignado', 'Asignado'], ['en_ruta', 'En ruta'], ['entregado', 'Entregado']];
+const PROGRESO = [['creado', 'Creado'], ['pagado', 'Pagado'], ['asignado', 'Por retirar'], ['en_ruta', 'En ruta'], ['entregado', 'Entregado']];
 
 function nivelProgreso(e) {
   const orden = { borrador: 0, creado: 1, asignado: 3, en_ruta: 4, fallido: 4, reagendado: 4, entregado: 5, devuelto: 4, anulado: 1 };
