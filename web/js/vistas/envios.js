@@ -3,7 +3,7 @@ import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
   $, $$, abrirBlob, badge, badgePago, PAGO_TXT, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { avisoWhatsapp, comunasCobertura, fechaRetiroTexto, itemEnvio, opcionesComunas, retiroTexto, textoPaquete } from './comun.js';
+import { avisoWhatsapp, comunasCobertura, fechaRetiroTexto, itemEnvio, opcionesComunas, retiroTexto, textoIntento, textoPaquete } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
 
 // ================= Registro de envíos (búsqueda, filtros, exportación) =================
@@ -153,7 +153,8 @@ export async function detalle(id) {
       <div><a href="#/envios" class="btn sec volver" id="volver">← Volver</a>
         <h1 class="mono">${e.folio || 'Borrador'}</h1>
         <div class="fila">${badge(e.estado)} ${badgePago(e.estado_pago)} ${e.horario_especial ? html`<span class="badge e-en_ruta">Horario ${e.franja_horaria}</span>` : ''}
-          <span class="sub">Intentos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
+          ${textoIntento(e) ? html`<span class="badge ${['fallido', 'devuelto'].includes(e.estado) ? 'e-anulado' : 'e-en_ruta'}">${textoIntento(e)}</span>` : ''}
+          <span class="sub" title="Intentos de entrega sin éxito">Fallidos <span class="intentos">${Array.from({ length: app.conf.operacion.intentos_max }, (_, i) => html`<i class="${i < e.intentos ? 'usado' : ''}"></i>`)}</span> ${e.intentos}/${app.conf.operacion.intentos_max}</span></div></div>
       <div class="fila">
         ${e.ticket_url ? html`<a class="btn blanco" href="${enlaceTicket('80mm')}" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta 80 mm</a><a class="btn blanco" href="${enlaceTicket('a4')}" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta A4</a>` : ''}
         ${reactivable ? html`<button class="btn" id="reactivar">Reactivar envío</button>` : ''}

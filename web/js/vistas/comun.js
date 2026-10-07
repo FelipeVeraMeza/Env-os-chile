@@ -67,6 +67,18 @@ export function mapaGoogle(id, url) {
     <p class="muted" style="margin-top:6px">Revisa en el mapa que el punto sea la dirección correcta. Si no lo es, corrige la calle, el número o la comuna.</p></div>`;
 }
 
+// En qué intento de entrega va (pedido 07-10): en ruta o reagendado es el siguiente; fallido, el que no resultó.
+export function textoIntento(e) {
+  const max = app.conf.operacion?.intentos_max || 3;
+  const n = Number(e.intentos) || 0;
+  if (e.estado === 'en_ruta') return `Intento ${n + 1} de ${max}`;
+  if (e.estado === 'reagendado') return `Próximo: intento ${n + 1} de ${max}`;
+  if (e.estado === 'fallido') return `Intento ${n} de ${max} sin éxito`;
+  if (e.estado === 'devuelto' && n) return `${n} intento${n === 1 ? '' : 's'} sin éxito`;
+  if (e.estado === 'entregado' && n) return `Entregado en el intento ${n + 1}`;
+  return '';
+}
+
 export function itemEnvio(e, { montos = true } = {}) {
   return html`<a class="item-envio" href="#/envio/${e.id}">
     <div>
@@ -77,6 +89,7 @@ export function itemEnvio(e, { montos = true } = {}) {
     </div>
     <div class="der">
       <span class="badge e-${e.estado}">${ESTADO_TXT[e.estado]}</span>
+      ${textoIntento(e) ? html`<span class="badge ${e.estado === 'fallido' || e.estado === 'devuelto' ? 'e-anulado' : 'e-en_ruta'}">${textoIntento(e)}</span>` : ''}
       ${montos && e.tarifa_total !== undefined ? html`<span class="monto">${'$' + Number(e.tarifa_total).toLocaleString('es-CL')}</span>` : ''}
       ${['pendiente', 'en_revision'].includes(e.estado_pago) && !['borrador', 'anulado'].includes(e.estado) ? badgePago(e.estado_pago) : ''}
     </div>

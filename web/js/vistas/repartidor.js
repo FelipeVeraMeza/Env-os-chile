@@ -3,7 +3,7 @@ import { api, archivo, enviarForm, get, post, put } from '../api.js';
 import {
   $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, hoyISO, html, modal, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { avisoWhatsapp, direccionTexto, fechaRetiroTexto, retiroTexto, textoPaquete } from './comun.js';
+import { avisoWhatsapp, direccionTexto, fechaRetiroTexto, retiroTexto, textoIntento, textoPaquete } from './comun.js';
 import { enviarPendientes, entregaPendiente, guardarCopia, guardarEntrega, leerCopia } from '../sin-conexion.js';
 
 // Sin señal se muestra lo último que se vio con conexión (y se avisa).
@@ -99,7 +99,7 @@ export async function ruta() {
       ${e.estado === 'asignado' && e.retiro_fecha ? html`<div class="aviso alerta" style="margin-top:6px;padding:6px 10px">Retiro reagendado: <b>${fechaRetiroTexto(e)}</b></div>` : ''}
       <div style="font-size:1.05rem;font-weight:700">${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}</div>
       <div class="dir">${e.comuna_nombre.toUpperCase()} · ${e.destinatario_nombre}</div></div>
-    <div class="der">${badge(e.estado)}${e.estado_pago !== 'pagado' ? html`<span class="badge e-pendiente">Sin pagar</span>` : ''}${e.intentos ? html`<span class="sub">Intento ${e.intentos + 1}/${app.conf.operacion.intentos_max}</span>` : ''}</div>
+    <div class="der">${badge(e.estado)}${e.estado_pago !== 'pagado' ? html`<span class="badge e-pendiente">Sin pagar</span>` : ''}${textoIntento(e) ? html`<span class="badge ${e.estado === 'fallido' ? 'e-anulado' : 'e-en_ruta'}">${textoIntento(e)}</span>` : ''}</div>
   </a></div>`;
   // Envíos pagados que nadie ha tomado: el repartidor los acepta y pasan a su ruta.
   const libre = (e) => html`<div class="item-envio">
