@@ -150,6 +150,7 @@ Faltan para operar con clientes reales. La mayoría depende de respuestas del cl
 | RF-93 | **Ruta completa en Google Maps** (pedido 07-10): la ruta ordenada (vecino más cercano + 2-opt desde el GPS) se abre en Maps con todas las paradas en orden; con más de 10 paradas se divide en tramos. Cada paquete muestra su orden (1.º … último) | A | ✅ | CP-247, revisión en pantalla |
 | RF-94 | **Envíos filtrados por cliente y por pago** (pedido 07-10): en el registro de envíos, administración filtra por cliente y por estado del pago (por pagar, pendiente de aprobación, pagado) | A | ✅ | revisión en pantalla |
 | RF-95 | **Pago de muchos envíos aprobado de una vez** (pedido 07-10): Cobranza agrupa por cliente lo por pagar y lo pendiente de aprobación; con "Aprobar pago" se marcan todos (se pueden desmarcar) y se aprueban juntos: los que tienen comprobante con su comprobante (el carrito completo), los demás como transferencia con el N° de operación. Todo o nada, solo un cliente a la vez, hasta 100 envíos. El carrito del cliente acepta hasta 100 envíos por comprobante | I | ✅ | CP-250 a CP-253 |
+| RF-96 | **Revisión lado a lado** (pedido 07-10): al revisar un comprobante o aprobar el pago de un cliente, el comprobante se ve a la izquierda y a la derecha los envíos (folio, destinatario, comuna, monto) con su total; al escribir el monto del comprobante avisa si coincide, cuánto falta o cuánto sobra. Ya aprobado, el comprobante sigue visible en el envío (con los envíos que pagó) | I | ✅ | CP-250, CP-251 |
 
 ## Requerimientos no funcionales
 

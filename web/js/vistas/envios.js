@@ -362,6 +362,19 @@ function tarjetaTransferencia(e, esAdmin) {
           <a class="sub" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Ver el comprobante enviado</a>`}
     </div>`;
   }
+  // Pagado (pedido 07-10): el comprobante aprobado sigue a la vista en el envío, con lo que pagó.
+  const aprobado = e.pagos.find((x) => x.comprobante && x.estado === 'aprobado');
+  if (['pagado', 'reembolsado'].includes(e.estado_pago) && aprobado) {
+    const url = archivo(aprobado.comprobante.url);
+    const folios = aprobado.lote_folios?.length > 1 ? aprobado.lote_folios : null;
+    return html`<div class="card"><div class="card-titulo"><h2>Comprobante de pago</h2>${badgePago(e.estado_pago)}</div>
+      <p class="sub">Aprobado ${fechaHora(aprobado.revisado_en || aprobado.verificado_en || aprobado.creado_en)}${aprobado.referencia ? ` · N° de operación ${aprobado.referencia}` : ''}${folios ? '' : ` · ${clp(aprobado.monto)}`}</p>
+      ${folios ? html`<div class="aviso" style="margin:8px 0">Esta transferencia pagó <b>${folios.length} envíos</b> juntos: ${listaCorta(folios, 6)}.</div>` : ''}
+      ${aprobado.comprobante.mime === 'application/pdf'
+        ? html`<a class="btn sec" href="${url}" target="_blank" rel="noopener" style="margin-top:8px">Abrir comprobante (PDF)</a>`
+        : html`<a href="${url}" target="_blank" rel="noopener" title="Abrir en tamaño completo"><img src="${url}" alt="Comprobante de pago de ${e.folio}" style="width:100%;max-height:320px;object-fit:contain;border-radius:12px;margin-top:8px;background:rgba(255,255,255,.06)"></a>`}
+    </div>`;
+  }
   if (e.estado_pago === 'pendiente' && c?.estado === 'rechazado' && !['borrador', 'anulado'].includes(e.estado)) {
     return html`<div class="card"><h2>Pago por transferencia</h2>
       <div class="aviso alerta"><b>${esAdmin ? 'El comprobante fue rechazado' : 'Tu comprobante fue rechazado'}</b>: ${c.motivo_rechazo}</div>
@@ -373,34 +386,34 @@ function tarjetaTransferencia(e, esAdmin) {
 // ================= Aprobar de una vez el pago de muchos envíos de un cliente (pedido 07-10) =================
 // c: un cliente de /api/cobranza/por-cliente. Todos vienen marcados; los de un mismo comprobante (carrito) se marcan juntos.
 export async function aprobarPagoCliente(c, alTerminar) {
+  // Los comprobantes del cliente (uno por carrito) para verlos al lado de la lista.
   const comprobantes = (await get('/api/cobranza/comprobantes').catch(() => []))
     .filter((x) => (x.envios || [{ envio_id: x.envio_id }]).some((v) => c.envios.some((e) => e.id === v.envio_id)));
   const m = modal(html`<h2>Aprobar pago de ${c.cliente_nombre}</h2>
-    <p class="sub">Marca los envíos que paga la transferencia. Los que tienen comprobante se aprueban con él; los demás quedan pagados por transferencia con el N° de operación.</p>
-    ${comprobantes.length ? html`<div class="fila" style="margin:10px 0">${comprobantes.map((x, i) => html`<a class="btn sec chico" href="${archivo(x.comprobante_url)}" target="_blank" rel="noopener">Ver comprobante ${comprobantes.length > 1 ? i + 1 : ''} (${clp(x.monto)})</a>`)}</div>`
-      : html`<div class="aviso" style="margin:10px 0">Este cliente no subió comprobante: revisa la transferencia en la cartola antes de aprobar.</div>`}
-    <form class="pila" id="f-varios" novalidate>
-      <div class="fila entre"><label class="interruptor"><input type="checkbox" id="todos" checked> Todos</label><span class="sub" id="cuenta-varios"></span></div>
-      <div class="lista-envios" style="max-height:40vh;overflow:auto">${c.envios.map((e) => html`<label class="item-envio" style="cursor:pointer">
-        <div><span class="folio">${e.folio}</span><div class="sub">${fechaHora(e.creado_en)}${e.grupo ? ' · con comprobante' : ''}</div></div>
-        <div class="der"><span class="monto">${clp(e.monto)}</span>${badgePago(e.estado_pago)}
-          <input type="checkbox" name="envio" value="${e.id}" data-monto="${e.monto}" data-grupo="${e.grupo || ''}" checked style="width:22px;min-height:22px"></div>
-      </label>`)}</div>
-      <div class="fila entre"><span class="sub">Total de la transferencia</span><div class="monto-grande" id="total-varios"></div></div>
-      <label class="campo">N° de operación <small>(según la cartola)</small><input name="referencia" maxlength="60" value="${c.envios.find((e) => e.referencia)?.referencia || ''}"></label>
-      <button class="btn grande" id="aprobar-varios">Aprobar pago</button>
-    </form>`);
+    <p class="sub">Compara el comprobante con los envíos. Los que tienen comprobante se aprueban con él (todo su carrito); los demás quedan pagados por transferencia con el N° de operación.</p>
+    <div class="revision-pago">
+      ${visorComprobantes(comprobantes)}
+      <form class="pila" id="f-varios" novalidate>
+        <label class="interruptor"><input type="checkbox" id="todos" checked> Marcar todos</label>
+        <div style="max-height:46vh;overflow:auto">${tablaEnvios(c.envios, { casillas: true })}</div>
+        <label class="campo">N° de operación <small>(según la cartola)</small><input name="referencia" maxlength="60" value="${c.envios.find((e) => e.referencia)?.referencia || ''}"></label>
+        <button class="btn grande" id="aprobar-varios">Aprobar pago</button>
+      </form>
+    </div>`, { ancho: true });
+  enlazarVisor(m.el);
   const f = $('#f-varios', m.el);
   const casillas = $$('input[name="envio"]', f);
+  const marcadas = () => casillas.filter((x) => x.checked);
+  const total = () => marcadas().reduce((s, x) => s + Number(x.dataset.monto), 0);
+  const cuadre = enlazarCuadre(m.el, total);
   const actualizar = () => {
-    const sel = casillas.filter((x) => x.checked);
-    const total = sel.reduce((s, x) => s + Number(x.dataset.monto), 0);
-    $('#total-varios', m.el).textContent = clp(total);
-    $('#cuenta-varios', m.el).textContent = `${sel.length} de ${casillas.length} envío(s)`;
+    const sel = marcadas();
+    cuadre();
+    $('[data-cuenta]', m.el).textContent = `(${sel.length} de ${casillas.length} envío${casillas.length === 1 ? '' : 's'})`;
     $('#todos', m.el).checked = sel.length === casillas.length;
     const b = $('#aprobar-varios', m.el);
     b.disabled = !sel.length;
-    b.textContent = sel.length ? `Aprobar pago de ${sel.length} envío(s) · ${clp(total)}` : 'Marca al menos un envío';
+    b.textContent = sel.length ? `Aprobar pago de ${sel.length} envío(s) · ${clp(total())}` : 'Marca al menos un envío';
   };
   f.addEventListener('change', (ev) => {
     if (ev.target.id === 'todos') casillas.forEach((x) => { x.checked = ev.target.checked; });
@@ -411,9 +424,8 @@ export async function aprobarPagoCliente(c, alTerminar) {
   actualizar();
   f.onsubmit = async (ev) => {
     ev.preventDefault();
-    const ids = casillas.filter((x) => x.checked).map((x) => Number(x.value));
-    const total = casillas.filter((x) => x.checked).reduce((s, x) => s + Number(x.dataset.monto), 0);
-    if (!(await confirmar(`¿Aprobar el pago de ${ids.length} envío(s)?`, `${c.cliente_nombre} · ${clp(total)}. Quedan pagados y listos para asignar y retirar.`, 'Aprobar'))) return;
+    const ids = marcadas().map((x) => Number(x.value));
+    if (!(await confirmar(`¿Aprobar el pago de ${ids.length} envío(s)?`, `${c.cliente_nombre} · ${clp(total())}. Quedan pagados y listos para asignar y retirar.`, 'Aprobar'))) return;
     const btn = $('#aprobar-varios', m.el);
     btn.disabled = true;
     try {
@@ -533,20 +545,82 @@ export function subirComprobante(envio, alTerminar) {
   };
 }
 
+// ---------- Revisión lado a lado (pedido 07-10): comprobante a la izquierda; envíos, total y cuadre a la derecha ----------
+// lista: [{ comprobante_url, mime, monto, referencia, creado_en }]. Con varios comprobantes se elige cuál ver.
+function visorComprobantes(lista) {
+  if (!lista.length) return html`<div class="visor-comprobante"><div class="vacio-pdf"><b>Sin comprobante subido</b><span class="sub">Revisa la transferencia en la cartola del banco antes de aprobar.</span></div></div>`;
+  const uno = (x, i) => html`<div data-visor="${i}" ${i ? html`hidden` : ''}>
+    <div class="sub" style="margin-bottom:6px">${clp(x.monto)}${x.referencia ? ` · N° ${x.referencia}` : ''} · enviado ${fechaHora(x.creado_en)}</div>
+    ${x.mime === 'application/pdf'
+      ? html`<div class="vacio-pdf"><b>Comprobante en PDF</b><a class="btn" href="${archivo(x.comprobante_url)}" target="_blank" rel="noopener">Abrir PDF</a></div>`
+      : html`<a href="${archivo(x.comprobante_url)}" target="_blank" rel="noopener" title="Abrir en tamaño completo"><img src="${archivo(x.comprobante_url)}" alt="Comprobante de transferencia"></a>`}
+  </div>`;
+  return html`<div class="visor-comprobante">
+    ${lista.length > 1 ? html`<div class="fila">${lista.map((x, i) => html`<button type="button" class="btn ${i ? 'sec' : ''} chico" data-ver-comprobante="${i}">Comprobante ${i + 1}</button>`)}</div>` : ''}
+    ${lista.map(uno)}</div>`;
+}
+
+function enlazarVisor(raiz) {
+  $$('[data-ver-comprobante]', raiz).forEach((b) => {
+    b.onclick = () => {
+      $$('[data-visor]', raiz).forEach((v) => { v.hidden = v.dataset.visor !== b.dataset.verComprobante; });
+      $$('[data-ver-comprobante]', raiz).forEach((x) => x.classList.toggle('sec', x !== b));
+    };
+  });
+}
+
+// Tabla de envíos con su monto y el total; filas con casilla si se pueden desmarcar.
+function tablaEnvios(envios, { casillas = false } = {}) {
+  return html`<table class="tabla-pago"><thead><tr>${casillas ? html`<th></th>` : ''}<th>Folio</th><th>Destinatario</th><th class="num">Monto</th></tr></thead>
+    <tbody>${envios.map((e) => html`<tr>
+      ${casillas ? html`<td><input type="checkbox" name="envio" value="${e.id}" data-monto="${e.monto}" data-grupo="${e.grupo || ''}" checked aria-label="Incluir ${e.folio}" style="width:20px;min-height:20px"></td>` : ''}
+      <td><span class="mono">${e.folio}</span>${e.estado_pago ? html`<div>${badgePago(e.estado_pago)}</div>` : ''}</td>
+      <td>${e.destinatario_nombre || ''}<div class="sub">${e.comuna_nombre || ''}${e.creado_en ? ` · ${fechaHora(e.creado_en)}` : ''}</div></td>
+      <td class="num">${clp(e.monto)}</td></tr>`)}</tbody>
+    <tfoot><tr>${casillas ? html`<td></td>` : ''}<td colspan="2">Total <span class="sub" data-cuenta></span></td><td class="num" data-total></td></tr></tfoot></table>
+    <label class="campo" style="margin-top:12px">Monto que dice el comprobante <small>(para comparar)</small><input name="monto_comprobante" inputmode="numeric" placeholder="Ej. 105000"></label>
+    <div class="cuadre" data-cuadre hidden></div>`;
+}
+
+// Compara el total de los envíos con el monto que escribe administración: coincide, falta o sobra.
+function enlazarCuadre(raiz, total) {
+  const entrada = $('[name="monto_comprobante"]', raiz);
+  const caja = $('[data-cuadre]', raiz);
+  const actualizar = () => {
+    const t = total();
+    $('[data-total]', raiz).textContent = clp(t);
+    const digitos = entrada.value.replace(/\D/g, '');
+    if (!digitos) { caja.hidden = true; return; }
+    const dif = Number(digitos) - t;
+    caja.hidden = false;
+    caja.className = `cuadre ${dif === 0 ? 'ok' : 'mal'}`;
+    caja.textContent = dif === 0 ? `✔ Coincide: el comprobante paga exactamente ${clp(t)}`
+      : dif < 0 ? `✖ Falta ${clp(-dif)}: el comprobante es por ${clp(Number(digitos))} y los envíos suman ${clp(t)}`
+        : `✖ Sobra ${clp(dif)}: el comprobante es por ${clp(Number(digitos))} y los envíos suman ${clp(t)}`;
+  };
+  entrada.addEventListener('input', actualizar);
+  actualizar();
+  return actualizar;
+}
+
 // Administración mira el comprobante y lo aprueba (el envío queda pagado) o lo rechaza con motivo.
 export function revisarComprobante(c, alTerminar) {
-  const m = modal(html`<h2>Comprobante de ${c.folio}</h2>
-    <p class="sub">${c.cliente_nombre} · debe transferir <b>${clp(c.monto)}</b>${c.envios?.length > 1 ? ' en total' : ''} · enviado ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}</p>
-    ${c.envios?.length > 1 || c.lote_folios?.length > 1 ? html`<div class="aviso" style="margin:10px 0">Este comprobante paga <b>${(c.envios?.map((x) => x.folio) || c.lote_folios).length} envíos</b> (carrito): ${(c.envios?.map((x) => x.folio) || c.lote_folios).join(', ')}. Al aprobar o rechazar, se aplica a todos.</div>` : ''}
+  const envios = (c.envios?.length ? c.envios : [{ envio_id: c.envio_id, folio: c.folio, monto: c.monto }])
+    .map((e) => ({ ...e, id: e.envio_id, monto: e.monto }));
+  const m = modal(html`<h2>Comprobante de ${c.cliente_nombre || c.folio}</h2>
+    <p class="sub">${envios.length > 1 ? `Paga ${envios.length} envíos (carrito): al aprobar o rechazar se aplica a todos.` : `Envío ${c.folio}.`}</p>
     ${c.usado_en?.length ? html`<div class="aviso alerta" style="margin:10px 0"><b>Atención:</b> este mismo comprobante o N° de operación ya se usó en ${listaCorta(c.usado_en, 5)}.</div>` : ''}
-    <div style="margin:12px 0;text-align:center">${c.mime === 'application/pdf'
-      ? html`<a class="btn sec" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Descargar comprobante (PDF)</a>`
-      : html`<a href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener" title="Abrir en tamaño completo"><img src="${archivo(c.comprobante_url)}" alt="Comprobante de transferencia de ${c.folio}" style="max-width:100%;max-height:42vh;border-radius:12px"></a>`}</div>
-    <form class="pila" id="f-revision" novalidate>
-      <label class="campo">N° de operación <small>(según la cartola)</small><input name="referencia" maxlength="60" value="${c.referencia || ''}"></label>
-      <label class="campo">Motivo del rechazo <small>(obligatorio si rechazas: el cliente lo verá)</small><input name="motivo" maxlength="300" placeholder="Ej. el monto no coincide, imagen ilegible"></label>
-      <div class="fila"><button type="button" class="btn" data-decision="aprobar">Aprobar pago</button><button type="button" class="btn peligro" data-decision="rechazar">Rechazar</button></div>
-    </form>`);
+    <div class="revision-pago">
+      ${visorComprobantes([{ comprobante_url: c.comprobante_url, mime: c.mime, monto: c.monto, referencia: c.referencia, creado_en: c.creado_en }])}
+      <form class="pila" id="f-revision" novalidate>
+        ${tablaEnvios(envios)}
+        <label class="campo">N° de operación <small>(según la cartola)</small><input name="referencia" maxlength="60" value="${c.referencia || ''}"></label>
+        <label class="campo">Motivo del rechazo <small>(obligatorio si rechazas: el cliente lo verá)</small><input name="motivo" maxlength="300" placeholder="Ej. el monto no coincide, imagen ilegible"></label>
+        <div class="fila"><button type="button" class="btn" data-decision="aprobar">Aprobar pago</button><button type="button" class="btn peligro" data-decision="rechazar">Rechazar</button></div>
+      </form>
+    </div>`, { ancho: true });
+  enlazarCuadre(m.el, () => envios.reduce((s, e) => s + Number(e.monto), 0));
+  $('[data-cuenta]', m.el).textContent = `(${envios.length} envío${envios.length === 1 ? '' : 's'})`;
   // Enter en un campo no decide nada: antes enviaba el formulario con el primer botón y APROBABA el pago
   // aunque se estuviera escribiendo el motivo del rechazo. Solo cuenta el botón que se pulsa.
   const f = $('#f-revision', m.el);

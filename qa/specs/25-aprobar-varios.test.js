@@ -27,6 +27,11 @@ test('CP-250 · Cobranza agrupa por cliente lo por pagar y lo pendiente de aprob
   assert.equal(g.envios.find((x) => x.id === a.id).grupo, g.envios.find((x) => x.id === b.id).grupo, 'los del mismo comprobante comparten grupo');
   assert.equal(g.envios.find((x) => x.id === c.id).grupo, null);
   assert.equal(g.total, g.monto_por_pagar + g.monto_en_revision);
+  assert.ok(g.envios.every((x) => x.destinatario_nombre && x.comuna_nombre), 'cada envío trae destinatario y comuna para comparar');
+  const comp = (await peticion('GET', '/api/cobranza/comprobantes', { sesion: esc.admin })).datos.find((x) => x.envios?.some((v) => v.envio_id === a.id));
+  assert.equal(comp.envios.length, 2, 'el comprobante del carrito trae sus 2 envíos');
+  assert.equal(comp.monto, a.tarifa_total + b.tarifa_total, 'y el total a comparar');
+  assert.ok(comp.envios.every((v) => v.destinatario_nombre && v.comuna_nombre));
   assert.equal((await peticion('GET', '/api/cobranza/por-cliente', { sesion: esc.cliente })).status, 403);
 });
 
@@ -44,6 +49,9 @@ test('CP-251 · 30 envíos de un cliente se aprueban de una vez: con comprobante
     assert.equal(d.estado_pago, 'pagado');
     assert.equal(d.pago_medio, 'transferencia');
   }
+  const conComp = (await peticion('GET', `/api/envios/${envios[0].id}`, { sesion: esc.clienteB })).datos;
+  assert.ok(conComp.pagos.some((x) => x.estado === 'aprobado' && x.comprobante?.url), 'el comprobante aprobado sigue visible en el envío');
+  assert.equal(conComp.pagos.find((x) => x.estado === 'aprobado').lote_folios.length, 20, 'y muestra los 20 envíos que pagó');
   assert.equal(await grupoDe(esc.clienteB.usuario.id), undefined, 'ya no tiene nada por cobrar');
   assert.equal((await aprobar([envios[0].id])).status, 409, 'no se aprueba dos veces');
 });

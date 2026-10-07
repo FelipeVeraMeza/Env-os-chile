@@ -74,12 +74,12 @@ document.addEventListener('click', async (ev) => {
 
 // Abre un modal; devuelve { el, cerrar }. onClose se ejecuta al cerrar.
 // fijo: true → no se cierra con Escape, clic afuera ni ✕ (solo por código).
-export function modal(contenido, { onClose, fijo = false } = {}) {
+export function modal(contenido, { onClose, fijo = false, ancho = false } = {}) {
   // Al cerrar, el foco vuelve al botón que abrió el modal (teclado y lectores de pantalla no pierden su lugar).
   const origen = document.activeElement;
   const fondo = document.createElement('div');
   fondo.className = 'modal-fondo';
-  fondo.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${fijo ? '' : '<button class="btn-icono cerrar" aria-label="Cerrar">✕</button>'}<div class="modal-cuerpo"></div></div>`;
+  fondo.innerHTML = `<div class="modal${ancho ? ' ancho' : ''}" role="dialog" aria-modal="true">${fijo ? '' : '<button class="btn-icono cerrar" aria-label="Cerrar">✕</button>'}<div class="modal-cuerpo"></div></div>`;
   montar($('.modal-cuerpo', fondo), contenido);
   const cerrar = () => {
     fondo.remove(); document.removeEventListener('keydown', esc); onClose?.();

@@ -497,3 +497,17 @@ input[type="file"]::file-selector-button {
 .flechas-ruta .btn-icono:disabled { opacity: .3; cursor: default; }
 /* Orden de entrega en la ruta del repartidor (pedido 07-10): 1.º … último. */
 .badge.orden-ruta { background: var(--degradado-btn); color: var(--blanco); font-weight: 800; }
+/* Revisión de pagos (pedido 07-10): comprobante a la izquierda, envíos y cuadre del total a la derecha. */
+.modal.ancho { width: min(1100px, 100%); }
+.revision-pago { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; margin-top: 12px; }
+.visor-comprobante { position: sticky; top: 0; display: grid; gap: 10px; }
+.visor-comprobante img { width: 100%; max-height: 68vh; object-fit: contain; border-radius: 12px; background: rgba(255, 255, 255, .06); }
+.visor-comprobante .vacio-pdf { display: grid; place-items: center; gap: 10px; min-height: 180px; border: 1px dashed var(--borde); border-radius: 12px; padding: 16px; text-align: center; }
+.tabla-pago { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.tabla-pago th, .tabla-pago td { padding: 7px 6px; border-bottom: 1px solid var(--borde); text-align: left; vertical-align: top; }
+.tabla-pago td.num, .tabla-pago th.num { text-align: right; white-space: nowrap; }
+.tabla-pago tfoot td { font-weight: 800; font-size: 1.05rem; border-bottom: 0; }
+.cuadre { margin-top: 6px; padding: 10px 12px; border-radius: 12px; font-weight: 700; }
+.cuadre.ok { background: rgba(52, 211, 153, .16); border: 1px solid rgba(52, 211, 153, .5); }
+.cuadre.mal { background: rgba(255, 107, 138, .16); border: 1px solid rgba(255, 107, 138, .6); }
+@media (max-width: 860px) { .revision-pago { grid-template-columns: minmax(0, 1fr); } .visor-comprobante { position: static; } }
