@@ -131,6 +131,8 @@ export async function ruta() {
   const porRetirar = activos.items.filter((e) => e.estado !== 'en_ruta');
   // Paquetes que todavía hay que ir a buscar (no los reintentos, que ya están en manos del repartidor).
   const aRetirar = porRetirar.filter((e) => e.estado === 'asignado');
+  // Los que se pueden marcar de una vez: pagados y sin retiro agendado para otro día.
+  const listosRetirar = aRetirar.filter((e) => e.estado_pago === 'pagado' && !retiroOtroDia(e));
   // Orden de la ruta (RF-60): flechas para subir o bajar cada parada dentro de su sección (en ruta / por retirar);
   // cada sección se numera desde 1. Antes la numeración era una sola y saltaba (1, 3, 4 arriba y 2 abajo).
   const secciones = [enRuta.map((e) => e.id), porRetirar.map((e) => e.id)];
@@ -181,7 +183,10 @@ export async function ruta() {
     ${offline ? '' : html`<div class="grid g2" style="margin-bottom:16px">
       <button class="btn grande" id="escanear">Escanear etiqueta (QR)</button>
       <button class="btn sec grande" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente</button></div>`}
-    ${!offline && aRetirar.length ? html`<button class="btn blanco grande ancho" id="retirar-paquetes" style="margin-bottom:16px">📦 Retirar paquetes · ${aRetirar.length} por retirar</button>` : ''}
+    ${!offline && listosRetirar.length ? html`<div class="grid g2" style="margin-bottom:16px;grid-template-columns:minmax(0,2fr) minmax(0,1fr)">
+      <button class="btn blanco grande" id="retirar-todos">📦 Ya retiré todos (${listosRetirar.length})</button>
+      <button class="btn sec grande" id="retirar-paquetes">Elegir cuáles</button></div>
+      ${aRetirar.length > listosRetirar.length ? html`<p class="muted" style="margin:-8px 0 16px">${aRetirar.length - listosRetirar.length} por retirar quedan fuera: sin pagar o con retiro agendado para otro día.</p>` : ''}` : ''}
     <div class="card"><div class="card-titulo"><h2>En ruta</h2>${botonesMaps(enRuta.map(lugarEntrega))}</div>
       ${enRuta.length > 1 ? html`<p class="sub" style="margin-bottom:10px">Entrega en este orden: primero el 1.º y al final el último. Toca "Ordenar ruta automáticamente" para recalcularlo desde donde estás.</p>` : ''}<div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
     <div class="card"><div class="card-titulo"><h2>Por retirar / reintentar</h2>${botonesMaps(porRetirar.filter((e) => !retiroOtroDia(e)).map(lugarParada))}</div><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
@@ -192,6 +197,19 @@ export async function ruta() {
   $$('[data-mover]').forEach((b) => { b.onclick = () => mover(Number(b.dataset.mover), Number(b.dataset.paso)); });
   $('#escanear')?.addEventListener('click', () => escanearEtiqueta(ruta));
   $('#retirar-paquetes')?.addEventListener('click', () => retirarPaquetes(aRetirar, ruta));
+  // Un solo toque (pedido 07-10): todos los que ya tomó, pagados y de hoy, quedan retirados sin elegirlos uno por uno.
+  $('#retirar-todos')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget; // después del await, currentTarget ya es null
+    const n = listosRetirar.length;
+    const direcciones = new Set(listosRetirar.map((e) => retiroTexto(e))).size;
+    if (!(await confirmar(`¿Retiraste los ${n} paquete(s)?`, `De ${direcciones} dirección(es) de retiro. Quedan "En ruta" para entregarlos.`, 'Sí, los retiré todos'))) return;
+    btn.disabled = true;
+    try {
+      const r = await post('/api/envios/retirar-varios', { envio_ids: listosRetirar.map((e) => e.id) });
+      toast(`${r.retirados} paquete(s) retirados. ¡Buen viaje!`, 'ok');
+      ruta();
+    } catch (err) { errorToast(err); ruta(); }
+  });
   // Ordena la ruta sola desde donde está el repartidor (si el teléfono da la ubicación; si no, desde el centro).
   $('#optimizar')?.addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
