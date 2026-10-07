@@ -511,3 +511,8 @@ input[type="file"]::file-selector-button {
 .cuadre.ok { background: rgba(52, 211, 153, .16); border: 1px solid rgba(52, 211, 153, .5); }
 .cuadre.mal { background: rgba(255, 107, 138, .16); border: 1px solid rgba(255, 107, 138, .6); }
 @media (max-width: 860px) { .revision-pago { grid-template-columns: minmax(0, 1fr); } .visor-comprobante { position: static; } }
+/* Aviso de versión nueva publicada (pedido 07-10): arriba, sobre todo, hasta que se actualiza. */
+.aviso-version { position: fixed; left: 50%; transform: translateX(-50%); top: calc(84px + env(safe-area-inset-top)); z-index: 60;
+  width: min(560px, calc(100% - 32px)); display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; border-radius: 14px; background: var(--degradado-btn); color: var(--blanco); box-shadow: 0 12px 30px rgba(0, 0, 0, .4); }
+@media (max-width: 860px) { .aviso-version { top: calc(70px + env(safe-area-inset-top)); } }

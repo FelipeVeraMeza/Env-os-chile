@@ -379,6 +379,36 @@ async function iniciar() {
   vigilarTeclado();
   enrutar();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  vigilarVersion();
+}
+
+// Versión nueva publicada (pedido 07-10): la app abierta desde antes de publicar seguía con el código viejo (el
+// repartidor no veía los botones nuevos). Se compara la publicación al volver a la app y cada 5 minutos; si cambió,
+// se ofrece actualizar (no se recarga sola para no perder un formulario a medio llenar).
+function vigilarVersion() {
+  let cargada = null;
+  const revisar = async () => {
+    if (document.hidden || $('#aviso-version')) return;
+    try {
+      const r = await fetch(`${urlApi()}/api/health`, { cache: 'no-store' }).then((x) => x.json());
+      if (!r?.build) return;
+      if (!cargada) { cargada = r.build; return; }
+      if (r.build === cargada) return;
+      const aviso = document.createElement('div');
+      aviso.id = 'aviso-version';
+      aviso.className = 'aviso-version';
+      aviso.setAttribute('role', 'status');
+      montar(aviso, html`<span><b>Hay una versión nueva de la app.</b> Actualiza para ver los últimos cambios.</span><button class="btn blanco chico" type="button">Actualizar</button>`);
+      $('button', aviso).onclick = async () => {
+        try { await (await navigator.serviceWorker?.getRegistration())?.update(); } catch { /* sin service worker */ }
+        location.reload();
+      };
+      document.body.append(aviso);
+    } catch { /* sin señal: se revisa la próxima vez */ }
+  };
+  revisar();
+  document.addEventListener('visibilitychange', revisar);
+  setInterval(revisar, 5 * 60 * 1000);
 }
 
 // Celular: con el teclado abierto la barra inferior tapa el formulario, así que se oculta. Se detecta por el alto

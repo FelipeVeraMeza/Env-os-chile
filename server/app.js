@@ -19,6 +19,8 @@ import { limitarPeticiones } from './lib/seguridad.js';
 
 const raiz = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const version = '0.1.0';
+// Identifica cada publicación: la app abierta lo compara para avisar que hay una versión nueva (pedido 07-10).
+const build = process.env.RAILWAY_DEPLOYMENT_ID || process.env.RAILWAY_GIT_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || new Date().toISOString();
 
 function contieneNulo(v, prof = 0) {
   if (typeof v === 'string') return v.includes('\u0000');
@@ -73,7 +75,7 @@ export function crearApp() {
     let db = 'ok';
     try { await pool.query('SELECT 1'); } catch { db = 'error'; }
     res.status(db === 'ok' ? 200 : 503).json({
-      ok: db === 'ok', db, version, entorno: config.entorno, auth_mode: config.authMode,
+      ok: db === 'ok', db, version, build, entorno: config.entorno, auth_mode: config.authMode,
       base: config.db.esSupabase ? 'supabase' : 'postgres', archivos: config.almacenamiento.driver, hora: new Date().toISOString(),
     });
   });
