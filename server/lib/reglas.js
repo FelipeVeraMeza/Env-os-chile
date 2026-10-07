@@ -118,6 +118,32 @@ export function validarMotivoRechazo(motivo) {
   return texto;
 }
 
+// ---------- Seguimiento público con los intentos de entrega (pedido 07-10) ----------
+// filas: [{ estado, motivo, fecha }] en orden. Cada salida a ruta es un intento; los fallidos dicen el motivo general
+// (nunca el detalle que escribe el repartidor, que puede traer datos personales). La devolución explica por qué.
+export function historialPublico(filas, intentosMax = 3) {
+  let intento = 0;
+  let fallidos = 0;
+  return filas.filter((h) => h.estado !== 'borrador').map((h) => {
+    const base = { estado: h.estado, fecha: h.fecha, label: ESTADOS[h.estado] || h.estado, detalle: null };
+    const codigo = String(h.motivo || '').split(' — ')[0];
+    if (h.estado === 'en_ruta') {
+      intento += 1;
+      return { ...base, intento, label: intento === 1 ? `Retirado: en ruta de entrega (intento 1 de ${intentosMax})` : `En ruta: intento ${intento} de ${intentosMax}` };
+    }
+    if (h.estado === 'fallido') {
+      fallidos += 1;
+      return { ...base, intento: fallidos, label: `Intento ${fallidos} de ${intentosMax}: no se pudo entregar`, detalle: MOTIVOS_FALLO[codigo] || null };
+    }
+    if (h.estado === 'reagendado') return { ...base, label: `Reagendado para el intento ${fallidos + 1} de ${intentosMax}` };
+    if (h.estado === 'entregado') return { ...base, intento, label: intento > 1 ? `Entregado en el intento ${intento}` : 'Entregado' };
+    if (h.estado === 'devuelto') {
+      return { ...base, label: 'Devuelto al remitente', detalle: fallidos >= intentosMax ? `Después de ${fallidos} intentos de entrega sin éxito` : (MOTIVOS_FALLO[codigo] || null) };
+    }
+    return base;
+  });
+}
+
 // ---------- Cambio de destino y reagendar el retiro (pedido 07-10) ----------
 
 // Antes de que el repartidor retire el paquete (después ya va en camino a la dirección de la etiqueta).
@@ -378,6 +404,9 @@ export function rolPuedeTransicionar(rol, actual, nuevo, { esDueno = false, esAs
     return false;
   }
   if (rol === 'repartidor') {
+    // Pedido 07-10: tras un intento fallido, el repartidor también programa el siguiente intento (hasta el máximo;
+    // eso lo valida validarTransicion). Devolver al remitente sigue siendo de administración.
+    if (nuevo === 'reagendado') return esAsignado && actual === 'fallido';
     return esAsignado && ['en_ruta', 'entregado', 'fallido'].includes(nuevo);
   }
   return false;

@@ -83,7 +83,22 @@ const MEDIO_TXT = { transferencia: 'transferencia', efectivo: 'efectivo', otro: 
 function lineaDeTiempo(e) {
   // Cambio de destino y retiro reagendado quedan en el historial sin cambiar el estado (pedido 07-10).
   const titulo = (h) => (h.estado_anterior === h.estado_nuevo ? (/^Destino/.test(h.motivo || '') ? 'Destino cambiado' : /^Retiro/.test(h.motivo || '') ? 'Retiro reagendado' : 'Cambio en el envío') : ESTADOS[h.estado_nuevo]);
-  const filas = e.historial.map((h) => ({ fecha: h.fecha, titulo: titulo(h), detalle: h.motivo, quien: h.usuario_nombre || 'Sistema' }));
+  // Intentos de entrega (pedido 07-10): cada salida a ruta es un intento; el motivo se muestra con su nombre, no el código.
+  const max = app.conf.operacion.intentos_max || 3;
+  let intento = 0;
+  let fallidos = 0;
+  const conIntento = (h) => {
+    const [codigo, ...resto] = String(h.motivo || '').split(' — ');
+    const motivo = [app.conf.motivos_fallo?.[codigo] || codigo, ...resto].filter(Boolean).join(' — ') || null;
+    if (h.estado_anterior === h.estado_nuevo) return { titulo: titulo(h), detalle: h.motivo };
+    if (h.estado_nuevo === 'en_ruta') { intento += 1; return { titulo: intento === 1 ? `En ruta (intento 1 de ${max})` : `En ruta: intento ${intento} de ${max}`, detalle: h.motivo }; }
+    if (h.estado_nuevo === 'fallido') { fallidos += 1; return { titulo: `Intento ${fallidos} de ${max}: no se pudo entregar`, detalle: motivo }; }
+    if (h.estado_nuevo === 'reagendado') return { titulo: `Reagendado para el intento ${fallidos + 1} de ${max}`, detalle: h.motivo };
+    if (h.estado_nuevo === 'devuelto') return { titulo: 'Devuelto al remitente', detalle: fallidos >= max ? `Después de ${fallidos} intentos sin éxito${h.motivo ? ` · ${motivo}` : ''}` : motivo };
+    if (h.estado_nuevo === 'entregado' && intento > 1) return { titulo: `Entregado en el intento ${intento}`, detalle: h.motivo };
+    return { titulo: titulo(h), detalle: h.motivo };
+  };
+  const filas = e.historial.map((h) => ({ fecha: h.fecha, ...conIntento(h), quien: h.usuario_nombre || 'Sistema', clase: ['fallido', 'devuelto'].includes(h.estado_nuevo) && h.estado_anterior !== h.estado_nuevo ? 'rechazo' : undefined }));
   for (const p of e.pagos || []) {
     const medio = MEDIO_TXT[p.medio] || p.medio || p.proveedor;
     if (p.comprobante_adjunto_id) filas.push({ fecha: p.creado_en, titulo: 'Comprobante de transferencia enviado', detalle: p.referencia ? `N° ${p.referencia}` : null, clase: 'pago' });
@@ -142,7 +157,7 @@ export async function detalle(id) {
       <div class="fila">
         ${e.ticket_url ? html`<a class="btn blanco" href="${enlaceTicket('80mm')}" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta 80 mm</a><a class="btn blanco" href="${enlaceTicket('a4')}" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta A4</a>` : ''}
         ${reactivable ? html`<button class="btn" id="reactivar">Reactivar envío</button>` : ''}
-        ${repetible ? html`<button class="btn sec" id="repetir">Repetir envío</button>` : ''}
+        ${repetible ? html`<button class="btn sec" id="repetir" title="Crea un envío NUEVO con los mismos datos (retiro, destinatario, dirección y paquete). No es un reintento de entrega: los reintentos los hace el repartidor.">Crear envío igual</button>` : ''}
         ${eliminable ? html`<button class="btn peligro" id="eliminar-anulado">Eliminar de mis envíos</button>` : ''}
         ${porPagar && app.conf.pagos.en_linea ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn sec" id="transferir">Pagar con transferencia</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
         ${porPagar && !app.conf.pagos.en_linea ? html`<button class="btn" id="transferir">Pagar ${clp(e.tarifa_total)} con transferencia</button>` : ''}

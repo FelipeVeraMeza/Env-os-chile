@@ -42,3 +42,25 @@ test('reagendar el retiro: desde mañana hasta 14 días, solo antes del retiro',
   assert.equal(codigo(() => validarReagendarRetiro(envio({ retiro_reagendado: MAX_CAMBIOS_CLIENTE }), '2026-10-08', { hoy })), 409);
   assert.equal(codigo(() => validarReagendarRetiro(envio({ retiro_reagendado: MAX_CAMBIOS_CLIENTE }), '2026-10-08', { hoy, rol: 'admin' })), 200);
 });
+
+test('seguimiento público: cada paso dice el intento y la devolución explica por qué (sin el detalle del repartidor)', async () => {
+  const { historialPublico } = await import('../../server/lib/reglas.js');
+  const h = historialPublico([
+    { estado: 'creado' }, { estado: 'asignado' },
+    { estado: 'en_ruta' }, { estado: 'fallido', motivo: 'nadie_en_domicilio — vecino dice que llega tarde' },
+    { estado: 'reagendado' }, { estado: 'en_ruta' }, { estado: 'fallido', motivo: 'direccion_incorrecta' },
+    { estado: 'reagendado' }, { estado: 'en_ruta' }, { estado: 'fallido', motivo: 'otro' },
+    { estado: 'devuelto' },
+  ], 3);
+  assert.match(h[2].label, /intento 1 de 3/);
+  assert.equal(h[3].label, 'Intento 1 de 3: no se pudo entregar');
+  assert.equal(h[3].detalle, 'Nadie en el domicilio', 'solo el motivo general');
+  assert.equal(h[4].label, 'Reagendado para el intento 2 de 3');
+  assert.equal(h[5].label, 'En ruta: intento 2 de 3');
+  assert.equal(h[9].label, 'Intento 3 de 3: no se pudo entregar');
+  assert.equal(h[10].label, 'Devuelto al remitente');
+  assert.equal(h[10].detalle, 'Después de 3 intentos de entrega sin éxito');
+  assert.ok(!JSON.stringify(h).includes('vecino'), 'el texto libre del repartidor no es público');
+  const ok = historialPublico([{ estado: 'en_ruta' }, { estado: 'fallido', motivo: 'otro' }, { estado: 'reagendado' }, { estado: 'en_ruta' }, { estado: 'entregado' }], 3);
+  assert.equal(ok.at(-1).label, 'Entregado en el intento 2');
+});

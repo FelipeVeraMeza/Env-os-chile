@@ -277,7 +277,16 @@ export async function detalleRepartidor(id) {
     $('#entregar').onclick = () => entregar(e, recargar);
     $('#fallido').onclick = () => fallido(e, segundosDesdeLlegada, espera, recargar);
   } else if (e.estado === 'fallido') {
-    montar(acciones, html`<div class="aviso alerta">Intento fallido registrado. Administración decidirá si se reagenda (${e.intentos}/${op.intentos_max}) o se devuelve.</div>`);
+    // Pedido 07-10: el repartidor programa el siguiente intento; después del último, administración lo devuelve.
+    const quedan = e.intentos < op.intentos_max;
+    montar(acciones, html`<div class="aviso alerta">Intento ${e.intentos} de ${op.intentos_max} sin éxito.${quedan ? '' : ' Ya no quedan intentos: administración lo devuelve al remitente.'}</div>
+      ${quedan ? html`<button class="btn grande ancho" id="siguiente-intento" style="margin-top:12px">Programar intento ${e.intentos + 1} de ${op.intentos_max}</button>` : ''}`);
+    $('#siguiente-intento')?.addEventListener('click', async (ev) => {
+      if (!(await confirmar(`¿Programar el intento ${e.intentos + 1}?`, 'El envío vuelve a tu ruta para salir de nuevo a entregarlo.', 'Programar'))) return;
+      ev.target.disabled = true;
+      try { await post(`/api/envios/${e.id}/estado`, { estado: 'reagendado', motivo: `Intento ${e.intentos + 1} programado por el repartidor` }); toast(`Intento ${e.intentos + 1} programado`, 'ok'); recargar(); }
+      catch (err) { errorToast(err); ev.target.disabled = false; }
+    });
   } else if (e.estado === 'entregado') {
     const foto = e.adjuntos.find((a) => a.tipo === 'foto_entrega');
     montar(acciones, html`<div class="card"><h2>Entregado ✔</h2><p>${fechaHora(e.entregado_en)}${e.entrega_lat ? ` · GPS ${e.entrega_lat.toFixed(5)}, ${e.entrega_lon.toFixed(5)}` : ''}</p>

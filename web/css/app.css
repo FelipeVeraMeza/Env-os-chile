@@ -323,7 +323,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .linea-tiempo .cuando { color: var(--texto-3); font-size: .8rem; }
 /* Pasos del pago dentro del historial: punto verde para distinguirlos de los cambios de estado. */
 .linea-tiempo li.pago::after { background: #10b981; box-shadow: 0 0 0 2px #6ee7b7; }
-.linea-tiempo li.pago.rechazo::after { background: #f43f5e; box-shadow: 0 0 0 2px #fda4af; }
+.linea-tiempo li.pago.rechazo::after, .linea-tiempo li.rechazo::after { background: #f43f5e; box-shadow: 0 0 0 2px #fda4af; }
 
 .progreso-envio { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 16px 0 6px; }
 .progreso-envio div { text-align: center; font-size: .72rem; font-weight: 700; color: var(--texto-3); }

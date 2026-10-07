@@ -2,6 +2,24 @@ import { get, post } from '../api.js';
 import { $, badge, clp, errorToast, fechaHora, html, montar, toast } from '../ui.js';
 
 // Seguimiento por folio: muestra solo el estado, sin datos personales.
+// Intentos de entrega (pedido 07-10): en qué intento va, cuántos fallaron y si se devolvió al remitente.
+function avisoIntentos(s) {
+  const max = s.intentos_max || 3;
+  const fallidos = Number(s.intentos) || 0;
+  const puntos = html`<span class="intentos">${Array.from({ length: max }, (_, i) => html`<i class="${i < fallidos ? 'usado' : ''}"></i>`)}</span>`;
+  if (s.estado === 'devuelto') {
+    return html`<div class="aviso alerta" style="margin-top:10px"><b>El paquete se devolvió al remitente</b>${fallidos >= max ? ` después de ${fallidos} intentos de entrega sin éxito` : ''}. ${puntos}</div>`;
+  }
+  if (s.estado === 'entregado') return fallidos ? html`<p class="sub">Entregado en el intento ${fallidos + 1} de ${max}.</p>` : '';
+  if (['en_ruta', 'fallido', 'reagendado'].includes(s.estado)) {
+    const actual = s.estado === 'fallido' ? fallidos : fallidos + 1;
+    const texto = s.estado === 'fallido' ? `Intento ${actual} de ${max}: no se pudo entregar${fallidos < max ? '. Se hará un nuevo intento.' : '.'}`
+      : s.estado === 'reagendado' ? `Nuevo intento programado: intento ${actual} de ${max}.` : `En camino: intento ${actual} de ${max}.`;
+    return html`<div class="aviso ${s.estado === 'fallido' ? 'alerta' : ''}" style="margin-top:10px"><b>${texto}</b> ${puntos}</div>`;
+  }
+  return '';
+}
+
 export async function seguimiento(folioInicial) {
   const vista = $('#vista');
   montar(vista, html`
@@ -17,8 +35,8 @@ export async function seguimiento(folioInicial) {
       montar(res, html`<div class="card">
         <div class="card-titulo"><div><h2 class="mono">${s.folio}</h2><div class="sub">Destino: ${s.tipo_destino === 'punto_courier' ? `punto ${s.courier_empresa} · ` : ''}${s.comuna}</div></div>${badge(s.estado, s.estado_label)}</div>
         ${s.horario_especial ? html`<p class="sub">Horario especial: ${s.franja_horaria}</p>` : ''}
-        ${s.intentos ? html`<p class="sub">Intentos de entrega: ${s.intentos} de ${s.intentos_max}</p>` : ''}
-        <ol class="linea-tiempo" style="margin-top:14px">${s.historial.filter((h) => h.estado !== 'borrador').map((h) => html`<li><b>${h.label}</b><div class="cuando">${fechaHora(h.fecha)}</div></li>`)}</ol>
+        ${avisoIntentos(s)}
+        <ol class="linea-tiempo" style="margin-top:14px">${s.historial.filter((h) => h.estado !== 'borrador').map((h) => html`<li class="${['fallido', 'devuelto'].includes(h.estado) ? 'rechazo' : ''}"><b>${h.label}</b>${h.detalle ? html`<div class="sub">${h.detalle}</div>` : ''}<div class="cuando">${fechaHora(h.fecha)}</div></li>`)}</ol>
       </div>`);
       if (location.hash !== `#/seguimiento/${s.folio}`) history.replaceState(null, '', `#/seguimiento/${s.folio}`);
     } catch (err) {

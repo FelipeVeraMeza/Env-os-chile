@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { query, uno } from '../db/pool.js';
 import { falla, ruta, auditar } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
-import { enlacesMapa, ESTADOS } from '../lib/reglas.js';
+import { enlacesMapa, historialPublico, ESTADOS } from '../lib/reglas.js';
 
 // Seguimiento por folio: solo estado e historial, sin datos personales.
 export const seguimiento = Router();
@@ -18,10 +18,11 @@ seguimiento.get('/:folio', ruta(async (req, res) => {
   if (!e) throw falla(404, 'No encontramos un envío con ese folio');
   // Sin los avisos que no cambian el estado (cambio de destino, retiro reagendado): no son públicos.
   const { rows } = await query(
-    'SELECT estado_nuevo AS estado, fecha FROM envio_estado WHERE envio_id = $1 AND estado_anterior IS DISTINCT FROM estado_nuevo ORDER BY fecha, id', [e.id]);
+    'SELECT estado_nuevo AS estado, motivo, fecha FROM envio_estado WHERE envio_id = $1 AND estado_anterior IS DISTINCT FROM estado_nuevo ORDER BY fecha, id', [e.id]);
   const conf = await leerConfig();
   delete e.id;
-  res.json({ ...e, estado_label: ESTADOS[e.estado], intentos_max: conf.operacion.intentos_max, historial: rows.map((h) => ({ ...h, label: ESTADOS[h.estado] })) });
+  // Cada paso dice en qué intento va; el motivo es solo el general (sin el detalle del repartidor).
+  res.json({ ...e, estado_label: ESTADOS[e.estado], intentos_max: conf.operacion.intentos_max, historial: historialPublico(rows, conf.operacion.intentos_max) });
 }));
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

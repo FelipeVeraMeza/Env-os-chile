@@ -79,7 +79,10 @@ test('espera máxima de 5 minutos', () => {
 test('permisos por rol en transiciones', () => {
   assert.ok(rolPuedeTransicionar('repartidor', 'asignado', 'en_ruta', { esAsignado: true }));
   assert.ok(!rolPuedeTransicionar('repartidor', 'asignado', 'en_ruta', { esAsignado: false }));
-  assert.ok(!rolPuedeTransicionar('repartidor', 'fallido', 'reagendado', { esAsignado: true }));
+  assert.ok(rolPuedeTransicionar('repartidor', 'fallido', 'reagendado', { esAsignado: true }), 'el repartidor programa el siguiente intento');
+  assert.ok(!rolPuedeTransicionar('repartidor', 'fallido', 'reagendado', { esAsignado: false }));
+  assert.ok(!rolPuedeTransicionar('repartidor', 'fallido', 'devuelto', { esAsignado: true }), 'devolver es de administración');
+  assert.ok(!rolPuedeTransicionar('cliente', 'fallido', 'reagendado', { esDueno: true }), 'el cliente no reagenda intentos');
   assert.ok(rolPuedeTransicionar('cliente', 'creado', 'anulado', { esDueno: true, estadoPago: 'pendiente' }));
   assert.ok(!rolPuedeTransicionar('cliente', 'creado', 'anulado', { esDueno: true, estadoPago: 'pagado' }));
   assert.ok(!rolPuedeTransicionar('cliente', 'asignado', 'anulado', { esDueno: true }));
