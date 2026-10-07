@@ -462,7 +462,11 @@ input[type="file"]::file-selector-button {
 .sin-sesion .shell { grid-template-columns: minmax(0, 1fr); }
 .sin-sesion .menu { display: none; }
 .sin-sesion #chip-perfil { display: none !important; }
-.login-caja { min-height: calc(100vh - 170px); display: grid; place-items: center; }
+/* Sin sesión el menú queda vacío: se quita su columna para que la tarjeta quede al centro de la pantalla. */
+.shell:has(.login-caja) { grid-template-columns: minmax(0, 1fr); }
+.shell:has(.login-caja) .menu { display: none; }
+.shell:has(.login-caja) .vista { max-width: none; }
+.login-caja { min-height: calc(100vh - 76px - 138px); display: grid; place-items: center; }
 .login { width: min(430px, 100%); margin: 0; padding: 30px 26px; }
 .login .logo { height: 96px; width: auto; max-width: 220px; object-fit: contain; border-radius: 16px; margin-bottom: 14px; }
 .login h1 { margin: 0 0 4px; }
