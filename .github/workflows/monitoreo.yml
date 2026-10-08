@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Revisar /api/health
         env:
-          URL: ${{ vars.URL_MONITOREO || 'https://env-os-chile-production.up.railway.app' }}
+          URL: ${{ vars.URL_MONITOREO || 'https://www.jfenvios.cl' }}
         run: |
           for intento in 1 2 3; do
             respuesta=$(curl -s -m 20 "$URL/api/health" || true)
