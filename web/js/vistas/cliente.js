@@ -261,7 +261,7 @@ export async function nuevo() {
     const p = w.paquete;
     const t = app.conf.tarifas;
     return html`
-      <div class="aviso alerta" style="margin-bottom:16px">⚠️ <b>Importante:</b> ingresa el peso y las dimensiones reales de tu paquete. Si detectamos diferencias al recibirlo, el cobro adicional se incluirá en tu próxima cuenta.</div>
+      <div class="aviso alerta" style="margin-bottom:16px">⚠️ <b>Importante:</b> declara el peso y las dimensiones reales de tu paquete. Si excede los límites de la categoría seleccionada, no será recibido y no habrá reembolso.</div>
       <h3 style="margin-top:0">¿De qué tamaño es cada bulto? *</h3>
       <div class="grid g2" id="grupo-tamano" style="margin-bottom:8px">
         <label class="item-envio" style="cursor:pointer;align-items:flex-start"><div>

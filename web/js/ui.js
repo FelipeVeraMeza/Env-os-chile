@@ -12,7 +12,8 @@ function valor(v) {
 export function html(partes, ...vals) {
   return raw(partes.reduce((acc, p, i) => acc + p + (i < vals.length ? valor(vals[i]) : ''), ''));
 }
-export function montar(el, contenido) { el.innerHTML = contenido instanceof Raw ? contenido.s : valor(contenido); return el; }
+// Si el contenedor ya no está (se cambió de pantalla mientras llegaban los datos), no hay nada que dibujar.
+export function montar(el, contenido) { if (el) el.innerHTML = contenido instanceof Raw ? contenido.s : valor(contenido); return el; }
 
 export const $ = (sel, raiz = document) => raiz.querySelector(sel);
 export const $$ = (sel, raiz = document) => [...raiz.querySelectorAll(sel)];
@@ -43,7 +44,12 @@ export function toast(mensaje, tipo = '') {
   setTimeout(() => t.remove(), 4200);
 }
 
-export function errorToast(err) { toast(err.message || 'Ocurrió un error', 'error'); }
+// Un error de programación (TypeError, p. ej. un elemento de una pantalla que ya se cerró) no se muestra con su texto
+// técnico ("Cannot set properties of null"): queda en la consola. Los errores de la API y de conexión sí se muestran.
+export function errorToast(err) {
+  if (err instanceof TypeError) { console.error(err); return; }
+  toast(err.message || 'Ocurrió un error', 'error');
+}
 
 // Botón para copiar un dato con un toque (datos bancarios y monto de la transferencia, pedido 03-10).
 export function botonCopiar(valor, etiqueta = 'dato') {

@@ -70,6 +70,8 @@ const RUTAS = [
 
 const INICIO = { cliente: '#/inicio', repartidor: '#/ruta', admin: '#/panel' };
 
+let navegacion = 0; // cuenta las navegaciones: una pantalla que termina de cargar tarde sabe que ya no es la actual
+
 export function ir(hash) { if (location.hash === hash) enrutar(); else location.hash = hash; }
 
 async function enrutar() {
@@ -83,10 +85,17 @@ async function enrutar() {
   if (!ruta) return ir(INICIO[rol] || '#/seguimiento');
   pintarMenu(hash);
   $('#modal-raiz').replaceChildren(); // al navegar se cierran hojas y modales abiertos
-  const vista = $('#vista');
+  // Cambio rápido de pestaña (pedido 09-10): la pantalla anterior seguía cargando y, al llegar sus datos, se dibujaba
+  // encima de la nueva o fallaba con "Cannot set properties of null". Cada pantalla se dibuja en un contenedor nuevo:
+  // la anterior queda dibujando en el suyo, ya fuera de la página, y sus errores no se muestran.
+  const nav = ++navegacion;
+  const anterior = $('#vista');
+  const vista = anterior.cloneNode(false);
+  anterior.replaceWith(vista);
   app.refrescar = null;
   try {
     await ruta[1](hash.match(ruta[0]));
+    if (nav !== navegacion) return;
     // Pantallas que se redibujan completas al refrescar (las listas con filtros definen su propio app.refrescar).
     if (!app.refrescar && /^#\/(ruta|inicio|envio\/\d+)$/.test(hash)) {
       app.refrescar = async () => {
@@ -96,6 +105,7 @@ async function enrutar() {
       };
     }
   } catch (err) {
+    if (nav !== navegacion) return;
     montar(vista, html`<div class="card"><h2>No se pudo cargar esta pantalla</h2><p class="sub">${err.message}</p>
       <button class="btn sec" onclick="location.reload()">Reintentar</button></div>`);
   }
