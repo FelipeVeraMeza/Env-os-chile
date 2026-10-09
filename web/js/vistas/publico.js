@@ -1,5 +1,6 @@
-import { get, post } from '../api.js';
-import { $, badge, clp, errorToast, fechaHora, html, montar, toast } from '../ui.js';
+import { api, get, post } from '../api.js';
+import { $, badge, clp, errorToast, fechaHora, html, icono, marcarErrores, montar, mostrarBlob, toast } from '../ui.js';
+import { enlazarSoporte } from './soporte.js';
 
 // Seguimiento por folio: muestra solo el estado, sin datos personales.
 // Intentos de entrega (pedido 07-10): en qué intento va, cuántos fallaron y si se devolvió al remitente.
@@ -20,6 +21,40 @@ function avisoIntentos(s) {
   return '';
 }
 
+// Foto del paquete al crearlo (pedido 09-10), debajo de "Creado": quien recibe compara si llegó en las mismas condiciones.
+// Por privacidad (la foto puede mostrar la etiqueta) se piden los últimos 4 dígitos del teléfono de quien recibe.
+const bloqueFoto = () => html`<div class="foto-seguimiento" id="foto-seg">
+  <div class="fila" style="gap:8px">${icono('camara')}<b>Foto del paquete al crearlo</b></div>
+  <p class="sub" style="margin:4px 0 8px">Compárala al recibirlo para ver que llegó en las mismas condiciones.</p>
+  <form class="fila" id="f-foto-seg" novalidate>
+    <label class="campo" style="flex:1;min-width:150px">Últimos 4 dígitos del teléfono de quien recibe
+      <input name="clave" inputmode="numeric" autocomplete="off" maxlength="4" pattern="\\d{4}" placeholder="1234"></label>
+    <button class="btn sec chico" style="align-self:flex-end;min-height:46px">Ver foto</button>
+  </form>
+</div>`;
+
+function enlazarFoto(folio) {
+  const f = $('#f-foto-seg');
+  if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const clave = f.clave.value.replace(/\D/g, '');
+    if (marcarErrores(f, clave.length === 4 ? {} : { clave: 'Escribe 4 dígitos' })) return;
+    const btn = $('button', f);
+    btn.disabled = true;
+    try {
+      const foto = await api(`/api/seguimiento/${encodeURIComponent(folio)}/foto`, { metodo: 'POST', json: { clave }, blob: true });
+      const caja = $('#foto-seg');
+      montar(caja, html`<div class="fila" style="gap:8px">${icono('camara')}<b>Foto del paquete al crearlo</b></div>
+        <img class="foto-paquete" alt="Foto del paquete al momento de crear el envío">`);
+      mostrarBlob($('img', caja), foto);
+    } catch (err) {
+      if (!marcarErrores(f, err.detalles)) errorToast(err);
+      btn.disabled = false;
+    }
+  };
+}
+
 export async function seguimiento(folioInicial) {
   const vista = $('#vista');
   montar(vista, html`
@@ -36,8 +71,13 @@ export async function seguimiento(folioInicial) {
         <div class="card-titulo"><div><h2 class="mono">${s.folio}</h2><div class="sub">Destino: ${s.tipo_destino === 'punto_courier' ? `punto ${s.courier_empresa} · ` : ''}${s.comuna}</div></div>${badge(s.estado, s.estado_label)}</div>
         ${s.horario_especial ? html`<p class="sub">Horario especial: ${s.franja_horaria}</p>` : ''}
         ${avisoIntentos(s)}
-        <ol class="linea-tiempo" style="margin-top:14px">${s.historial.filter((h) => h.estado !== 'borrador').map((h) => html`<li class="${['fallido', 'devuelto'].includes(h.estado) ? 'rechazo' : ''}"><b>${h.label}</b>${h.detalle ? html`<div class="sub">${h.detalle}</div>` : ''}<div class="cuando">${fechaHora(h.fecha)}</div></li>`)}</ol>
+        <ol class="linea-tiempo" style="margin-top:14px">${s.historial.filter((h) => h.estado !== 'borrador').map((h, i, lista) => html`<li class="${['fallido', 'devuelto'].includes(h.estado) ? 'rechazo' : ''}"><b>${h.label}</b>${h.detalle ? html`<div class="sub">${h.detalle}</div>` : ''}<div class="cuando">${fechaHora(h.fecha)}</div>
+          ${s.foto_paquete && h.estado === 'creado' && lista.findIndex((x) => x.estado === 'creado') === i ? bloqueFoto() : ''}</li>`)}</ol>
+        <div class="fila entre ayuda-seguimiento"><span class="sub">¿Algún problema con este envío?</span>
+          <button type="button" class="btn sec chico" data-soporte data-folio="${s.folio}">${icono('soporte')} Escribir a soporte</button></div>
       </div>`);
+      enlazarFoto(s.folio);
+      enlazarSoporte(res);
       if (location.hash !== `#/seguimiento/${s.folio}`) history.replaceState(null, '', `#/seguimiento/${s.folio}`);
     } catch (err) {
       montar(res, html`<div class="aviso alerta">${err.message}</div>`);

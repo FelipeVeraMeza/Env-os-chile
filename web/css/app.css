@@ -426,8 +426,7 @@ input[type="file"]::file-selector-button {
 .desglose div { gap: 12px; }
 .desglose b { text-align: right; overflow-wrap: anywhere; min-width: 0; }
 .modal .pila > .btn, .modal form > .btn:last-child { width: 100%; }
-/* Firma en la pantalla del repartidor (fondo blanco: la firma se ve igual al imprimirla). */
-.firma-pad { width: 100%; height: 160px; background: #fff; border-radius: 12px; border: 2px dashed rgba(10, 26, 107, .35); touch-action: none; cursor: crosshair; }
+/* Firma de quien recibió (entregas anteriores al 09-10; fondo blanco: se ve igual al imprimirla). */
 .foto-mini.firma-mini { object-fit: contain; background: #fff; }
 /* Escáner de QR */
 .escaner { position: relative; border-radius: 16px; overflow: hidden; background: #000; aspect-ratio: 1 / 1; max-height: 60vh; }
@@ -516,3 +515,46 @@ input[type="file"]::file-selector-button {
   width: min(560px, calc(100% - 32px)); display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px 14px; border-radius: 14px; background: var(--degradado-btn); color: var(--blanco); box-shadow: 0 12px 30px rgba(0, 0, 0, .4); }
 @media (max-width: 860px) { .aviso-version { top: calc(70px + env(safe-area-inset-top)); } }
+
+/* ---------- Pedidos 09-10 ---------- */
+/* Nombre completo en el chip de la cuenta: si no cabe, baja a dos líneas en vez de cortarse ("SOLO"). */
+#chip-perfil { max-width: min(46vw, 220px); padding-top: 3px; padding-bottom: 3px; }
+#chip-rol { min-width: 0; text-align: left; line-height: 1.15; font-size: .8rem; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+#chip-perfil .avatar { flex: none; }
+/* Inicio del cliente: cobertura bajo la descripción del servicio, en letra más pequeña. */
+.hero p.cobertura { font-size: .82rem; font-weight: 600; opacity: .85; margin-top: -2px; position: relative; z-index: 1; }
+/* Inicio de sesión: botones en vez de enlaces subrayados; el seguimiento destaca en blanco. */
+.acciones-login { display: grid; gap: 10px; }
+.acciones-login .btn { min-height: 48px; }
+/* Soporte */
+.card.ayuda { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+.card.ayuda h2 { margin-bottom: 2px; }
+.card.ayuda p { margin: 0; }
+.texto-mensaje { white-space: pre-line; margin: 6px 0 0; }
+.respuesta-soporte { white-space: pre-line; margin-top: 12px; padding: 10px 12px; border-radius: 12px; border-left: 4px solid var(--magenta-400); background: rgba(224, 33, 138, .1); }
+.respuesta-soporte .muted { white-space: normal; font-size: .8rem; margin-bottom: 4px; }
+.menu a, .menu button { position: relative; }
+.contador { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--magenta-500); color: var(--blanco);
+  font-size: .72rem; font-weight: 800; display: inline-grid; place-items: center; margin-left: auto; }
+.contador[hidden] { display: none; }
+@media (max-width: 860px) { .menu .contador { position: absolute; top: 2px; right: 50%; margin: 0 -22px 0 0; } }
+.hoja-lista .contador { margin-left: auto; }
+@media (max-width: 640px) { .segmentos.desplazable { grid-auto-columns: max-content; overflow-x: auto; } }
+/* Seguimiento: foto del paquete bajo "Creado" y acceso a soporte. */
+.foto-seguimiento { margin-top: 10px; padding: 12px; border-radius: 14px; background: rgba(255, 255, 255, .06); border: 1px solid var(--borde); }
+.foto-seguimiento svg { width: 20px; height: 20px; }
+.foto-paquete { display: block; width: 100%; max-height: 420px; object-fit: contain; margin-top: 10px; border-radius: 12px; background: rgba(0, 0, 0, .25); }
+.ayuda-seguimiento { margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--borde); }
+/* Entrega del repartidor: la foto es un recuadro grande que se nota (antes se perdía en la pantalla). */
+.foto-entrega { display: grid; justify-items: center; gap: 4px; padding: 22px 16px; border-radius: 18px; cursor: pointer; text-align: center;
+  border: 2px dashed var(--magenta-400); background: rgba(224, 33, 138, .14); color: var(--texto); }
+.foto-entrega:focus-within { outline: 3px solid var(--magenta-200); outline-offset: 2px; }
+.foto-entrega .icono-foto { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--degradado-btn); box-shadow: 0 8px 20px rgba(224, 33, 138, .35); }
+.foto-entrega .icono-foto svg { width: 32px; height: 32px; }
+.foto-entrega b { font-size: 1.1rem; }
+.foto-entrega small { color: var(--texto-2); }
+.foto-entrega img { width: 100%; max-height: 240px; object-fit: cover; border-radius: 12px; margin-top: 8px; }
+.foto-entrega.lista { border-style: solid; border-color: rgba(52, 211, 153, .6); background: rgba(52, 211, 153, .1); }
+.foto-entrega.lista .icono-foto { display: none; }
+.foto-entrega.falta { border-color: var(--error); background: rgba(255, 107, 138, .12); }

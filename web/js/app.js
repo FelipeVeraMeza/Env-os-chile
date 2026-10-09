@@ -6,6 +6,7 @@ import * as repartidor from './vistas/repartidor.js';
 import * as admin from './vistas/admin.js';
 import * as publico from './vistas/publico.js';
 import * as cuenta from './vistas/cuenta.js';
+import * as soporte from './vistas/soporte.js';
 
 // Estado compartido de la aplicación.
 export const app = { conf: null, usuario: null, perfiles: [], refrescar: null };
@@ -15,21 +16,24 @@ const MENUS = {
     ['#/inicio', 'inicio', 'Inicio'],
     ['#/nuevo', 'nuevo', 'Nuevo envío'],
     ['#/envios', 'envios', 'Mis envíos'],
-    ['#/carrito', 'cobranza', 'Por pagar'],
+    ['#/carrito', 'cobranza', 'Pagar envíos'], // antes "Por pagar": en otras empresas significa que paga quien recibe (pedido 09-10)
     ['#/libreta', 'libreta', 'Guardados'],
     ['#/reclamos', 'seguro', 'Seguros', 'solo-escritorio'],
     ['#/seguimiento', 'seguimiento', 'Seguimiento', 'solo-escritorio'],
+    ['#/soporte', 'soporte', 'Soporte', 'solo-escritorio'],
   ],
   repartidor: [
     ['#/ruta', 'ruta', 'Mi ruta'],
     ['#/envios', 'envios', 'Historial'],
     ['#/seguimiento', 'seguimiento', 'Seguimiento'],
+    ['#/soporte', 'soporte', 'Soporte'],
   ],
   admin: [
     ['#/panel', 'panel', 'Panel'],
     ['#/envios', 'envios', 'Envíos'],
     ['#/ruta', 'ruta', 'Mi ruta'], // administración también reparte
     ['#/cobranza', 'cobranza', 'Cobranza'],
+    ['#/soporte', 'soporte', 'Soporte', 'solo-escritorio'],
     ['#/nuevo', 'nuevo', 'Nuevo', 'solo-escritorio'],
     ['#/reclamos', 'seguro', 'Seguros', 'solo-escritorio'],
     ['#/tarifas', 'tarifas', 'Tarifas'],
@@ -61,6 +65,7 @@ const RUTAS = [
   [/^#\/usuarios$/, () => admin.usuarios(), 'admin'],
   [/^#\/seguridad$/, () => admin.seguridad(), 'admin'],
   [/^#\/ajustes$/, () => admin.ajustes(), 'admin'],
+  [/^#\/soporte$/, () => (app.usuario.rol === 'admin' ? soporte.bandeja() : soporte.misMensajes()), ['admin', 'cliente', 'repartidor']],
 ];
 
 const INICIO = { cliente: '#/inicio', repartidor: '#/ruta', admin: '#/panel' };
@@ -100,13 +105,17 @@ async function enrutar() {
   if (conSesion() && app.usuario?.debe_cambiar_clave && !$('#f-clave-nueva')) dialogoCambiarClave({ obligatorio: true });
 }
 
+// Mensajes de soporte sin responder (solo administración): el número lo completa actualizarContadorSoporte().
+const contador = (h) => (h === '#/soporte' && app.usuario?.rol === 'admin' ? html`<span class="contador" data-contador-soporte hidden></span>` : '');
+
 function pintarMenu(hash) {
   const items = [...(MENUS[app.usuario?.rol] || []), ...(app.usuario && app.conf?.auth_mode === 'jwt' ? [['#/cuenta', 'usuarios', 'Mi cuenta', 'solo-escritorio']] : [])];
   const ocultos = items.filter(([, , , cls]) => cls === 'solo-escritorio');
   montar($('#menu'), html`<div class="titulo-menu">${app.usuario?.nombre || ''}</div>${items.map(([h, ic, txt, cls]) => html`
-    <a href="${h}" class="${[hash.startsWith(h) ? 'activo' : '', cls].filter(Boolean).join(' ')}">${icono(ic)}<span>${txt}</span></a>`)}
-    <button type="button" class="solo-movil ${ocultos.some(([h]) => hash.startsWith(h)) ? 'activo' : ''}" id="btn-mas" aria-label="Más opciones">${raw('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>')}<span>Más</span></button>`);
+    <a href="${h}" class="${[hash.startsWith(h) ? 'activo' : '', cls].filter(Boolean).join(' ')}">${icono(ic)}<span>${txt}</span>${contador(h)}</a>`)}
+    <button type="button" class="solo-movil ${ocultos.some(([h]) => hash.startsWith(h)) ? 'activo' : ''}" id="btn-mas" aria-label="Más opciones">${raw('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>')}<span>Más</span>${ocultos.some(([h]) => h === '#/soporte') ? contador('#/soporte') : ''}</button>`);
   $('#btn-mas').onclick = hojaMas;
+  soporte.actualizarContadorSoporte();
 }
 
 // ---------- Celular: hoja "Más" (secciones extra y cambio de perfil) ----------
@@ -117,7 +126,9 @@ const iniciales = (nombre) => String(nombre || '?').split(/\s+/).filter((p) => /
 
 function pintarChip() {
   $('#chip-avatar').textContent = conSesion() ? iniciales(app.usuario?.nombre) : INICIALES[app.usuario?.rol] || '?';
-  $('#chip-rol').textContent = !app.usuario ? 'Perfil' : conSesion() ? app.usuario.nombre.split(' ')[0] : ROL_TXT[app.usuario.rol];
+  // Nombre completo (pedido 09-10): con solo la primera palabra, "Solo por Gracia" quedaba en "SOLO". Si no cabe, baja a dos líneas.
+  $('#chip-rol').textContent = !app.usuario ? 'Perfil' : conSesion() ? app.usuario.nombre : ROL_TXT[app.usuario.rol];
+  $('#chip-perfil').title = app.usuario?.nombre || '';
 }
 
 function hojaMas() {
@@ -127,13 +138,14 @@ function hojaMas() {
   if (!ocultos.length && !app.perfiles.length) return; // nada que mostrar (p. ej. antes de ingresar la clave)
   const m = modal(html`
     ${ocultos.length ? html`<div class="hoja-titulo" style="margin-top:0">Secciones</div><div class="hoja-lista">${ocultos.map(([h, ic, txt]) => html`
-      <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}</a>`)}</div>` : ''}
+      <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}${contador(h)}</a>`)}</div>` : ''}
     ${app.perfiles.length ? html`<div class="hoja-titulo" ${ocultos.length ? '' : raw('style="margin-top:0"')}>Ver la plataforma como</div>
     <div class="hoja-lista">${app.perfiles.map((p) => html`<button class="item ${p.id === app.usuario?.id ? 'activo' : ''}" data-perfil="${p.id}">
       <span class="perfil-chip" style="pointer-events:none;padding:0;border:0;background:none"><span class="avatar">${INICIALES[p.rol]}</span></span>${p.nombre}</button>`)}</div>` : ''}
   `);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
   m.el.querySelectorAll('[data-perfil]').forEach((b) => { b.onclick = () => { m.cerrar(); cambiarPerfil(Number(b.dataset.perfil)); }; });
+  soporte.actualizarContadorSoporte();
 }
 
 // ---------- Sesión real (AUTH_MODE=jwt) ----------
@@ -141,7 +153,7 @@ function hojaCuenta(ocultos, hash) {
   if (!app.usuario) return;
   const m = modal(html`
     ${ocultos.length ? html`<div class="hoja-titulo" style="margin-top:0">Secciones</div><div class="hoja-lista">${ocultos.map(([h, ic, txt]) => html`
-      <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}</a>`)}</div>` : ''}
+      <a href="${h}" class="${hash.startsWith(h) ? 'activo' : ''}">${icono(ic)}${txt}${contador(h)}</a>`)}</div>` : ''}
     <div class="hoja-titulo" ${ocultos.length ? '' : raw('style="margin-top:0"')}>Mi cuenta</div>
     <div class="cuenta-resumen"><span class="avatar">${iniciales(app.usuario.nombre)}</span>
       <div><b>${app.usuario.nombre}</b><div class="sub">${app.usuario.correo} · ${ROL_TXT[app.usuario.rol]}</div></div></div>
@@ -151,6 +163,7 @@ function hojaCuenta(ocultos, hash) {
       <button class="item" id="cerrar-sesion">${icono('salir')}Cerrar sesión</button>
     </div>`);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
+  soporte.actualizarContadorSoporte();
   $('#cambiar-clave', m.el).onclick = () => { m.cerrar(); dialogoCambiarClave(); };
   $('#cerrar-sesion', m.el).onclick = () => { m.cerrar(); cerrarSesion(); };
   $('#cerrar-todas', m.el).onclick = async () => {
@@ -172,10 +185,15 @@ function pantallaLogin(mensaje) {
         <button type="button" class="btn sec chico ver-clave" aria-label="Mostrar contraseña">Mostrar</button></span></label>
       <button class="btn grande ancho" id="entrar">Entrar</button>
     </form>
-    <div class="fila entre" style="margin-top:16px"><a href="#/recuperar">¿Olvidaste tu contraseña?</a>
-      ${app.conf.operacion?.registro_clientes ? html`<a href="#/registro">Crear cuenta de cliente</a>` : ''}</div>
-    <div class="pie"><a href="#/seguimiento">Seguimiento de envío →</a></div>
+    <p style="margin:14px 0 0;text-align:center"><a href="#/recuperar">¿Olvidaste tu contraseña?</a></p>
+    <!-- Botones en vez de enlaces subrayados (pedido 09-10); el seguimiento destaca en blanco. -->
+    <div class="pie acciones-login">
+      <a class="btn blanco ancho" href="#/seguimiento">${icono('seguimiento')} Seguimiento de envío</a>
+      ${app.conf.operacion?.registro_clientes ? html`<a class="btn sec ancho" href="#/registro">${icono('usuarios')} Crear cuenta de cliente</a>` : ''}
+      <button type="button" class="btn sec ancho" data-soporte>${icono('soporte')} Escribir a soporte</button>
+    </div>
   </div></div>`);
+  soporte.enlazarSoporte($('#vista'));
   const f = $('#f-login');
   const clave = $('input[name="password"]', f);
   $('.ver-clave', f).onclick = (e) => {

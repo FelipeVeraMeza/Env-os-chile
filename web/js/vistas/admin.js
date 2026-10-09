@@ -28,14 +28,15 @@ export async function panel(rango = {}) {
   const desde = rango.desde || `${hoy.slice(0, 8)}01`;
   const hasta = rango.hasta || hoy;
   montar(vista, esqueleto(4));
-  let g; let pendientes; let reclamosAbiertos; let comprobantes; let usuariosLista;
+  let g; let pendientes; let reclamosAbiertos; let comprobantes; let usuariosLista; let soporte;
   try {
-    [g, pendientes, reclamosAbiertos, comprobantes, usuariosLista] = await Promise.all([
+    [g, pendientes, reclamosAbiertos, comprobantes, usuariosLista, soporte] = await Promise.all([
       get(`/api/reportes/ganancias?desde=${desde}&hasta=${hasta}`),
       get('/api/envios?estado=creado&repartidor_id=sin&limite=5'),
       get('/api/reclamos?estado=solicitado'),
       get('/api/cobranza/comprobantes').catch(() => []),
       app.conf.auth_mode === 'jwt' ? get('/api/usuarios').catch(() => []) : [],
+      get('/api/soporte/nuevos').catch(() => ({ nuevos: 0 })),
     ]);
   } catch (err) { return errorRango(vista, err, () => panel()); }
   const pidieronClave = usuariosLista.filter((u) => u.pidio_clave_en && u.activo);
@@ -50,6 +51,7 @@ export async function panel(rango = {}) {
       </form></div>
     ${avisoCuentaTransferencia()}
     ${pidieronClave.length ? html`<a class="aviso magenta" href="#/usuarios" style="display:block;margin-bottom:16px;color:inherit;text-decoration:none"><b>${pidieronClave.length} persona(s) pidieron recuperar su contraseña</b> (${pidieronClave.map((u) => u.nombre).join(', ')}). Envíales el enlace por WhatsApp → Ir a Usuarios</a>` : ''}
+    ${soporte.nuevos ? html`<a class="aviso magenta" href="#/soporte" style="display:block;margin-bottom:16px;color:inherit;text-decoration:none"><b>${soporte.nuevos} mensaje(s) nuevo(s) en Soporte.</b> Clientes o visitantes de la página esperan respuesta → Ir a Soporte</a>` : ''}
     ${comprobantes.length ? html`<a class="aviso magenta" href="#/cobranza" style="display:block;margin-bottom:16px;color:inherit;text-decoration:none"><b>${comprobantes.length} comprobante(s) de transferencia por revisar.</b> Esos envíos no se pueden asignar ni retirar hasta que apruebes el pago → Ir a Cobranza</a>` : ''}
     <div class="grid g4">
       <div class="kpi destacado"><div class="etiqueta">Ganancia neta</div><div class="valor">${clp(g.neto)}</div><div class="nota">${fecha(g.desde)} – ${fecha(g.hasta)}</div></div>
@@ -338,6 +340,8 @@ const ACCIONES = {
   revisar: 'Revisó reclamo', pagar: 'Pagó reclamo', pago_aprobado: 'Pago aprobado', pago_rechazado: 'Pago rechazado', login: 'Inició sesión', qr_escaneado: 'QR escaneado',
   comprobante_pago: 'Subió comprobante de transferencia', aprobar_comprobante: 'Aprobó comprobante', rechazar_comprobante: 'Rechazó comprobante',
   ocultar_anulado: 'Cliente eliminó el anulado de su lista',
+  mensaje_soporte: 'Escribió a soporte', responder_soporte: 'Respondió en soporte', cerrar_soporte: 'Cerró mensaje de soporte', reabrir_soporte: 'Reabrió mensaje de soporte',
+  foto_seguimiento: 'Vio la foto del paquete en el seguimiento',
 };
 export async function ajustes() {
   const vista = $('#vista');
@@ -351,7 +355,8 @@ export async function ajustes() {
         <div class="pila">
           <label class="campo">Nombre de la empresa<input name="nombre" value="${n.nombre}"></label>
           <div class="grid g2"><label class="campo">RUT<input name="rut" value="${n.rut}"></label><label class="campo">Teléfono<input name="telefono" value="${n.telefono}"></label></div>
-          <label class="campo">Correo de contacto<input name="correo" value="${n.correo}"></label>
+          <label class="campo">Correo de contacto <small>(también recibe el aviso de cada mensaje a soporte)</small><input name="correo" value="${n.correo}"></label>
+          <label class="campo">WhatsApp de soporte <small>(opcional: si lo completas, los clientes también pueden escribirte por WhatsApp)</small><input name="whatsapp" value="${n.whatsapp || ''}" inputmode="tel" placeholder="+56 9 1234 5678"></label>
           <div class="campo">Logo <small>(PNG, JPG, WebP o SVG; ideal cuadrado y con fondo transparente)</small>
             <div class="fila" style="margin-top:6px;align-items:center">
               <img id="logo-vista" src="${n.logo_url || 'icons/icono.svg'}" alt="Logo actual" style="width:64px;height:64px;object-fit:contain;border-radius:14px;background:rgba(255,255,255,.08)">
@@ -490,7 +495,7 @@ export async function cobranza(rango = {}) {
   // Recordatorio al cliente por WhatsApp (mensaje listo; se envía con un toque desde el teléfono de administración).
   const recordatorio = (e) => {
     const fono = String(e.cliente_telefono || '').replace(/\D/g, '');
-    const texto = `Hola ${e.cliente_nombre}: tu envío ${e.folio} (${clp(e.tarifa_total)}) sigue sin pagar y se anula el ${fechaHora(e.vence_en)}. Paga desde la app en "Por pagar" o sube el comprobante de tu transferencia. ${app.conf.negocio.nombre}`;
+    const texto = `Hola ${e.cliente_nombre}: tu envío ${e.folio} (${clp(e.tarifa_total)}) sigue sin pagar y se anula el ${fechaHora(e.vence_en)}. Paga desde la app en "Pagar envíos" o sube el comprobante de tu transferencia. ${app.conf.negocio.nombre}`;
     return fono ? `https://wa.me/${fono}?text=${encodeURIComponent(texto)}` : null;
   };
   const restante = (iso) => {

@@ -16,6 +16,7 @@ export const TIPOS = {
   exportacion: ['info', 'Exportación de datos (CSV)'],
   descarga_archivo: ['info', 'Descarga de foto o boleta'],
   enlace_invalido: ['aviso', 'Enlace alterado, vencido o inexistente'],
+  foto_seguimiento_fallida: ['aviso', 'Dígitos incorrectos al pedir la foto del paquete en el seguimiento'],
   link_pago_creado: ['info', 'Link de pago generado'],
   archivo_rechazado: ['aviso', 'Archivo sospechoso rechazado'],
   limite_peticiones: ['aviso', 'Exceso de peticiones'],

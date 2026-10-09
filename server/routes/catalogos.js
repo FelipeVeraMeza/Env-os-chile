@@ -148,12 +148,13 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
     else if (nuevo.logo_url.length > 400_000) errores.logo_url = 'El logo es demasiado grande';
   }
   if (clave === 'negocio') {
-    for (const k of ['nombre', 'rut', 'telefono', 'correo']) nuevo[k] = String(nuevo[k] ?? '').trim();
+    for (const k of ['nombre', 'rut', 'telefono', 'correo', 'whatsapp']) nuevo[k] = String(nuevo[k] ?? '').trim();
     if (!nuevo.nombre) errores.nombre = 'El nombre de la empresa es obligatorio (aparece en el ticket y en la app)';
-    for (const k of ['nombre', 'rut', 'telefono', 'correo']) if (nuevo[k].length > 80) errores[k] = 'Máximo 80 caracteres';
+    for (const k of ['nombre', 'rut', 'telefono', 'correo', 'whatsapp']) if (nuevo[k].length > 80) errores[k] = 'Máximo 80 caracteres';
     if (nuevo.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nuevo.correo)) errores.correo = 'Correo inválido';
     if (nuevo.rut) { const rut = normalizarRut(nuevo.rut); if (rut) nuevo.rut = rut; else errores.rut = 'RUT inválido'; }
     if (nuevo.telefono && !errores.telefono) nuevo.telefono = normalizarTelefono(nuevo.telefono) || nuevo.telefono;
+    if (nuevo.whatsapp && !errores.whatsapp) { const w = normalizarTelefono(nuevo.whatsapp); if (w) nuevo.whatsapp = w; else errores.whatsapp = 'Celular con formato +56 9 XXXX XXXX'; }
   }
   if (clave === 'ticket') {
     nuevo.pie = String(nuevo.pie ?? '').trim();

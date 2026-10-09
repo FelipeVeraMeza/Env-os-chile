@@ -15,6 +15,7 @@ import { adjuntos, auditoria, costos, pagoPublico, pagos, reclamos, reportes } f
 import { paginaQr, seguimiento } from './routes/publico.js';
 import { cobranza } from './routes/cobranza.js';
 import { seguridad } from './routes/seguridad.js';
+import { soporte } from './routes/soporte.js';
 import { limitarPeticiones } from './lib/seguridad.js';
 
 const raiz = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -63,6 +64,9 @@ export function crearApp() {
   app.use('/api/auth/login', limite('login', 20));
   app.use(['/api/seguimiento', '/q', '/api/pago-publico'], limite('publico', config.limites.publico));
   app.use('/api', (req, res, next) => (req.is('multipart/form-data') ? limite('subidas', 30)(req, res, next) : next()));
+  // Mensajes a soporte sin sesión (pedido 09-10): pocos por minuto, para que nadie llene la bandeja de administración.
+  const limiteSoporte = limite('soporte', 10);
+  app.use('/api/soporte', (req, res, next) => (req.method === 'POST' && req.path === '/' ? limiteSoporte(req, res, next) : next()));
   const limiteApi = limite('api', config.limites.api);
   // El seguimiento público ya tiene su límite más estricto: no se le aplica (ni se le sobrescriben las cabeceras) el general.
   app.use('/api', (req, res, next) => (req.path.startsWith('/seguimiento') || req.path.startsWith('/pago-publico') ? next() : limiteApi(req, res, next)));
@@ -99,6 +103,7 @@ export function crearApp() {
   app.use('/api/cobranza', cobranza);
   app.use('/api/seguridad', seguridad);
   app.use('/api/auditoria', auditoria);
+  app.use('/api/soporte', soporte);
   app.use('/q', paginaQr);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 

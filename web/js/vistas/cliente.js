@@ -5,6 +5,7 @@ import {
 } from '../ui.js';
 import { comunasCobertura, direccionTexto, itemEnvio, mapaGoogle, opcionesComunas, textoPaquete, urlMapaGoogle } from './comun.js';
 import { pagar, subirComprobante } from './envios.js';
+import { enlazarSoporte, tarjetaAyuda } from './soporte.js';
 
 // ================= Inicio del cliente =================
 export async function inicio() {
@@ -12,11 +13,12 @@ export async function inicio() {
   montar(vista, esqueleto(3));
   // Las cifras vienen contadas por el servidor sobre TODOS los envíos (antes se contaban solo los últimos 100 de la lista).
   const [{ items }, r] = await Promise.all([get('/api/envios?limite=6'), get('/api/envios/resumen')]);
-  const nombre = app.usuario.nombre.split(' ')[0];
+  // Nombre completo (pedido 09-10): con la primera palabra, "Solo por Gracia" quedaba en "Hola, SOLO".
   montar(vista, html`
     <section class="hero">
-      <h1>Hola, ${nombre} 👋</h1>
-      <p>Crea tu envío en menos de un minuto. Dentro de Santiago <b>${clp(app.conf.tarifas.base)}</b> hasta ${app.conf.tarifas.peso_estandar_kg} kg y ${app.conf.tarifas.dim_estandar_cm}×${app.conf.tarifas.dim_estandar_cm}×${app.conf.tarifas.dim_estandar_cm} cm, sin importar la cantidad de bultos.${app.conf.operacion.punto_courier ? ' También llevamos tus paquetes a puntos Blue Express, Starken y otros.' : ''}</p>
+      <h1>Hola, ${app.usuario.nombre} 👋</h1>
+      <p>Simplifica tus envíos. Créalo en menos de un minuto y envía dentro de Santiago desde <b>${clp(app.conf.tarifas.base)}</b>.</p>
+      <p class="cobertura">Servicio disponible dentro de Santiago</p>
       <div class="fila" style="margin-top:16px">
         <a class="btn blanco grande" href="#/nuevo">${icono('nuevo')} Nuevo envío</a>
         <a class="btn sec grande" href="#/seguimiento">Seguimiento de envío</a>
@@ -24,7 +26,7 @@ export async function inicio() {
     </section>
     <div class="grid g4" style="margin-bottom:20px">
       <div class="kpi"><div class="etiqueta">En curso</div><div class="valor">${r.en_curso}</div><div class="nota">envíos activos</div></div>
-      <div class="kpi"><div class="etiqueta">Por pagar</div><div class="valor">${r.por_pagar}</div><div class="nota">${clp(r.monto_por_pagar)}</div></div>
+      <div class="kpi"><div class="etiqueta">Sin pagar</div><div class="valor">${r.por_pagar}</div><div class="nota">${clp(r.monto_por_pagar)}</div></div>
       <div class="kpi"><div class="etiqueta">Entregados</div><div class="valor">${r.entregados}</div><div class="nota">con foto y GPS</div></div>
       <div class="kpi destacado"><div class="etiqueta">Total</div><div class="valor">${r.total}</div><div class="nota">envíos registrados</div></div>
     </div>
@@ -35,7 +37,9 @@ export async function inicio() {
     <div class="card">
       <div class="card-titulo"><h2>Envíos recientes</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
       <div class="lista-envios">${items.length ? items.map((e) => itemEnvio(e)) : vacio('Aún no tienes envíos.', html`<a class="btn" href="#/nuevo">Crear mi primer envío</a>`)}</div>
-    </div>`);
+    </div>
+    ${tarjetaAyuda()}`);
+  enlazarSoporte(vista);
 }
 
 // Horario de retiro (pedido 07-10): visible al crear un envío y en el inicio. Lo edita administración en Tarifas y reglas.
@@ -55,7 +59,7 @@ export async function carrito() {
   const items = pendientes.items;
   const t = app.conf.transferencia || {};
   montar(vista, html`
-    <div class="encabezado"><div><h1>Por pagar</h1><p>Marca los envíos que quieres pagar: haces <b>una sola transferencia</b> por el total y subes <b>un solo comprobante</b>. Los envíos sin pagar se anulan solos ${app.conf.operacion.horas_sin_pago || 24} horas después de creados.</p></div>
+    <div class="encabezado"><div><h1>Pagar envíos</h1><p>Marca los envíos que quieres pagar: haces <b>una sola transferencia</b> por el total y subes <b>un solo comprobante</b>. Los envíos sin pagar se anulan solos ${app.conf.operacion.horas_sin_pago || 24} horas después de creados.</p></div>
       <a class="btn sec" href="#/nuevo">${icono('nuevo')} Agregar otro envío</a></div>
     ${items.length ? html`
       <form class="card" id="f-carrito" novalidate>
@@ -257,6 +261,7 @@ export async function nuevo() {
     const p = w.paquete;
     const t = app.conf.tarifas;
     return html`
+      <div class="aviso alerta" style="margin-bottom:16px">⚠️ <b>Importante:</b> ingresa el peso y las dimensiones reales de tu paquete. Si detectamos diferencias al recibirlo, el cobro adicional se incluirá en tu próxima cuenta.</div>
       <h3 style="margin-top:0">¿De qué tamaño es cada bulto? *</h3>
       <div class="grid g2" id="grupo-tamano" style="margin-bottom:8px">
         <label class="item-envio" style="cursor:pointer;align-items:flex-start"><div>

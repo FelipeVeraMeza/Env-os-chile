@@ -49,6 +49,8 @@ export const CONFIG_POR_DEFECTO = {
     telefono: '',
     correo: '',
     logo_url: '',
+    // WhatsApp de soporte (pedido 09-10): si está, el formulario de soporte ofrece también escribir por WhatsApp.
+    whatsapp: '',
   },
   tarifas: {
     // Pedido del cliente 30-09: la tarifa no depende de la cantidad de bultos.

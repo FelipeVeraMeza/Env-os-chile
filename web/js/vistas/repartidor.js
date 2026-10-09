@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, put } from '../api.js';
 import {
-  $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, hoyISO, html, modal, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
+  $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, hoyISO, html, icono, modal, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, direccionTexto, fechaRetiroTexto, retiroTexto, textoIntento, textoPaquete } from './comun.js';
 import { enviarPendientes, entregaPendiente, guardarCopia, guardarEntrega, leerCopia } from '../sin-conexion.js';
@@ -399,17 +399,20 @@ function entregar(e, recargar) {
   const esDemo = app.conf.auth_mode === 'demo';
   const cont = document.createElement('div');
   cont.className = 'modal-fondo';
+  // Pedido 09-10: la foto se perdía en la pantalla (un campo de archivo más); ahora es un recuadro grande y destacado.
+  // Se quitó la firma: al deslizar la pantalla se rayaba sin querer y por ahora no se necesita.
   montar(cont, html`<div class="modal"><h2>Cerrar entrega</h2>
     <form class="pila" id="f-ent" novalidate>
-      <label class="campo">Foto de la entrega * <small>Obligatoria para terminar la entrega</small>
-        <input type="file" name="foto" accept="image/*" capture="environment" required></label>
-      <img id="prev" class="foto-mini" style="display:none;width:100%;height:220px" alt="Vista previa de la foto">
+      <label class="foto-entrega" id="zona-foto">
+        <input type="file" name="foto" accept="image/*" capture="environment" class="sr" required>
+        <span class="icono-foto">${icono('camara')}</span>
+        <b id="foto-titulo">Tomar foto de la entrega</b>
+        <small id="foto-nota">Obligatoria para terminar la entrega</small>
+        <img id="prev" alt="Vista previa de la foto" hidden>
+      </label>
       <div class="aviso" id="gps">Obteniendo ubicación GPS…</div>
       ${esDemo ? html`<button type="button" class="btn sec chico" id="gps-demo">Usar ubicación de prueba (solo demo)</button>` : ''}
       <label class="campo">¿Quién recibe? <small>(opcional)</small><input name="receptor" placeholder="Nombre de quien recibe"></label>
-      <div class="campo"><span>Firma de quien recibe <small>(opcional)</small></span>
-        <canvas id="firma" class="firma-pad" aria-label="Recuadro para firmar con el dedo"></canvas>
-        <div class="fila entre"><small id="firma-estado">Firma con el dedo dentro del recuadro.</small><button type="button" class="btn sec chico" id="borrar-firma">Borrar firma</button></div></div>
       <div class="fila"><button type="button" class="btn sec" id="cancelar">Cancelar</button><button class="btn grande" id="confirmar-ent" disabled>Confirmar entrega</button></div>
     </form></div>`);
   $('#modal-raiz').append(cont);
@@ -434,25 +437,29 @@ function entregar(e, recargar) {
     foto = await comprimirFoto(f);
     const img = $('#prev', cont);
     mostrarBlob(img, foto);
-    img.style.display = 'block';
+    img.hidden = false;
+    $('#zona-foto', cont).classList.add('lista');
+    $('#foto-titulo', cont).textContent = '✔ Foto lista';
+    $('#foto-nota', cont).textContent = 'Toca para tomarla de nuevo';
     listo();
   };
-  const pad = padFirma($('#firma', cont), () => { $('#firma-estado', cont).textContent = '✔ Firma lista'; });
-  $('#borrar-firma', cont).onclick = () => { pad.borrar(); $('#firma-estado', cont).textContent = 'Firma con el dedo dentro del recuadro.'; };
   $('#cancelar', cont).onclick = () => cont.remove();
   $('#f-ent', cont).onsubmit = async (ev) => {
     ev.preventDefault();
-    if (!foto) return toast('La foto es obligatoria para terminar la entrega', 'error');
-    const firma = await pad.png();
+    if (!foto) {
+      const zona = $('#zona-foto', cont);
+      zona.classList.add('falta');
+      zona.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return toast('La foto es obligatoria para terminar la entrega', 'error');
+    }
     const fd = new FormData();
     fd.append('foto', foto, 'entrega.jpg');
-    if (firma) fd.append('firma', firma, 'firma.png');
     if (ubic) { fd.append('lat', ubic.lat); fd.append('lon', ubic.lon); if (ubic.precision) fd.append('precision', ubic.precision); }
     if (ev.target.receptor.value) fd.append('receptor', ev.target.receptor.value);
     const btn = $('#confirmar-ent', cont);
     btn.disabled = true;
     const guardarSinSenal = async () => {
-      await guardarEntrega({ envioId: e.id, foto, firma, lat: ubic?.lat, lon: ubic?.lon, precision: ubic?.precision, receptor: ev.target.receptor.value || null });
+      await guardarEntrega({ envioId: e.id, foto, lat: ubic?.lat, lon: ubic?.lon, precision: ubic?.precision, receptor: ev.target.receptor.value || null });
       cont.remove();
       toast('Sin señal: la entrega quedó guardada en el teléfono y se enviará sola al volver internet', 'ok');
       recargar();
@@ -510,51 +517,10 @@ function fallido(e, segundosDesdeLlegada, espera, recargar) {
   };
 }
 
-
-// ================= Firma en la pantalla (pedido 03-10) =================
-// Recuadro para firmar con el dedo. png() devuelve la firma como imagen PNG, o null si no se firmó.
-function padFirma(canvas, alFirmar) {
-  const escala = window.devicePixelRatio || 1;
-  const ajustar = () => {
-    const { width } = canvas.getBoundingClientRect();
-    canvas.width = Math.round(width * escala);
-    canvas.height = Math.round(160 * escala);
-    const ctx = canvas.getContext('2d');
-    ctx.scale(escala, escala);
-    ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#0a1a6b';
-  };
-  ajustar();
-  const ctx = canvas.getContext('2d');
-  let firmado = false;
-  let dibujando = false;
-  const punto = (ev) => { const r = canvas.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
-  canvas.addEventListener('pointerdown', (ev) => {
-    ev.preventDefault();
-    canvas.setPointerCapture?.(ev.pointerId);
-    dibujando = true;
-    const [x, y] = punto(ev);
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 0.1, y + 0.1); ctx.stroke();
-  });
-  canvas.addEventListener('pointermove', (ev) => {
-    if (!dibujando) return;
-    ev.preventDefault();
-    const [x, y] = punto(ev);
-    ctx.lineTo(x, y); ctx.stroke();
-    if (!firmado) { firmado = true; alFirmar?.(); }
-  });
-  const soltar = () => { dibujando = false; };
-  canvas.addEventListener('pointerup', soltar);
-  canvas.addEventListener('pointercancel', soltar);
-  return {
-    borrar() { ctx.clearRect(0, 0, canvas.width, canvas.height); firmado = false; },
-    png() { return firmado ? new Promise((r) => { canvas.toBlob((b) => r(b), 'image/png'); }) : Promise.resolve(null); },
-  };
-}
-
 // ================= Escanear la etiqueta (pedido 03-10) =================
 // La cámara lee el QR de la etiqueta: con el lector del navegador si lo tiene y, si no (iPhone) o no lee (algunos
 // Android), con jsQR, incluido en la app (pedido 07-10). Sin cámara o sin permiso, se escribe el folio.
-// Un envío por retirar se marca retirado ahí mismo; uno en ruta abre su detalle para entregarlo con foto, GPS y firma.
+// Un envío por retirar se marca retirado ahí mismo; uno en ruta abre su detalle para entregarlo con foto y GPS.
 function escanearEtiqueta(alTerminar) {
   let stream = null;
   let activo = true;
@@ -579,7 +545,7 @@ function escanearEtiqueta(alTerminar) {
       ir(`#/envio/${e.id}`);
       return;
     }
-    if (e.estado === 'en_ruta') toast(`${e.folio}: confirma la entrega con foto${app.conf.operacion.gps_obligatorio ? ', GPS' : ''} y firma`, 'ok');
+    if (e.estado === 'en_ruta') toast(`${e.folio}: confirma la entrega con foto${app.conf.operacion.gps_obligatorio ? ' y GPS' : ''}`, 'ok');
     ir(`#/envio/${e.id}`);
   };
   const buscarToken = async (texto) => {
