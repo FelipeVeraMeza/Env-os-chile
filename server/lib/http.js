@@ -36,6 +36,20 @@ export function limitador({ nombre, max, ventanaMs = 60_000, mensaje = 'Demasiad
   };
 }
 
+// CSV para Excel en español (Chile): separador ";", BOM UTF-8 y celdas entre comillas. Un texto que empieza con
+// = + - @ se ejecutaría como fórmula al abrirlo en Excel (inyección de fórmulas): se antepone un apóstrofo.
+export function celdaCsv(v) {
+  let t = String(v ?? '');
+  if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(t)) t = `'${t}`; // un número negativo (neto en pérdida) no es fórmula
+  return `"${t.replace(/"/g, '""')}"`;
+}
+
+export function enviarCsv(res, nombre, filas) {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`);
+  res.send('﻿' + filas.map((f) => f.map(celdaCsv).join(';')).join('\r\n'));
+}
+
 export function exigirSinErrores(errores, mensaje = 'Revisa los campos marcados') {
   if (Object.keys(errores).length) throw falla(422, mensaje, errores);
 }

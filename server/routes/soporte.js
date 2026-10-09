@@ -11,6 +11,7 @@ export const soporte = Router();
 
 const LARGO = { nombre: 80, contacto: 120, mensaje: 2000, respuesta: 2000 };
 const texto = (v) => String(v ?? '').trim();
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function validarMensajeSoporte(b, { conSesion }) {
   const d = { nombre: texto(b.nombre), contacto: texto(b.contacto), folio: texto(b.folio).toUpperCase(), mensaje: texto(b.mensaje) };
@@ -41,7 +42,9 @@ soporte.post('/', ruta(async (req, res) => {
     enviarCorreo({
       para: conf.negocio.correo,
       asunto: `Soporte: nuevo mensaje de ${m.nombre}`,
-      texto: `${m.nombre}${m.contacto ? ` (${m.contacto})` : ''}${m.folio ? ` · envío ${m.folio}` : ''} escribió:\n\n${m.mensaje}\n\nRespóndelo desde Soporte en la plataforma.`,
+      texto: `${m.nombre}${m.contacto ? ` (${m.contacto})` : ''}${m.folio ? ` · envío ${m.folio}` : ''} escribió:\n\n${m.mensaje}\n\nRespóndelo desde Soporte en la plataforma${EMAIL.test(m.contacto || '') ? ' o respondiendo este correo' : ''}.`,
+      // Al tocar "Responder" en el correo, la respuesta le llega directo a quien escribió.
+      responderA: EMAIL.test(m.contacto || '') ? m.contacto : undefined,
     }).catch((err) => console.error('[soporte] no se pudo avisar por correo', err.message));
   }
   res.status(201).json(m);
@@ -82,12 +85,13 @@ soporte.post('/:id/responder', autenticar, requiereRol('admin'), ruta(async (req
   await auditar(req, 'responder_soporte', 'mensaje_soporte', id);
   // Si dejó un correo (o es el de su cuenta) y hay correo configurado, la respuesta también le llega por correo.
   let correoEnviado = false;
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.contacto || '')) {
+  if (EMAIL.test(m.contacto || '')) {
     const conf = await leerConfig();
     correoEnviado = await enviarCorreo({
       para: m.contacto,
       asunto: `Respuesta de ${conf.negocio.nombre}${m.folio ? ` · envío ${m.folio}` : ''}`,
       texto: `Hola ${m.nombre}:\n\n${m.respuesta}\n\n— ${conf.negocio.nombre}\n\nTu mensaje:\n${m.mensaje}`,
+      responderA: conf.negocio.correo || undefined, // si el cliente contesta el correo, le llega a la empresa
     }).catch((err) => { console.error('[soporte] no se pudo enviar la respuesta por correo', err.message); return false; });
   }
   res.json({ id: m.id, estado: m.estado, respuesta: m.respuesta, respondido_en: m.respondido_en, correo_enviado: correoEnviado });

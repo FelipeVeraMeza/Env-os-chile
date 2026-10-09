@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
-import { enviarForm, get, post, patch, api, urlApi } from '../api.js';
+import { enviarForm, get, post, patch, urlApi } from '../api.js';
 import {
-  $, $$, badgePago, botonCopiar, clp, comprimirFoto, datosForm, errorToast, esqueleto, fechaHora, html, icono, marcarErrores, modal, montar, mostrarBlob, toast, vacio,
+  $, $$, badgePago, botonCopiar, clp, comprimirFoto, datosForm, errorToast, esqueleto, fechaHora, html, icono, marcarErrores, modal, montar, toast, vacio,
 } from '../ui.js';
 import { comunasCobertura, direccionTexto, itemEnvio, mapaGoogle, opcionesComunas, textoPaquete, urlMapaGoogle } from './comun.js';
 import { pagar, subirComprobante } from './envios.js';
@@ -513,7 +513,7 @@ export async function nuevo() {
     montar(vista, html`
       <section class="hero"><p>Envío confirmado</p><h1 class="mono folio-grande">${envio.folio}</h1>
         <p>${envio.destinatario_nombre} · ${direccionTexto(envio)}</p></section>
-      <div class="grid g2">
+      <div style="max-width:680px">
         <div class="card pila">
           <div class="fila entre"><h2 style="margin:0">Total ${clp(envio.tarifa_total)}</h2>${badgePago(envio.estado_pago)}</div>
           <div class="aviso magenta">Imprime la etiqueta y pégala en el paquete. Paga ahora: con el pago aprobado el repartidor puede retirar tu envío. <b>Si no pagas en ${app.conf.operacion.horas_sin_pago || 24} horas, el envío se anula solo.</b></div>
@@ -525,10 +525,7 @@ export async function nuevo() {
           <a class="btn sec ancho" href="${wa}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
           <div class="grid g2"><a class="btn azul" href="#/envio/${envio.id}">Ver detalle</a><a class="btn sec" href="#/nuevo" id="otro">Crear otro envío</a></div>
         </div>
-        <div class="card" style="text-align:center"><div class="qr-caja"><img id="qr" alt="Código QR del envío ${envio.folio}"></div>
-          <p class="sub" style="margin-top:10px">Al escanearlo se abre la ruta en Google Maps o Waze.</p></div>
       </div>`);
-    api(`/api/envios/${envio.id}/qr.png`, { blob: true }).then((b) => mostrarBlob($('#qr'), b)).catch(() => {});
     $('#pagar')?.addEventListener('click', () => pagar(envio, () => ir(`#/envio/${envio.id}`)));
     $('#transferir').onclick = () => subirComprobante(envio, () => ir(`#/envio/${envio.id}`));
     $('#otro').onclick = (e) => { e.preventDefault(); nuevo(); };

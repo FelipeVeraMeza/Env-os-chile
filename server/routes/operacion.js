@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { query, transaccion, uno } from '../db/pool.js';
-import { auditar, falla, fechaFiltro, idNumerico, rangoFechas, ruta } from '../lib/http.js';
+import { auditar, enviarCsv, falla, fechaFiltro, idNumerico, rangoFechas, ruta } from '../lib/http.js';
 import { cargarEnvio, exigirAcceso, exigirSinConflicto, siguienteFolio } from '../lib/envios.js';
 import { borrarArchivos, guardarArchivo, leerArchivo, subida, verificarFirma, firmarEnlace } from '../lib/archivos.js';
 import { quitarExif } from '../lib/exif.js';
@@ -263,6 +263,47 @@ reportes.use(autenticar, requiereRol('admin'));
 // Ganancia neta = tarifas de envíos ENTREGADOS en el período − costos del período (incluye seguros pagados).
 reportes.get('/ganancias', ruta(async (req, res) => {
   const { desde, hasta } = rangoFechas(req.query);
+  res.json(await calcularGanancias(desde, hasta));
+}));
+
+// Reporte de ganancias en Excel (RF-37, faltaba: solo se exportaba el registro de envíos). Mismo período y cifras que
+// el Panel, en secciones: resumen, por día, por comuna (todas, no solo las 10 primeras), por repartidor y costos.
+reportes.get('/ganancias.csv', ruta(async (req, res) => {
+  const { desde, hasta } = rangoFechas(req.query);
+  const g = await calcularGanancias(desde, hasta, { todasLasComunas: true });
+  const fecha = (iso) => iso.split('-').reverse().join('-');
+  const filas = [
+    ['Reporte de ganancias', `${fecha(desde)} al ${fecha(hasta)}`],
+    [],
+    ['Resumen', 'Valor'],
+    ['Envíos entregados', g.entregados],
+    ['Ingreso (tarifas de envíos entregados)', g.ingreso],
+    ['Costos del período', g.costos],
+    ['Ganancia neta', g.neto],
+    ['Promedio por envío', g.promedio_por_envio],
+    ['Cobrado (pagos aprobados)', g.cobrado],
+    ['Reembolsos', g.reembolsos],
+    ['Cobrado neto', g.cobrado_neto],
+    ['Tasa de intentos fallidos (%)', String(Math.round(g.tasa_intentos_fallidos * 1000) / 10).replace('.', ',')],
+    ['Proyectado (envíos en curso, monto)', g.proyectado.monto],
+    [],
+    ['Por día', 'Envíos entregados', 'Ingreso'],
+    ...g.por_dia.map((d) => [fecha(d.dia), d.envios, d.ingreso]),
+    [],
+    ['Por comuna', 'Envíos entregados', 'Ingreso'],
+    ...g.por_comuna.map((c) => [c.comuna, c.envios, c.ingreso]),
+    [],
+    ['Por repartidor', 'Entregas', 'Intentos fallidos', 'Ingreso'],
+    ...g.por_repartidor.map((r) => [r.repartidor, r.entregados, r.intentos_fallidos, r.ingreso]),
+    [],
+    ['Costos por tipo', 'Total'],
+    ...g.costos_por_tipo.map((c) => [c.tipo, c.total]),
+  ];
+  await registrarEvento(req, 'exportacion', { registros: g.entregados, detalle: { reporte: 'ganancias', desde, hasta } });
+  enviarCsv(res, `ganancias-${desde}-al-${hasta}.csv`, filas);
+}));
+
+async function calcularGanancias(desde, hasta, { todasLasComunas = false } = {}) {
   const tz = "AT TIME ZONE 'America/Santiago'";
   const p = [desde, hasta];
   const [tot, cobrado, proyectado, costosTot, porDia, porComuna, porRepartidor, porEstado, costosTipo] = await Promise.all([
@@ -277,7 +318,7 @@ reportes.get('/ganancias', ruta(async (req, res) => {
            FROM envio WHERE estado = 'entregado' AND (entregado_en ${tz})::date BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 1`, p),
     query(`SELECT c.nombre AS comuna, count(*)::int AS envios, sum(e.tarifa_total)::int AS ingreso
            FROM envio e JOIN comuna c ON c.id = e.comuna_id
-           WHERE e.estado = 'entregado' AND (e.entregado_en ${tz})::date BETWEEN $1 AND $2 GROUP BY c.nombre ORDER BY ingreso DESC LIMIT 10`, p),
+           WHERE e.estado = 'entregado' AND (e.entregado_en ${tz})::date BETWEEN $1 AND $2 GROUP BY c.nombre ORDER BY ingreso DESC${todasLasComunas ? '' : ' LIMIT 10'}`, p),
     // Se agrupa por persona (id), no por nombre: dos repartidores con el mismo nombre no se suman.
     query(`SELECT u.id AS repartidor_id, u.nombre AS repartidor, count(*) FILTER (WHERE e.estado = 'entregado')::int AS entregados,
              sum(e.intentos)::int AS intentos_fallidos, COALESCE(sum(e.tarifa_total) FILTER (WHERE e.estado = 'entregado'), 0)::int AS ingreso
@@ -291,7 +332,7 @@ reportes.get('/ganancias', ruta(async (req, res) => {
   const reembolsos = await uno(`SELECT count(*)::int AS n, COALESCE(sum(reembolso_monto), 0)::int AS monto
     FROM envio WHERE estado_pago = 'reembolsado' AND (reembolsado_en ${tz})::date BETWEEN $1 AND $2`, p);
   const fallidosIntentos = await uno(`SELECT COALESCE(sum(intentos), 0)::int AS n FROM envio WHERE (creado_en ${tz})::date BETWEEN $1 AND $2`, p);
-  res.json({
+  return {
     desde, hasta,
     ingreso: tot.ingreso,
     entregados: tot.entregados,
@@ -305,8 +346,8 @@ reportes.get('/ganancias', ruta(async (req, res) => {
     promedio_por_envio: tot.entregados ? Math.round(tot.ingreso / tot.entregados) : 0,
     tasa_intentos_fallidos: totalCreados ? fallidosIntentos.n / totalCreados : 0,
     por_dia: porDia.rows, por_comuna: porComuna.rows, por_repartidor: porRepartidor.rows, por_estado: porEstado.rows, costos_por_tipo: costosTipo.rows,
-  });
-}));
+  };
+}
 
 // Consulta del registro de auditoría (RF-54): solo administración, del más reciente al más antiguo.
 export const auditoria = Router();

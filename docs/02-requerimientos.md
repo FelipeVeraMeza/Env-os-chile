@@ -48,7 +48,7 @@ Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan
 | RF-20 | Etiqueta mínima para pegar en el paquete (pedido del cliente 03-10): logo, folio, QR, remitente (nombre, teléfono, RUT), destinatario (nombre, teléfono, RUT) y dirección con referencia, comuna y región. Bulto, pago, estado, contenido y firma se ven en la app y en el sistema | I | ✅ | CP-22, CP-84 |
 | RF-21 | Formato térmico 80 mm y A4 (PDF) | A | ✅ | CP-22 |
 | RF-22 | Imprimir, descargar y compartir (WhatsApp manual) | I | ✅ | — |
-| RF-23 | QR único por envío | I | ✅ | CP-23 |
+| RF-23 | QR único por envío. **Desde el 09-10 ya no se imprime en la etiqueta ni se muestra en pantalla** (pedido del cliente): el mapa se abre desde la app; el enlace /q/ sigue funcionando para etiquetas ya impresas | I | ✅ | CP-23 |
 | RF-24 | El QR abre **Google Maps con la dirección** del destino (configurable: Google Maps, Waze o página con ambos) | I | ✅ | CP-23, CP-71, CP-84 |
 | RF-25 | El administrador elige si el QR abre página, Google Maps o Waze | M | ✅ | CP-71 |
 | RF-26 | Botones "Google Maps / Waze" en el detalle sin escanear | A | ✅ | CP-71 |
@@ -58,7 +58,7 @@ Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan
 |---|---|---|---|---|
 | RF-27 | Listado paginado de envíos | I | ✅ | CP-66 |
 | RF-28 | Búsqueda por folio, nombre, teléfono o dirección | A | ✅ | CP-66 |
-| RF-29 | Filtros por fecha, comuna, estado y repartidor | A | ✅ | CP-69 |
+| RF-29 | Filtros por fecha, comuna, estado y repartidor (el selector de comuna se agregó el 09-10; antes solo se buscaba escribiéndola) | A | ✅ | CP-69 |
 | RF-30 | Estados con historial de quién y cuándo | I | ✅ | CP-32 |
 | RF-31 | Intento fallido con motivo obligatorio; **máximo 3 intentos**, luego devolución | I | ✅ | CP-40, CP-42 |
 | RF-32 | **Foto obligatoria para cerrar la entrega** | I | ✅ | CP-29 |
@@ -70,7 +70,7 @@ Columna **QA**: casos de prueba automatizados que lo verifican (ver [08](08-plan
 | RF-34 | Totales de envíos y montos por día y período | I | ✅ | CP-61, CP-70 |
 | RF-35 | Desglose por comuna y repartidor | A | ✅ | CP-70 |
 | RF-36 | Registro de costos y cálculo del neto | A | ✅ | CP-59 |
-| RF-37 | Exportación a Excel (CSV) | A | ✅ | CP-66 |
+| RF-37 | Exportación a Excel (CSV) del registro de envíos y, desde el 09-10, del **reporte de ganancias** del período (resumen, por día, por comuna, por repartidor y costos) | A | ✅ | CP-66 |
 | RF-38 | Instalable como app desde el navegador (PWA) | A | ✅ | CP-75 |
 | RF-39 | Configuración de logo, datos del negocio y textos del ticket | M | ✅ | CP-72 |
 | RF-40 | Auditoría de acciones sensibles | M | ✅ | CP-73 |
@@ -153,13 +153,14 @@ Faltan para operar con clientes reales. La mayoría depende de respuestas del cl
 | RF-96 | **Revisión lado a lado** (pedido 07-10): al revisar un comprobante o aprobar el pago de un cliente, el comprobante se ve a la izquierda y a la derecha los envíos (folio, destinatario, comuna, monto) con su total; al escribir el monto del comprobante avisa si coincide, cuánto falta o cuánto sobra. Ya aprobado, el comprobante sigue visible en el envío (con los envíos que pagó) | I | ✅ | CP-250, CP-251 |
 | RF-97 | **Seguimiento con los intentos de entrega** (pedido 07-10): cada paso dice el intento ("En ruta: intento 2 de 3", "Intento 1 de 3: no se pudo entregar — Nadie en el domicilio") y, si se devuelve, "Devuelto al remitente después de 3 intentos". En el seguimiento público solo el motivo general, nunca el detalle del repartidor. El historial del envío muestra lo mismo con el motivo legible | I | ✅ | CP-260 |
 | RF-98 | **Siguiente intento por el repartidor** (pedido 07-10): tras un intento fallido, el repartidor (o administración) programa el siguiente hasta el máximo; después del último solo administración devuelve al remitente. El cliente no reagenda intentos. "Repetir envío" pasa a llamarse **"Crear envío igual"** (crea un envío nuevo con los mismos datos; no es un reintento) | I | ✅ | CP-261 |
-| RF-99 | **Escanear QR en cualquier teléfono** (pedido 07-10): además del lector del navegador (no existe en iPhone y en algunos Android no lee), la app trae su propio lector (jsQR, Apache 2.0) que se descarga al escanear. Cámara trasera en alta resolución con enfoque continuo, linterna si el teléfono la tiene y vibración al leer. Sin cámara o sin permiso, se escribe el folio | A | ✅ | prueba de lectura del QR de la etiqueta (480, 160 y 96 px) |
+| RF-99 | ~~Escanear QR en cualquier teléfono~~ **Quitado el 09-10** a pedido del cliente: la etiqueta ya no trae QR y el repartidor abre el mapa con los botones de la ruta (Google Maps / Waze) | A | ❌ retirado | — |
 | RF-100 | **"Por retirar" y retiro de varios paquetes** (pedido 07-10): el estado "Asignado" se muestra como **"Por retirar"** (el repartidor ya lo tiene y falta ir a buscarlo) y el botón dice **"Paquete retirado"**. En Mi ruta, **"Retirar paquetes"** muestra todos los por retirar agrupados por dirección de retiro, con el total; vienen marcados los pagados y de hoy y se confirman juntos con "Paquetes retirados (N)". Además, **"Ya retiré todos (N)"** marca de un toque todos los que tomó (pagados y de hoy), sin elegirlos; "Elegir cuáles" abre la lista. Todo o nada; solo los propios, pagados y por retirar. En "Disponibles para tomar", **"Tomar todos"** los pasa a "Por retirar" de una vez (hasta 100; los que tomó otro se informan) | I | ✅ | CP-270 a CP-273 |
 | RF-101 | **Soporte dentro de la plataforma** (pedido 09-10): "Escribir a soporte" en el inicio de sesión, en el seguimiento, en el inicio del cliente y en el menú (Soporte). Sin sesión se deja nombre y correo o teléfono; con sesión basta el mensaje. Los mensajes llegan a administración (Soporte, con el número de nuevos en el menú y aviso en el Panel; también por correo a la empresa si hay SMTP), que responde ahí: el cliente ve la respuesta en Soporte y, si dejó correo, le llega por correo. También se puede responder por WhatsApp o cerrar el mensaje. Si la empresa pone su WhatsApp en Ajustes, se ofrece además escribir por WhatsApp. Máximo 10 mensajes por minuto por IP | I | ✅ | CP-280, CP-281, CP-283 |
 | RF-102 | **Ajustes de textos del cliente** (pedido 09-10): el nombre completo en el saludo y en el botón de la cuenta (antes se cortaba en la primera palabra, "SOLO"); "Por pagar" pasa a **"Pagar envíos"**; el inicio dice "Simplifica tus envíos. Créalo en menos de un minuto y envía dentro de Santiago desde $3.500." y, más pequeño, "Servicio disponible dentro de Santiago"; en el paso Paquete, "⚠️ Importante: declara el peso y las dimensiones reales de tu paquete. Si excede los límites de la categoría seleccionada, no será recibido y no habrá reembolso." (no se cobra la diferencia: el paquete no se recibe) En el inicio de sesión, Seguimiento de envío, Crear cuenta y Soporte son botones (el seguimiento destacado) | A | ✅ | revisión en pantalla |
 | RF-103 | **Foto del paquete en el seguimiento** (pedido 09-10): bajo "Creado" aparece la foto que tomó el cliente al crear el envío, para que quien recibe compare si llegó igual. Como la foto puede mostrar la etiqueta y los folios son correlativos, se piden los últimos 4 dígitos del teléfono de quien recibe; con 10 intentos fallidos en una hora el folio se bloquea | I | ✅ | CP-282 |
 | RF-104 | **Entrega con la foto destacada y sin firma** (pedido 09-10): la foto es un recuadro grande con ícono de cámara al inicio de "Cerrar entrega" (se pone verde con la vista previa). Se quitó la firma: se rayaba al deslizar la pantalla y por ahora no se necesita (las firmas ya guardadas se siguen viendo) | A | ✅ | revisión en pantalla |
 | RF-105 | **Cambio rápido de pestaña sin errores** (09-10): si se cambiaba de pestaña mientras la anterior cargaba, aparecía "Cannot set properties of null (setting 'innerHTML')" y la pantalla vieja podía dibujarse encima de la nueva. Cada pantalla se dibuja ahora en su propio contenedor; lo que llega tarde de la anterior se descarta y los errores técnicos no se muestran como aviso | A | ✅ | prueba en el navegador con la red lenta (repartidor, cliente y administración) |
+| RF-106 | **Etiqueta sin QR y con letra más grande** (pedido 09-10): sin el QR del mapa (el repartidor usa la ruta de la app); con ese espacio, folio, remitente, destinatario, dirección y comuna se imprimen más grandes. También se quitó el QR de las pantallas de envío confirmado y detalle, y el lector de QR de Mi ruta | A | ✅ | PDF de prueba 80 mm y A4 |
 
 ## Requerimientos no funcionales
 

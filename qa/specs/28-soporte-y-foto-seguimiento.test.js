@@ -85,3 +85,19 @@ test('CP-283 · El WhatsApp de soporte se guarda normalizado y se rechaza uno in
     await peticion('PUT', '/api/config/negocio', { sesion: esc.admin, json: { whatsapp: antes } });
   }
 });
+
+test('CP-284 · Ganancias en Excel (solo administración) y registro filtrado por comuna', async () => {
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+  const csv = await peticion('GET', `/api/reportes/ganancias.csv?desde=${hoy}&hasta=${hoy}`, { sesion: esc.admin, crudo: true });
+  assert.equal(csv.status, 200);
+  assert.match(csv.headers.get('content-type'), /text\/csv/);
+  const texto = await csv.text();
+  for (const s of ['Reporte de ganancias', 'Ganancia neta', 'Por día', 'Por comuna', 'Por repartidor', 'Costos por tipo']) assert.ok(texto.includes(s), s);
+  assert.equal((await peticion('GET', `/api/reportes/ganancias.csv?desde=${hoy}&hasta=${hoy}`, { sesion: esc.cliente })).status, 403);
+
+  const c = await peticion('POST', '/api/envios', { sesion: esc.cliente, json: { ...datosEnvio(esc.comuna.id), confirmar: true } });
+  assert.equal(c.status, 201, JSON.stringify(c.datos));
+  const lista = (await peticion('GET', `/api/envios?comuna_id=${esc.comuna.id}&limite=100`, { sesion: esc.cliente })).datos;
+  assert.ok(lista.items.some((e) => e.id === c.datos.id));
+  assert.ok(lista.items.every((e) => e.comuna_id === esc.comuna.id || e.comuna_nombre === esc.comuna.nombre));
+});

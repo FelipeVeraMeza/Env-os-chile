@@ -23,14 +23,8 @@ export function generarQrPng(texto, ancho = 480) {
   return QRCode.toBuffer(texto, { errorCorrectionLevel: 'H', margin: 2, width: ancho, color: { dark: '#000000', light: '#ffffff' } });
 }
 
-const LEYENDA_QR = {
-  google: 'Escanea para ver la dirección en Google Maps',
-  waze: 'Escanea para abrir la ruta en Waze',
-  pagina: 'Escanea para ver la dirección y abrir Google Maps o Waze',
-};
-
 // Dibuja una etiqueta completa (una por bulto en el formato térmico). Devuelve la altura usada.
-function dibujarEtiqueta(doc, { envio, conf, qr, termico, ancho, margen }) {
+function dibujarEtiqueta(doc, { envio, conf, termico, ancho, margen }) {
   const util = ancho - margen * 2;
   const t = termico ? 1 : 1.35;
   const linea = () => {
@@ -39,13 +33,15 @@ function dibujarEtiqueta(doc, { envio, conf, qr, termico, ancho, margen }) {
     doc.moveDown(0.35);
   };
   const seccion = (titulo) => {
-    doc.moveDown(0.2).fontSize(7.5 * t).font('Helvetica-Bold').fillColor('#000000').text(titulo.toUpperCase(), { width: util, characterSpacing: 0.6 });
-    doc.font('Helvetica').fontSize(9 * t).fillColor('#000000');
+    doc.moveDown(0.2).fontSize(8.5 * t).font('Helvetica-Bold').fillColor('#000000').text(titulo.toUpperCase(), { width: util, characterSpacing: 0.6 });
+    doc.font('Helvetica').fontSize(10.5 * t).fillColor('#000000');
   };
 
-  // Etiqueta mínima (pedido del cliente 03-10, con la etiqueta marcada): logo, folio, QR, remitente y
-  // destinatario con su dirección. Lo demás (nombre y contacto de la empresa, bulto, fechas, pago, estado,
-  // paquete, firma, seguimiento y pie) lo ven el repartidor en su app y administración en el sistema.
+  // Etiqueta mínima (pedido del cliente 03-10, con la etiqueta marcada): logo, folio, remitente y destinatario con
+  // su dirección. Lo demás (nombre y contacto de la empresa, bulto, fechas, pago, estado, paquete, firma, seguimiento
+  // y pie) lo ven el repartidor en su app y administración en el sistema.
+  // Sin QR (pedido 09-10): el repartidor abre el mapa desde la app al hacer la ruta; con ese espacio libre la letra
+  // es más grande.
 
   // Logo centrado (el subido en Ajustes; ya lleva el nombre de la empresa)
   const logo = logoEtiqueta(conf);
@@ -60,40 +56,33 @@ function dibujarEtiqueta(doc, { envio, conf, qr, termico, ancho, margen }) {
   }
 
   // Folio
-  doc.fillColor('#000000').fontSize(17 * t).font('Helvetica-Bold').text(envio.folio, { align: 'center', width: util });
-  linea();
-
-  // QR hacia el mapa con la dirección de destino
-  const ladoQr = termico ? 132 : 150; // > 4 cm: se lee bien desde el teléfono del repartidor
-  doc.image(qr, (ancho - ladoQr) / 2, doc.y, { width: ladoQr });
-  doc.y += ladoQr + 2;
-  doc.fontSize(7.5 * t).font('Helvetica-Bold').text(LEYENDA_QR[conf.operacion.qr_destino] || LEYENDA_QR.google, { align: 'center', width: util });
+  doc.fillColor('#000000').fontSize(20 * t).font('Helvetica-Bold').text(envio.folio, { align: 'center', width: util });
   linea();
 
   // Remitente: quién envía (el cliente dueño del envío).
   seccion('Remitente');
-  doc.font('Helvetica-Bold').fontSize(10 * t).text(envio.cliente_nombre, { width: util });
-  doc.font('Helvetica').fontSize(9 * t);
+  doc.font('Helvetica-Bold').fontSize(12.5 * t).text(envio.cliente_nombre, { width: util });
+  doc.font('Helvetica').fontSize(10.5 * t);
   const contactoRemitente = [envio.cliente_telefono && `Tel. ${envio.cliente_telefono}`, envio.cliente_rut && `RUT ${envio.cliente_rut}`].filter(Boolean).join(' · ');
   if (contactoRemitente) doc.text(contactoRemitente, { width: util });
   linea();
 
   // Destinatario y dirección
   seccion('Destinatario');
-  doc.font('Helvetica-Bold').fontSize(11 * t).text(envio.destinatario_nombre, { width: util });
+  doc.font('Helvetica-Bold').fontSize(14 * t).text(envio.destinatario_nombre, { width: util });
   const contactoDestinatario = [envio.destinatario_telefono && `Tel. ${envio.destinatario_telefono}`, envio.destinatario_rut && `RUT ${envio.destinatario_rut}`].filter(Boolean).join(' · ');
-  doc.font('Helvetica').fontSize(9.5 * t).text(contactoDestinatario, { width: util });
+  doc.font('Helvetica').fontSize(11.5 * t).text(contactoDestinatario, { width: util });
   seccion(envio.tipo_destino === 'punto_courier' ? `Entregar en punto ${envio.courier_empresa}` : 'Dirección de entrega');
   if (envio.tipo_destino === 'punto_courier') {
     doc.font('Helvetica-Bold').text(envio.courier_punto, { width: util }).font('Helvetica');
     if (envio.courier_codigo) doc.text(`Código del courier: ${envio.courier_codigo}`, { width: util });
   }
-  doc.font('Helvetica-Bold').fontSize(10.5 * t).text(`${envio.calle} ${envio.numero}`, { width: util });
-  doc.font('Helvetica').fontSize(9.5 * t);
+  doc.font('Helvetica-Bold').fontSize(13.5 * t).text(`${envio.calle} ${envio.numero}`, { width: util });
+  doc.font('Helvetica').fontSize(11.5 * t);
   if (envio.depto) doc.text(`Depto./Of.: ${envio.depto}`, { width: util });
   if (envio.referencia) doc.text(`Referencia: ${envio.referencia}`, { width: util });
-  doc.moveDown(0.25).font('Helvetica-Bold').fontSize(16 * t).text(String(envio.comuna_nombre).toUpperCase(), { width: util });
-  doc.font('Helvetica').fontSize(8.5 * t).text(`Región ${envio.region}${envio.region === 'Metropolitana' ? ' de Santiago' : ''}`, { width: util });
+  doc.moveDown(0.25).font('Helvetica-Bold').fontSize(21 * t).text(String(envio.comuna_nombre).toUpperCase(), { width: util });
+  doc.font('Helvetica').fontSize(10 * t).text(`Región ${envio.region}${envio.region === 'Metropolitana' ? ' de Santiago' : ''}`, { width: util });
   doc.fillColor('#000000');
   return doc.y + margen;
 }
@@ -114,7 +103,7 @@ export async function generarEtiquetasPdf(envios, conf, formato = '80mm', titulo
   doc.on('data', (p) => partes.push(p));
   const fin = new Promise((resolve) => doc.on('end', () => resolve(Buffer.concat(partes))));
   for (const envio of envios) {
-    const opciones = { envio, conf, qr: await generarQrPng(urlQr(envio)), termico, ancho, margen };
+    const opciones = { envio, conf, termico, ancho, margen };
     // El rollo térmico no tiene alto fijo: se mide la etiqueta en una pasada previa para no gastar papel en blanco.
     let alto = 841.89;
     if (termico) {

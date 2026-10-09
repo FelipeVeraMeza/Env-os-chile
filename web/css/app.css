@@ -331,8 +331,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .progreso-envio div.on { color: var(--texto); }
 .progreso-envio div.on::before { background: var(--degradado-btn); }
 
-.qr-caja { background: var(--blanco); border-radius: 16px; padding: 12px; display: inline-block; }
-.qr-caja img { display: block; width: 180px; height: 180px; }
 .foto-mini { width: 110px; height: 110px; object-fit: cover; border-radius: 12px; border: 1px solid var(--borde); background: rgba(0, 0, 0, .2); }
 .intentos { display: inline-flex; gap: 5px; vertical-align: middle; }
 .intentos i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--texto-3); }

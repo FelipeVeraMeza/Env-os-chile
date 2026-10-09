@@ -1,5 +1,5 @@
-import { app, ir } from '../app.js';
-import { api, archivo, enviarForm, get, post, put } from '../api.js';
+import { app } from '../app.js';
+import { archivo, enviarForm, get, post, put } from '../api.js';
 import {
   $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, hoyISO, html, icono, modal, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
@@ -180,9 +180,9 @@ export async function ruta() {
     <section class="hero"><p>${new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Santiago' })}</p>
       <h1>Mi ruta</h1>
       <div class="fila"><span class="badge" style="background:rgba(255,255,255,.2)">${enRuta.length} en ruta</span><span class="badge" style="background:rgba(255,255,255,.2)">${porRetirar.length} por retirar</span><span class="badge" style="background:rgba(255,255,255,.2)">${hechos.total} cerrados hoy</span>${disponibles.total ? html`<span class="badge" style="background:rgba(255,255,255,.2)">${disponibles.total} disponibles</span>` : ''}</div></section>
-    ${offline ? '' : html`<div class="grid g2" style="margin-bottom:16px">
-      <button class="btn grande" id="escanear">Escanear etiqueta (QR)</button>
-      <button class="btn sec grande" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente</button></div>`}
+    ${offline ? '' : html`<div style="margin-bottom:16px">
+      <!-- Sin lector de QR (pedido 09-10): la etiqueta ya no trae QR; el mapa se abre con los botones de la ruta. -->
+      <button class="btn grande ancho" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente</button></div>`}
     ${!offline && aRetirar.length ? html`<div class="grid g2" style="margin-bottom:16px;grid-template-columns:minmax(0,2fr) minmax(0,1fr)">
       <button class="btn blanco grande" id="retirar-todos" ${listosRetirar.length ? '' : html`disabled`}>📦 Ya retiré todos (${listosRetirar.length})</button>
       <button class="btn sec grande" id="retirar-paquetes">Elegir cuáles</button></div>
@@ -197,7 +197,6 @@ export async function ruta() {
       ${disponibles.total > 10 ? html`<button class="btn sec ancho" id="ver-disponibles" style="margin-top:12px">Ver los ${disponibles.total - 10} restantes</button>` : ''}</div>`
     : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
   $$('[data-mover]').forEach((b) => { b.onclick = () => mover(Number(b.dataset.mover), Number(b.dataset.paso)); });
-  $('#escanear')?.addEventListener('click', () => escanearEtiqueta(ruta));
   $('#retirar-paquetes')?.addEventListener('click', () => retirarPaquetes(aRetirar, ruta));
   // Un solo toque (pedido 07-10): todos los que ya tomó, pagados y de hoy, quedan retirados sin elegirlos uno por uno.
   $('#retirar-todos')?.addEventListener('click', async (ev) => {
@@ -515,139 +514,4 @@ function fallido(e, segundosDesdeLlegada, espera, recargar) {
       recargar();
     } catch (err) { errorToast(err); btn.disabled = false; btn.textContent = 'Registrar intento fallido'; }
   };
-}
-
-// ================= Escanear la etiqueta (pedido 03-10) =================
-// La cámara lee el QR de la etiqueta: con el lector del navegador si lo tiene y, si no (iPhone) o no lee (algunos
-// Android), con jsQR, incluido en la app (pedido 07-10). Sin cámara o sin permiso, se escribe el folio.
-// Un envío por retirar se marca retirado ahí mismo; uno en ruta abre su detalle para entregarlo con foto y GPS.
-function escanearEtiqueta(alTerminar) {
-  let stream = null;
-  let activo = true;
-  const detener = () => { activo = false; stream?.getTracks().forEach((t) => t.stop()); };
-  const m = modal(html`<h2>Escanear etiqueta</h2>
-    <p class="sub">Apunta la cámara al código QR de la etiqueta del paquete.</p>
-    <div class="escaner"><video id="cam" playsinline muted></video></div>
-    <p class="muted" id="estado-cam" style="margin-top:8px">Abriendo la cámara…</p>
-    <form class="fila" id="f-folio" style="margin-top:12px" novalidate>
-      <input name="folio" placeholder="O escribe el folio: ENV-2026-…" autocomplete="off" style="flex:1;min-width:0">
-      <button class="btn sec">Buscar</button></form>`, { onClose: detener });
-  const estado = (t) => { const p = $('#estado-cam', m.el); if (p) p.textContent = t; };
-  let ocupado = false;
-  const accion = async (e) => {
-    detener();
-    m.cerrar();
-    if (e.estado === 'asignado' || e.estado === 'reagendado') {
-      if (e.estado_pago !== 'pagado') { toast(`${e.folio} no está pagado: no se puede retirar todavía`, 'error'); ir(`#/envio/${e.id}`); return; }
-      if (await confirmar('¿Retiraste este paquete?', `${e.folio} · ${textoPaquete(e)} · para ${e.destinatario_nombre} (${e.comuna_nombre})`, 'Sí, lo retiré')) {
-        try { await post(`/api/envios/${e.id}/estado`, { estado: 'en_ruta' }); toast(`${e.folio} retirado. ¡Buen viaje!`, 'ok'); alTerminar?.(); return; } catch (err) { errorToast(err); }
-      }
-      ir(`#/envio/${e.id}`);
-      return;
-    }
-    if (e.estado === 'en_ruta') toast(`${e.folio}: confirma la entrega con foto${app.conf.operacion.gps_obligatorio ? ' y GPS' : ''}`, 'ok');
-    ir(`#/envio/${e.id}`);
-  };
-  const buscarToken = async (texto) => {
-    const token = (String(texto).match(/\/q\/([A-Za-z0-9_-]{8,100})/) || [])[1];
-    if (!token) { estado('Ese código no es de una etiqueta de envío. Prueba de nuevo.'); return; }
-    ocupado = true;
-    try { await accion(await get(`/api/envios/por-qr/${encodeURIComponent(token)}`)); } catch (err) { estado(err.message); ocupado = false; }
-  };
-  $('#f-folio', m.el).onsubmit = async (ev) => {
-    ev.preventDefault();
-    const folio = ev.target.folio.value.trim().toUpperCase();
-    if (!folio) return;
-    try {
-      const r = await get(`/api/envios?q=${encodeURIComponent(folio)}&limite=5`);
-      const e = r.items.find((x) => String(x.folio).toUpperCase() === folio) || (r.items.length === 1 ? r.items[0] : null);
-      if (e) await accion(e); else estado('No encontramos ese folio en tu ruta.');
-    } catch (err) { errorToast(err); }
-  };
-  (async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      $('.escaner', m.el).hidden = true;
-      estado('Este navegador no da acceso a la cámara: escribe el folio que aparece en la etiqueta.');
-      return;
-    }
-    try {
-      // Cámara trasera en buena resolución: el QR de una etiqueta térmica es chico.
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
-      if (!activo) { detener(); return; }
-      const pista = stream.getVideoTracks()[0];
-      const capacidades = pista.getCapabilities?.() || {};
-      if (capacidades.focusMode?.includes('continuous')) pista.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
-      // Linterna en los teléfonos que la permiten (bodegas o noche).
-      if (capacidades.torch) {
-        const b = Object.assign(document.createElement('button'), { type: 'button', className: 'btn sec chico', textContent: 'Linterna' });
-        let prendida = false;
-        b.onclick = () => { prendida = !prendida; pista.applyConstraints({ advanced: [{ torch: prendida }] }).catch(() => {}); };
-        $('#estado-cam', m.el).after(b);
-      }
-      const video = $('#cam', m.el);
-      video.srcObject = stream;
-      await video.play();
-      estado('Buscando el código QR… acércalo hasta que llene el recuadro.');
-      // Dos lectores: el del navegador (rápido, no existe en iPhone y en algunos Android no lee nada) y jsQR, que
-      // funciona en cualquier teléfono. Se prueban los dos en cada cuadro hasta que uno encuentre el código.
-      const detector = await lectorDelNavegador();
-      const jsQR = await cargarJsQR().catch(() => null);
-      if (!detector && !jsQR) throw new Error('sin lector de QR');
-      const lienzo = document.createElement('canvas');
-      const ctx = lienzo.getContext('2d', { willReadFrequently: true });
-      const leer = async () => {
-        if (!activo) return;
-        if (!ocupado && video.readyState >= 2 && video.videoWidth) {
-          let texto = null;
-          if (detector) {
-            try { texto = (await detector.detect(video))[0]?.rawValue || null; } catch { /* cuadro sin QR */ }
-          }
-          if (!texto && jsQR) {
-            // Se lee el centro del cuadro (donde está el recuadro guía), achicado para que sea rápido.
-            const lado = Math.min(video.videoWidth, video.videoHeight);
-            const destino = Math.min(lado, 720);
-            lienzo.width = destino;
-            lienzo.height = destino;
-            ctx.drawImage(video, (video.videoWidth - lado) / 2, (video.videoHeight - lado) / 2, lado, lado, 0, 0, destino, destino);
-            texto = jsQR(ctx.getImageData(0, 0, destino, destino).data, destino, destino, { inversionAttempts: 'attemptBoth' })?.data || null;
-          }
-          if (texto) {
-            navigator.vibrate?.(80);
-            await buscarToken(texto);
-          }
-        }
-        if (activo) setTimeout(leer, 200);
-      };
-      leer();
-    } catch (err) {
-      detener();
-      $('.escaner', m.el).hidden = true;
-      estado(err?.name === 'NotAllowedError' ? 'No diste permiso para usar la cámara: actívalo en los permisos del navegador o escribe el folio de la etiqueta.'
-        : 'No se pudo leer con la cámara: escribe el folio de la etiqueta.');
-    }
-  })();
-}
-
-// Lector de QR del navegador, solo si existe y de verdad soporta QR (en algunos Android existe pero no lee nada).
-async function lectorDelNavegador() {
-  if (!('BarcodeDetector' in window)) return null;
-  try {
-    const formatos = await window.BarcodeDetector.getSupportedFormats?.();
-    if (formatos && !formatos.includes('qr_code')) return null;
-    return new window.BarcodeDetector({ formats: ['qr_code'] });
-  } catch { return null; }
-}
-
-// jsQR (vendor/jsQR.js) se descarga solo la primera vez que se escanea.
-let cargaJsQR = null;
-function cargarJsQR() {
-  if (window.jsQR) return Promise.resolve(window.jsQR);
-  cargaJsQR ||= new Promise((ok, mal) => {
-    const s = Object.assign(document.createElement('script'), { src: 'vendor/jsQR.js', async: true });
-    s.onload = () => (window.jsQR ? ok(window.jsQR) : mal(new Error('jsQR no cargó')));
-    s.onerror = () => { cargaJsQR = null; mal(new Error('jsQR no cargó')); };
-    document.head.append(s);
-  });
-  return cargaJsQR;
 }

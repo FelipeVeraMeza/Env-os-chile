@@ -1,6 +1,6 @@
 import { app } from '../app.js';
-import { get, patch, post, put } from '../api.js';
-import { $, $$, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
+import { api, get, patch, post, put } from '../api.js';
+import { $, $$, abrirBlob, badgePago, clp, confirmar, datosForm, errorToast, esqueleto, fecha, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 import { limpiarCacheComunas } from './comun.js';
 import { aprobarPagoCliente, revisarComprobante } from './envios.js';
 
@@ -47,7 +47,8 @@ export async function panel(rango = {}) {
       <form class="fila" id="rango">
         <label class="campo">Desde<input type="date" name="desde" value="${desde}" max="${hoy}"></label>
         <label class="campo">Hasta<input type="date" name="hasta" value="${hasta}" max="${hoy}"></label>
-        <div class="fila" style="align-self:flex-end"><button type="button" class="btn sec chico" data-r="hoy">Hoy</button><button type="button" class="btn sec chico" data-r="mes">Mes</button></div>
+        <div class="fila" style="align-self:flex-end"><button type="button" class="btn sec chico" data-r="hoy">Hoy</button><button type="button" class="btn sec chico" data-r="mes">Mes</button>
+          <button type="button" class="btn sec chico" id="exportar-ganancias">Exportar a Excel (CSV)</button></div>
       </form></div>
     ${avisoCuentaTransferencia()}
     ${pidieronClave.length ? html`<a class="aviso magenta" href="#/usuarios" style="display:block;margin-bottom:16px;color:inherit;text-decoration:none"><b>${pidieronClave.length} persona(s) pidieron recuperar su contraseña</b> (${pidieronClave.map((u) => u.nombre).join(', ')}). Envíales el enlace por WhatsApp → Ir a Usuarios</a>` : ''}
@@ -79,6 +80,8 @@ export async function panel(rango = {}) {
 
   graficoBarras($('#grafico'), g.por_dia, desde, hasta);
   $('#rango').addEventListener('change', (e) => panel(datosForm(e.currentTarget)));
+  // Reporte de ganancias del período en Excel (RF-37).
+  $('#exportar-ganancias').onclick = () => abrirBlob(api(`/api/reportes/ganancias.csv?desde=${desde}&hasta=${hasta}`, { blob: true }), `ganancias-${desde}-al-${hasta}.csv`).catch(errorToast);
   $$('[data-r]').forEach((b) => { b.onclick = () => panel(b.dataset.r === 'hoy' ? { desde: hoy, hasta: hoy } : {}); });
 }
 

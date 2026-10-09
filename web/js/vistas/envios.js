@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
 import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
-  $, $$, abrirBlob, badge, badgePago, PAGO_TXT, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, mostrarBlob, toast, vacio, ESTADOS,
+  $, $$, abrirBlob, badge, badgePago, PAGO_TXT, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, toast, vacio, ESTADOS,
 } from '../ui.js';
 import { avisoWhatsapp, comunasCobertura, fechaRetiroTexto, itemEnvio, opcionesComunas, retiroTexto, textoIntento, textoPaquete } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
@@ -10,11 +10,13 @@ import { detalleRepartidor } from './repartidor.js';
 export async function registro() {
   const vista = $('#vista');
   const rol = app.usuario.rol;
-  const f = { q: '', estado: '', pagina: 1, repartidor_id: '', cliente_id: rol === 'admin' ? app.filtroCliente || '' : '', estado_pago: '', desde: '', hasta: '' };
+  const f = { q: '', estado: '', comuna_id: '', pagina: 1, repartidor_id: '', cliente_id: rol === 'admin' ? app.filtroCliente || '' : '', estado_pago: '', desde: '', hasta: '' };
   // Administración filtra por cliente y por estado del pago (pedido 07-10: aprobar los comprobantes de un cliente de una vez).
-  const [repartidores, clientes] = rol === 'admin'
-    ? await Promise.all([get('/api/usuarios/repartidores'), get('/api/usuarios?rol=cliente').then((l) => l.filter((u) => !u.correo.startsWith('qa-')))])
-    : [[], []];
+  const [repartidores, clientes, comunas] = await Promise.all([
+    rol === 'admin' ? get('/api/usuarios/repartidores') : [],
+    rol === 'admin' ? get('/api/usuarios?rol=cliente').then((l) => l.filter((u) => !u.correo.startsWith('qa-'))) : [],
+    comunasCobertura().catch(() => []), // filtro por comuna (RF-29)
+  ]);
 
   const qs = () => new URLSearchParams(Object.entries({ ...f, limite: 20 }).filter(([, v]) => v !== '' && v !== null)).toString();
 
@@ -25,6 +27,7 @@ export async function registro() {
     <form class="card" id="filtros" style="margin-bottom:16px">
       <div class="grid g3">
         <label class="campo">Buscar<input type="search" name="q" placeholder="ENV-2026-…, nombre, teléfono"></label>
+        <label class="campo">Comuna<select name="comuna_id"><option value="">Todas</option>${comunas.map((c) => html`<option value="${c.id}">${c.nombre}</option>`)}</select></label>
         <label class="campo">Estado<select name="estado"><option value="">Todos</option>${Object.entries(ESTADOS).filter(([k]) => k !== 'borrador').map(([k, v]) => html`<option value="${k}">${v}</option>`)}</select></label>
         ${rol === 'admin' ? html`<label class="campo">Repartidor<select name="repartidor_id"><option value="">Todos</option><option value="sin">Sin asignar</option>${repartidores.map((r) => html`<option value="${r.id}">${r.nombre}</option>`)}</select></label>` : ''}
         ${rol === 'admin' ? html`<label class="campo">Cliente<select name="cliente_id"><option value="">Todos</option>${clientes.map((c) => html`<option value="${c.id}">${c.nombre}</option>`)}</select></label>
@@ -211,7 +214,6 @@ export async function detalle(id) {
       <div>
         ${tarjetaTransferencia(e, esAdmin)}
         ${esAdmin ? accionesAdmin(e, repartidores) : accionesCliente(e)}
-        ${e.folio ? html`<div class="card" style="text-align:center"><div class="qr-caja"><img id="qr" alt="QR del envío"></div><p class="sub" style="margin-top:8px">Escanéalo para abrir la ruta</p></div>` : ''}
         ${e.estado === 'entregado' ? html`<div class="card"><h2>Constancia de entrega</h2>
           <p>Entregado ${fechaHora(e.entregado_en)}${e.entrega_receptor ? ` · recibió ${e.entrega_receptor}` : ''}</p>
           ${e.entrega_lat ? html`<p class="sub">GPS: ${e.entrega_lat.toFixed(5)}, ${e.entrega_lon.toFixed(5)}${e.entrega_precision_m ? ` (±${Math.round(e.entrega_precision_m)} m)` : ''} · <a href="https://www.google.com/maps?q=${e.entrega_lat},${e.entrega_lon}" target="_blank" rel="noopener">ver en mapa</a></p>` : ''}</div>` : ''}
@@ -220,7 +222,6 @@ export async function detalle(id) {
       </div>
     </div>`);
 
-  if (e.folio) api(`/api/envios/${e.id}/qr.png`, { blob: true }).then((b) => mostrarBlob($('#qr'), b)).catch(() => {});
   $('#pagar')?.addEventListener('click', () => pagar(e, () => detalle(id)));
   $('#transferir')?.addEventListener('click', () => subirComprobante(e, () => detalle(id)));
   $('#revisar-comprobante')?.addEventListener('click', () => revisarComprobante(comprobanteDe(e), () => detalle(id)));

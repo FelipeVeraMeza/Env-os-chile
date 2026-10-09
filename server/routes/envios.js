@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { config } from '../config.js';
 import { query, transaccion, uno } from '../db/pool.js';
-import { auditar, exigirSinErrores, falla, fechaFiltro, idNumerico, patronBusqueda, ruta } from '../lib/http.js';
+import { auditar, enviarCsv, exigirSinErrores, falla, fechaFiltro, idNumerico, patronBusqueda, ruta } from '../lib/http.js';
 import { leerConfig } from '../lib/configuracion.js';
 import {
   calcularTarifa, normalizarRut, normalizarTelefono, rolPuedeTransicionar, validarDestinatario, validarDestino, vistaDisponible,
@@ -329,18 +329,9 @@ envios.get('/exportar.csv', requiereRol('admin', 'cliente'), ruta(async (req, re
     ['Tarifa total', 'tarifa_total'], ['Repartidor', 'repartidor_nombre'], ['Intentos', 'intentos'],
     ['Entregado', (e) => (e.entregado_en ? new Date(e.entregado_en).toLocaleString('es-CL', { timeZone: 'America/Santiago' }) : '')],
   ];
-  // Inyección de fórmulas: un texto que empieza con = + - @ se ejecutaría como fórmula al abrirlo en Excel.
-  const celda = (v) => {
-    let t = String(v ?? '');
-    if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`;
-    return `"${t.replace(/"/g, '""')}"`;
-  };
-  const lineas = [cols.map(([t]) => celda(t)).join(';')];
-  for (const e of rows) lineas.push(cols.map(([, c]) => celda(typeof c === 'function' ? c(e) : e[c])).join(';'));
+  const filas = [cols.map(([t]) => t), ...rows.map((e) => cols.map(([, c]) => (typeof c === 'function' ? c(e) : e[c])))];
   await registrarEvento(req, 'exportacion', { registros: rows.length, detalle: { filtros: req.query } });
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="envios-${new Date().toISOString().slice(0, 10)}.csv"`);
-  res.send('﻿' + lineas.join('\r\n'));
+  enviarCsv(res, `envios-${new Date().toISOString().slice(0, 10)}.csv`, filas);
 }));
 
 // Envíos pagados que aún no tienen repartidor: el repartidor los ve y puede tomarlos.
