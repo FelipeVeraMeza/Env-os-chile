@@ -372,6 +372,20 @@ function dialogoServidor() {
   $('#usar-url', m.el).onclick = () => probar($('#url-custom', m.el).value.trim());
 }
 
+// Estado de la conexión con el servidor (app publicada): actualiza el punto y lo informa.
+async function estadoConexion() {
+  const punto = $('#estado-api');
+  try {
+    const r = await fetch(`${urlApi()}/api/health`, { cache: 'no-store' }).then((x) => x.json());
+    if (!r.ok) throw new Error();
+    punto.className = 'punto-estado ok';
+    toast('Conectado: la plataforma funciona con normalidad', 'ok');
+  } catch {
+    punto.className = 'punto-estado error';
+    toast('Sin conexión con el servidor. Revisa tu internet o inténtalo en unos minutos.', 'error');
+  }
+}
+
 // La demo publicada puede estar protegida con una clave (DEMO_CLAVE en Railway).
 function pedirClaveDemo(conf) {
   $('#marca-nombre').textContent = conf.negocio.nombre;
@@ -389,8 +403,14 @@ function pedirClaveDemo(conf) {
 }
 
 async function iniciar() {
-  $('#btn-servidor').onclick = dialogoServidor;
-  if (!modoDesarrollo()) $('#btn-servidor').style.pointerEvents = 'none'; // solo muestra el punto de estado
+  // En la app publicada el botón no cambia el servidor: muestra el estado de la conexión (antes no hacía nada al tocarlo).
+  const btnServidor = $('#btn-servidor');
+  if (modoDesarrollo()) btnServidor.onclick = dialogoServidor;
+  else {
+    btnServidor.onclick = estadoConexion;
+    btnServidor.title = 'Estado de la conexión';
+    btnServidor.setAttribute('aria-label', 'Estado de la conexión');
+  }
   $('#chip-perfil').onclick = hojaMas;
   try {
     // Configuración y perfiles se piden en paralelo (una ida y vuelta menos al abrir la app).
