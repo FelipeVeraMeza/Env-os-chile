@@ -1,5 +1,5 @@
 import { fijarClaveDemo, fijarPerfil, fijarToken, fijarUrlApi, get, hayToken, perfilActual, post, urlApi } from './api.js';
-import { $, datosForm, errorToast, html, icono, marcarErrores, modal, montar, raw, toast } from './ui.js';
+import { $, $$, datosForm, errorToast, html, icono, marcarErrores, modal, montar, raw, toast } from './ui.js';
 import * as cliente from './vistas/cliente.js';
 import * as envios from './vistas/envios.js';
 import * as repartidor from './vistas/repartidor.js';
@@ -7,6 +7,7 @@ import * as admin from './vistas/admin.js';
 import * as publico from './vistas/publico.js';
 import * as cuenta from './vistas/cuenta.js';
 import * as soporte from './vistas/soporte.js';
+import * as bolsas from './vistas/bolsas.js';
 
 // Estado compartido de la aplicación.
 export const app = { conf: null, usuario: null, perfiles: [], refrescar: null };
@@ -18,6 +19,7 @@ const MENUS = {
     ['#/envios', 'envios', 'Mis envíos'],
     ['#/carrito', 'cobranza', 'Pagar envíos'], // antes "Por pagar": en otras empresas significa que paga quien recibe (pedido 09-10)
     ['#/libreta', 'libreta', 'Guardados'],
+    ['#/bolsas', 'bolsa', 'Bolsas', 'solo-escritorio'], // pedido 11-10: bolsas de envío por color y medida
     ['#/reclamos', 'seguro', 'Seguros', 'solo-escritorio'],
     ['#/seguimiento', 'seguimiento', 'Seguimiento', 'solo-escritorio'],
     ['#/soporte', 'soporte', 'Soporte', 'solo-escritorio'],
@@ -34,6 +36,7 @@ const MENUS = {
     ['#/ruta', 'ruta', 'Mi ruta'], // administración también reparte
     ['#/cobranza', 'cobranza', 'Cobranza'],
     ['#/soporte', 'soporte', 'Soporte', 'solo-escritorio'],
+    ['#/bolsas', 'bolsa', 'Bolsas', 'solo-escritorio'],
     ['#/nuevo', 'nuevo', 'Nuevo', 'solo-escritorio'],
     ['#/reclamos', 'seguro', 'Seguros', 'solo-escritorio'],
     ['#/tarifas', 'tarifas', 'Tarifas'],
@@ -42,6 +45,11 @@ const MENUS = {
     ['#/ajustes', 'ajustes', 'Ajustes', 'solo-escritorio'],
   ],
 };
+
+// Secciones que dependen de un interruptor de Tarifas y reglas: Bolsas está en pausa (pedido 12-10) y, mientras esté
+// apagada, solo administración la ve (para dejar listos los precios antes de activarla).
+const bolsasActivas = () => Boolean(app.conf?.operacion?.bolsas);
+const menu = () => (MENUS[app.usuario?.rol] || []).filter(([h]) => h !== '#/bolsas' || bolsasActivas() || app.usuario?.rol === 'admin');
 
 const RUTAS = [
   [/^#\/seguimiento(?:\/([\w-]+))?$/, (m) => publico.seguimiento(m[1])],
@@ -66,6 +74,7 @@ const RUTAS = [
   [/^#\/seguridad$/, () => admin.seguridad(), 'admin'],
   [/^#\/ajustes$/, () => admin.ajustes(), 'admin'],
   [/^#\/soporte$/, () => (app.usuario.rol === 'admin' ? soporte.bandeja() : soporte.misMensajes()), ['admin', 'cliente', 'repartidor']],
+  [/^#\/bolsas$/, () => (app.usuario.rol === 'admin' ? bolsas.admin() : bolsasActivas() ? bolsas.cliente() : ir('#/inicio')), ['admin', 'cliente']],
 ];
 
 const INICIO = { cliente: '#/inicio', repartidor: '#/ruta', admin: '#/panel' };
@@ -115,17 +124,26 @@ async function enrutar() {
   if (conSesion() && app.usuario?.debe_cambiar_clave && !$('#f-clave-nueva')) dialogoCambiarClave({ obligatorio: true });
 }
 
-// Mensajes de soporte sin responder (solo administración): el número lo completa actualizarContadorSoporte().
-const contador = (h) => (h === '#/soporte' && app.usuario?.rol === 'admin' ? html`<span class="contador" data-contador-soporte hidden></span>` : '');
+// Mensajes de soporte sin responder y pedidos de bolsas por atender (solo administración): los números los completa
+// actualizarContadores(). En el celular, "Más" muestra la suma de lo que quedó dentro de esa hoja.
+const CONTADORES = { '#/soporte': 'data-contador-soporte', '#/bolsas': 'data-contador-bolsas' };
+const contador = (h) => (CONTADORES[h] && app.usuario?.rol === 'admin' ? html`<span class="contador" ${CONTADORES[h]} hidden></span>` : '');
+
+export async function actualizarContadores() {
+  const [nSoporte, nBolsas] = await Promise.all([soporte.actualizarContadorSoporte(), bolsas.actualizarContadorBolsas()]);
+  const ocultos = menu().filter(([, , , cls]) => cls === 'solo-escritorio').map(([h]) => h);
+  const n = (ocultos.includes('#/soporte') ? nSoporte : 0) + (ocultos.includes('#/bolsas') ? nBolsas : 0);
+  $$('[data-contador-mas]').forEach((el) => { el.textContent = n > 99 ? '99+' : String(n); el.hidden = !n; });
+}
 
 function pintarMenu(hash) {
-  const items = [...(MENUS[app.usuario?.rol] || []), ...(app.usuario && app.conf?.auth_mode === 'jwt' ? [['#/cuenta', 'usuarios', 'Mi cuenta', 'solo-escritorio']] : [])];
+  const items = [...menu(), ...(app.usuario && app.conf?.auth_mode === 'jwt' ? [['#/cuenta', 'usuarios', 'Mi cuenta', 'solo-escritorio']] : [])];
   const ocultos = items.filter(([, , , cls]) => cls === 'solo-escritorio');
   montar($('#menu'), html`<div class="titulo-menu">${app.usuario?.nombre || ''}</div>${items.map(([h, ic, txt, cls]) => html`
     <a href="${h}" class="${[hash.startsWith(h) ? 'activo' : '', cls].filter(Boolean).join(' ')}">${icono(ic)}<span>${txt}</span>${contador(h)}</a>`)}
-    <button type="button" class="solo-movil ${ocultos.some(([h]) => hash.startsWith(h)) ? 'activo' : ''}" id="btn-mas" aria-label="Más opciones">${raw('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>')}<span>Más</span>${ocultos.some(([h]) => h === '#/soporte') ? contador('#/soporte') : ''}</button>`);
+    <button type="button" class="solo-movil ${ocultos.some(([h]) => hash.startsWith(h)) ? 'activo' : ''}" id="btn-mas" aria-label="Más opciones">${raw('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>')}<span>Más</span>${app.usuario?.rol === 'admin' ? html`<span class="contador" data-contador-mas hidden></span>` : ''}</button>`);
   $('#btn-mas').onclick = hojaMas;
-  soporte.actualizarContadorSoporte();
+  actualizarContadores();
 }
 
 // ---------- Celular: hoja "Más" (secciones extra y cambio de perfil) ----------
@@ -143,7 +161,7 @@ function pintarChip() {
 
 function hojaMas() {
   const hash = location.hash;
-  const ocultos = (MENUS[app.usuario?.rol] || []).filter(([, , , cls]) => cls === 'solo-escritorio');
+  const ocultos = menu().filter(([, , , cls]) => cls === 'solo-escritorio');
   if (conSesion()) return hojaCuenta(ocultos, hash);
   if (!ocultos.length && !app.perfiles.length) return; // nada que mostrar (p. ej. antes de ingresar la clave)
   const m = modal(html`
@@ -155,7 +173,7 @@ function hojaMas() {
   `);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
   m.el.querySelectorAll('[data-perfil]').forEach((b) => { b.onclick = () => { m.cerrar(); cambiarPerfil(Number(b.dataset.perfil)); }; });
-  soporte.actualizarContadorSoporte();
+  actualizarContadores();
 }
 
 // ---------- Sesión real (AUTH_MODE=jwt) ----------
@@ -173,7 +191,7 @@ function hojaCuenta(ocultos, hash) {
       <button class="item" id="cerrar-sesion">${icono('salir')}Cerrar sesión</button>
     </div>`);
   m.el.querySelectorAll('a').forEach((a) => { a.addEventListener('click', () => m.cerrar()); });
-  soporte.actualizarContadorSoporte();
+  actualizarContadores();
   $('#cambiar-clave', m.el).onclick = () => { m.cerrar(); dialogoCambiarClave(); };
   $('#cerrar-sesion', m.el).onclick = () => { m.cerrar(); cerrarSesion(); };
   $('#cerrar-todas', m.el).onclick = async () => {

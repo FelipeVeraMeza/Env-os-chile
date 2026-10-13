@@ -14,7 +14,7 @@ import { validarClave } from '../server/lib/seguridad.js';
 
 // Tablas con datos de operación (se vacían). comuna, zona, config y schema_migracion se conservan.
 const TABLAS = ['usuario', 'destinatario', 'direccion', 'folio_contador', 'envio', 'adjunto', 'envio_estado', 'pago', 'pago_evento',
-  'link_pago', 'reclamo_seguro', 'costo', 'auditoria', 'evento_seguridad', 'alerta_seguridad'];
+  'link_pago', 'reclamo_seguro', 'costo', 'auditoria', 'evento_seguridad', 'alerta_seguridad', 'pedido_bolsas', 'pedido_bolsas_item'];
 
 const arg = (nombre) => {
   const i = process.argv.indexOf(`--${nombre}`);
@@ -45,8 +45,8 @@ try {
 
   console.log(`\nBase de datos: ${db.host || 'local'}${db.esSupabase ? ' (Supabase)' : ''}`);
   console.log(`Se borrarán: ${conteo.usuario ?? 0} usuarios, ${conteo.envio ?? 0} envíos, ${conteo.pago ?? 0} pagos, ${conteo.adjunto ?? 0} archivos,`);
-  console.log(`             ${conteo.reclamo_seguro ?? 0} reclamos, ${conteo.costo ?? 0} costos, ${conteo.destinatario ?? 0} destinatarios y las bitácoras.`);
-  console.log('Se conservan: comunas, zonas, tarifas, datos de la empresa y cuenta para transferencias.');
+  console.log(`             ${conteo.reclamo_seguro ?? 0} reclamos, ${conteo.costo ?? 0} costos, ${conteo.destinatario ?? 0} destinatarios, ${conteo.pedido_bolsas ?? 0} pedidos de bolsas y las bitácoras.`);
+  console.log('Se conservan: comunas, zonas, tarifas, catálogo y precios de bolsas, datos de la empresa y cuenta para transferencias.');
   let conservado = null;
   if (mantener) {
     conservado = (await pool.query("SELECT id, nombre, correo FROM usuario WHERE correo = $1 AND rol = 'admin' AND activo AND password_hash IS NOT NULL", [correo])).rows[0];
@@ -65,6 +65,8 @@ try {
   }
 
   const rutas = (await pool.query('SELECT ruta FROM adjunto')).rows.map((r) => r.ruta);
+  // Comprobantes de los pedidos de bolsas (la tabla puede no existir si la base aún no tiene la migración 018).
+  if (tablas.includes('pedido_bolsas')) rutas.push(...(await pool.query('SELECT comprobante_ruta FROM pedido_bolsas WHERE comprobante_ruta IS NOT NULL')).rows.map((r) => r.comprobante_ruta));
   const hash = mantener ? null : await bcrypt.hash(clave, 10);
   const cliente = await pool.connect();
   try {

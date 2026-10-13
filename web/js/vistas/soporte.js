@@ -1,4 +1,4 @@
-import { app } from '../app.js';
+import { actualizarContadores, app } from '../app.js';
 import { get, patch, post } from '../api.js';
 import { $, $$, badge, datosForm, errorToast, esqueleto, fechaHora, html, icono, marcarErrores, modal, montar, toast, vacio } from '../ui.js';
 
@@ -102,14 +102,14 @@ export async function bandeja(filtro = 'abiertos') {
         const r = await post(`/api/soporte/${f.dataset.responder}/responder`, { respuesta });
         toast(r.correo_enviado ? 'Respuesta guardada y enviada por correo' : 'Respuesta guardada', 'ok');
         bandeja(filtro);
-        actualizarContadorSoporte();
+        actualizarContadores();
       } catch (err) { marcarErrores(f, err.detalles); errorToast(err); }
     };
   });
   $$('[data-estado]').forEach((b) => {
     b.onclick = async () => {
       const [id, estado] = b.dataset.estado.split(':');
-      try { await patch(`/api/soporte/${id}`, { estado }); toast(estado === 'cerrado' ? 'Mensaje cerrado' : 'Mensaje abierto de nuevo', 'ok'); bandeja(filtro); actualizarContadorSoporte(); }
+      try { await patch(`/api/soporte/${id}`, { estado }); toast(estado === 'cerrado' ? 'Mensaje cerrado' : 'Mensaje abierto de nuevo', 'ok'); bandeja(filtro); actualizarContadores(); }
       catch (err) { errorToast(err); }
     };
   });

@@ -16,6 +16,7 @@ import { paginaQr, seguimiento } from './routes/publico.js';
 import { cobranza } from './routes/cobranza.js';
 import { seguridad } from './routes/seguridad.js';
 import { soporte } from './routes/soporte.js';
+import { bolsas } from './routes/bolsas.js';
 import { limitarPeticiones } from './lib/seguridad.js';
 
 const raiz = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -104,6 +105,7 @@ export function crearApp() {
   app.use('/api/seguridad', seguridad);
   app.use('/api/auditoria', auditoria);
   app.use('/api/soporte', soporte);
+  app.use('/api/bolsas', bolsas);
   app.use('/q', paginaQr);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 

@@ -75,6 +75,10 @@ export const CONFIG_POR_DEFECTO = {
     punto_courier: false,
     // Horario de retiro que ve el cliente al crear un envío y en su inicio (pedido 07-10). Se edita en Tarifas y reglas.
     horario_retiro: 'Agenda hasta las 23:59 y retiramos tu paquete al día siguiente entre las 9:00 y las 13:00 hrs.',
+    // Al confirmar un envío se avisa por correo al destinatario con el enlace de seguimiento (pedido 12-10).
+    aviso_destinatario: true,
+    // Sección "Bolsas de envío" (pedido 11-10). En pausa por pedido del cliente (12-10): los clientes no la ven hasta activarla.
+    bolsas: false,
   },
   ticket: {
     pie: 'Conserve este ticket. Consultas y reclamos indicando el folio.',

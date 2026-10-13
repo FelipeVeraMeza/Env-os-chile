@@ -14,19 +14,20 @@ const remitente = () => process.env.CORREO_REMITENTE || process.env.SMTP_FROM
   || (process.env.RESEND_API_KEY ? 'onboarding@resend.dev' : 'no-responder@envios.local');
 
 // responderA: al tocar "Responder" en el correo, la respuesta va a esa dirección (p. ej. quien escribió a soporte).
-export async function enviarCorreo({ para, asunto, texto, responderA }) {
+// html (opcional): versión con la marca; el texto plano siempre va para los programas de correo que no muestran HTML.
+export async function enviarCorreo({ para, asunto, texto, html, responderA }) {
   if (!correoConfigurado()) return false;
   if (process.env.RESEND_API_KEY) {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: remitente(), to: [para], subject: asunto, text: texto, ...(responderA ? { reply_to: responderA } : {}) }),
+      body: JSON.stringify({ from: remitente(), to: [para], subject: asunto, text: texto, ...(html ? { html } : {}), ...(responderA ? { reply_to: responderA } : {}) }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!r.ok) throw new Error(`Resend respondió ${r.status}: ${(await r.text()).slice(0, 200)}`);
     return true;
   }
   transporte ||= nodemailer.createTransport(process.env.SMTP_URL);
-  await transporte.sendMail({ from: remitente(), to: para, subject: asunto, text: texto, ...(responderA ? { replyTo: responderA } : {}) });
+  await transporte.sendMail({ from: remitente(), to: para, subject: asunto, text: texto, ...(html ? { html } : {}), ...(responderA ? { replyTo: responderA } : {}) });
   return true;
 }

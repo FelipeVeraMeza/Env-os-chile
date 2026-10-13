@@ -1,7 +1,7 @@
 import { app, ir } from '../app.js';
-import { enviarForm, get, post, patch, urlApi } from '../api.js';
+import { api, enviarForm, get, post, patch, urlApi } from '../api.js';
 import {
-  $, $$, badgePago, botonCopiar, clp, comprimirFoto, datosForm, errorToast, esqueleto, fechaHora, html, icono, marcarErrores, modal, montar, toast, vacio,
+  $, $$, badgePago, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, html, icono, marcarErrores, modal, montar, toast, vacio,
 } from '../ui.js';
 import { comunasCobertura, direccionTexto, itemEnvio, mapaGoogle, opcionesComunas, textoPaquete, urlMapaGoogle } from './comun.js';
 import { pagar, subirComprobante } from './envios.js';
@@ -38,6 +38,8 @@ export async function inicio() {
       <div class="card-titulo"><h2>Envíos recientes</h2><a class="btn sec chico" href="#/envios">Ver todos</a></div>
       <div class="lista-envios">${items.length ? items.map((e) => itemEnvio(e)) : vacio('Aún no tienes envíos.', html`<a class="btn" href="#/nuevo">Crear mi primer envío</a>`)}</div>
     </div>
+    ${app.conf.operacion?.bolsas ? html`<div class="card fila entre"><div><h2 style="margin:0">${icono('bolsa')} Bolsas de envío</h2><p class="sub">Pide bolsas de distintas medidas para despachar tus productos y te las llevamos.</p></div>
+      <a class="btn sec" href="#/bolsas">Pedir bolsas</a></div>` : ''}
     ${tarjetaAyuda()}`);
   enlazarSoporte(vista);
 }
@@ -122,6 +124,10 @@ export async function carrito() {
 // Pasos del asistente. Retiro (pedido 01-10): dónde el repartidor recoge el paquete.
 const PASOS = ['Retiro', 'Destinatario', 'Destino', 'Paquete', 'Confirmar'];
 const P = { retiro: 0, destinatario: 1, destino: 2, paquete: 3, resumen: 4 };
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Aviso al destinatario por correo con el enlace de seguimiento (pedido 12-10): solo si hay correo configurado.
+const avisaPorCorreo = () => app.conf.operacion?.aviso_destinatario !== false && app.conf.recuperacion_por_correo;
+const notaCorreoDestinatario = () => (avisaPorCorreo() ? '(opcional: le avisamos que creaste el envío, con el enlace de seguimiento)' : '(opcional)');
 
 export async function nuevo() {
   const vista = $('#vista');
@@ -131,7 +137,7 @@ export async function nuevo() {
   const w = {
     paso: 0, clienteId: esAdmin ? clientes[0]?.id : app.usuario.id, modoDest: 'libreta', destinatario: null, nuevoDest: {},
     tipo_destino: 'domicilio', direccionId: null, nuevaDir: {}, courier: {}, paquete: { bultos: 1 }, boleta: null, foto: null, cotizacion: null,
-    retiro: {}, guardarRetiro: true,
+    retiro: {}, guardarRetiro: true, correoDest: '',
   };
   let libreta = [];
   const cargarLibreta = async () => {
@@ -156,6 +162,7 @@ export async function nuevo() {
     if (dest) {
       w.modoDest = 'libreta';
       w.destinatario = dest;
+      w.correoDest = dest.correo || '';
       const dir = dest.direcciones.find((x) => x.id === base.direccion_id);
       w.direccionId = dir ? dir.id : 'nueva';
       if (!dir) w.nuevaDir = dirAnterior;
@@ -212,11 +219,13 @@ export async function nuevo() {
           <label class="item-envio" data-nombre="${(d.nombre + ' ' + d.telefono).toLowerCase()}" style="cursor:pointer">
             <div><div class="titulo-item">${d.nombre}</div><div class="dir"><span class="nowrap">${d.telefono}</span> · ${d.direcciones.length === 1 ? '1 dirección' : `${d.direcciones.length} direcciones`}</div></div>
             <input type="radio" name="dest" value="${d.id}" ${w.destinatario?.id === d.id ? html`checked` : ''} style="width:22px;min-height:22px">
-          </label>`)}</div>` : html`
+          </label>`)}</div>
+        <label class="campo" style="margin-top:14px">Correo del destinatario <small>${notaCorreoDestinatario()}</small>
+          <input name="destinatario_correo" id="correo-dest" type="email" autocapitalize="none" maxlength="200" value="${w.correoDest || ''}" placeholder="nombre@correo.cl"></label>` : html`
         <div class="grid g2">
           <label class="campo">Nombre completo *<input name="nombre" value="${w.nuevoDest.nombre || ''}" autocomplete="name" required></label>
           <label class="campo">Teléfono móvil *<input name="telefono" value="${w.nuevoDest.telefono || ''}" inputmode="tel" placeholder="+56 9 1234 5678" autocomplete="tel"></label>
-          <label class="campo">Correo <small>(opcional)</small><input name="correo" type="email" value="${w.nuevoDest.correo || ''}"></label>
+          <label class="campo">Correo <small>${notaCorreoDestinatario()}</small><input name="correo" type="email" autocapitalize="none" maxlength="200" value="${w.nuevoDest.correo || ''}" placeholder="nombre@correo.cl"></label>
           <label class="campo">RUT <small>(opcional)</small><input name="rut" value="${w.nuevoDest.rut || ''}" placeholder="12.345.678-5"></label>
         </div>
         <p class="muted" style="margin-top:10px">El destinatario queda en Guardados con todas sus direcciones.</p>`}`;
@@ -306,6 +315,7 @@ export async function nuevo() {
     return html`<div class="grid g2">
       <div class="pila">
         <div><div class="muted">Destinatario</div><b>${d?.nombre}</b> · <span class="nowrap">${d?.telefono}</span>${d?.rut ? html` · RUT <span class="nowrap">${d.rut}</span>` : ''}</div>
+        ${correoAviso() && avisaPorCorreo() ? html`<div><div class="muted">Aviso por correo</div>Le enviaremos el enlace de seguimiento a <b>${correoAviso()}</b></div>` : ''}
         <div><div class="muted">${w.tipo_destino === 'punto_courier' ? `Punto ${w.courier.courier_empresa}` : 'Dirección'}</div>
           ${w.tipo_destino === 'punto_courier' ? html`<b>${w.courier.courier_punto}</b><br>` : ''}${dir.calle} ${dir.numero}${dir.depto ? ', ' + dir.depto : ''} · <b>${dir.comuna_nombre}</b></div>
         <div><div class="muted">Retiro</div>${w.retiro.calle} ${w.retiro.numero}${w.retiro.depto ? ', ' + w.retiro.depto : ''} · <b>${nombreComuna(w.retiro.comuna_id)}</b></div>
@@ -361,6 +371,7 @@ export async function nuevo() {
         // Al cambiar de destinatario, la dirección elegida antes ya no le pertenece: se preselecciona la principal.
         if (elegido?.id !== w.destinatario?.id) w.direccionId = elegido?.direcciones[0]?.id ?? null;
         w.destinatario = elegido;
+        w.correoDest = String(d.destinatario_correo || '').trim();
       }
     } else if (w.paso === P.destino) {
       if (d.dir) w.direccionId = d.dir === 'nueva' ? 'nueva' : Number(d.dir);
@@ -376,12 +387,20 @@ export async function nuevo() {
     b.horario_especial = Boolean(w.paquete.horario_especial);
     b.retiro = w.retiro;
     b.guardar_retiro = w.guardarRetiro;
-    if (w.modoDest === 'libreta' && w.destinatario) b.destinatario_id = w.destinatario.id;
-    else b.destinatario = w.nuevoDest;
+    if (w.modoDest === 'libreta' && w.destinatario) {
+      b.destinatario_id = w.destinatario.id;
+      // Solo si se escribió o cambió: así el servidor completa el correo guardado del destinatario.
+      if (w.correoDest && w.correoDest !== (w.destinatario.correo || '')) b.destinatario_correo = w.correoDest;
+    } else b.destinatario = w.nuevoDest;
     const usaNueva = !(w.modoDest === 'libreta' && w.destinatario?.direcciones.length) || w.direccionId === 'nueva';
     if (usaNueva) b.direccion = w.nuevaDir;
     else b.direccion_id = w.direccionId;
     return b;
+  }
+
+  // Correo al que irá el aviso del envío (el del destinatario guardado o el que se escribió).
+  function correoAviso() {
+    return (w.modoDest === 'libreta' ? w.correoDest || w.destinatario?.correo : w.nuevoDest.correo)?.trim() || '';
   }
 
   function validarLocal() {
@@ -393,6 +412,8 @@ export async function nuevo() {
     }
     if (w.paso === P.destinatario) {
       if (w.modoDest === 'libreta' && !w.destinatario) { toast('Selecciona un destinatario de Guardados', 'error'); return false; }
+      if (w.modoDest === 'libreta' && w.correoDest && !EMAIL.test(w.correoDest)) e.destinatario_correo = 'Correo inválido (ej. nombre@correo.cl)';
+      if (w.modoDest === 'nuevo' && w.nuevoDest.correo?.trim() && !EMAIL.test(w.nuevoDest.correo.trim())) e.correo = 'Correo inválido (ej. nombre@correo.cl)';
       if (w.modoDest === 'nuevo') {
         if (!w.nuevoDest.nombre?.trim()) e.nombre = 'Nombre obligatorio';
         if (!/^(\+?56)?\s*9?\s*\d{4}\s*\d{4}$/.test((w.nuevoDest.telefono || '').replace(/\s+/g, ' ').trim())) e.telefono = 'Formato +56 9 XXXX XXXX';
@@ -442,6 +463,10 @@ export async function nuevo() {
           if (url && mapa.src !== url) { mapa.src = url; mapa.closest('.mapa-dir').hidden = false; }
         }, 800);
       });
+    });
+    // Al elegir otro destinatario de Guardados, el campo de correo muestra el suyo (se puede completar o corregir).
+    $$('input[name="dest"]', f).forEach((r) => {
+      r.onchange = () => { const elegido = libreta.find((x) => String(x.id) === r.value); $('#correo-dest', f).value = elegido?.correo || ''; };
     });
     $('#buscar-dest', f)?.addEventListener('input', (ev) => {
       const q = ev.target.value.toLowerCase();
@@ -516,6 +541,7 @@ export async function nuevo() {
       <div style="max-width:680px">
         <div class="card pila">
           <div class="fila entre"><h2 style="margin:0">Total ${clp(envio.tarifa_total)}</h2>${badgePago(envio.estado_pago)}</div>
+          ${envio.aviso_destinatario ? html`<div class="aviso">✉️ Le enviamos un correo a <b>${envio.destinatario_nombre}</b> con el enlace para seguir su envío.</div>` : ''}
           <div class="aviso magenta">Imprime la etiqueta y pégala en el paquete. Paga ahora: con el pago aprobado el repartidor puede retirar tu envío. <b>Si no pagas en ${app.conf.operacion.horas_sin_pago || 24} horas, el envío se anula solo.</b></div>
           ${app.conf.pagos.en_linea ? html`<button class="btn grande ancho" id="pagar">Pagar ${clp(envio.tarifa_total)}</button>` : ''}
           <button class="btn ${app.conf.pagos.en_linea ? 'sec' : 'grande'} ancho" id="transferir">Pagar ${clp(envio.tarifa_total)} con transferencia (subir comprobante)</button>
@@ -551,7 +577,9 @@ export async function libreta() {
             <div class="fila">${di.es_principal ? '' : html`<button class="btn sec chico" data-principal="${d.id}:${di.id}">Principal</button>`}
               <button class="btn peligro chico" data-quitar="${d.id}:${di.id}" aria-label="Quitar dirección">Quitar</button></div>
           </div>`)}</div>
-        <button class="btn sec chico" style="margin-top:12px" data-agregar="${d.id}">+ Agregar dirección</button>
+        <div class="fila" style="margin-top:12px"><button class="btn sec chico" data-agregar="${d.id}">+ Agregar dirección</button>
+          <button class="btn sec chico" data-editar="${d.id}">Editar datos</button>
+          <button class="btn peligro chico" data-borrar-dest="${d.id}">Borrar contacto</button></div>
       </div>`)}</div>` : html`<div class="card">${vacio('Aún no tienes destinatarios guardados. Se guardan solos al crear un envío.')}</div>`}`);
 
   const formDireccion = (destId) => {
@@ -578,11 +606,40 @@ export async function libreta() {
   };
   $$('[data-principal]').forEach((b) => { b.onclick = () => cambiarDireccion(b.dataset.principal, { es_principal: true }); });
   $$('[data-quitar]').forEach((b) => { b.onclick = () => cambiarDireccion(b.dataset.quitar, { activa: false }, 'Dirección quitada (se conserva en envíos anteriores)'); });
+  // Editar nombre, teléfono o correo (p. ej. completar el correo para que le llegue el aviso de sus envíos).
+  $$('[data-editar]').forEach((b) => {
+    b.onclick = () => {
+      const d = lista.find((x) => String(x.id) === b.dataset.editar);
+      const m = modal(html`<h2>Editar destinatario</h2><form class="pila" id="f-editar-dest" novalidate>
+        <label class="campo">Nombre completo *<input name="nombre" value="${d.nombre}"></label>
+        <label class="campo">Teléfono móvil *<input name="telefono" value="${d.telefono}" inputmode="tel"></label>
+        <label class="campo">Correo <small>${notaCorreoDestinatario()}</small><input name="correo" type="email" autocapitalize="none" maxlength="200" value="${d.correo || ''}"></label>
+        <label class="campo">RUT <small>(opcional)</small><input name="rut" value="${d.rut || ''}"></label>
+        <button class="btn">Guardar cambios</button></form>`);
+      $('#f-editar-dest', m.el).onsubmit = async (e) => {
+        e.preventDefault();
+        try { await patch(`/api/destinatarios/${d.id}`, datosForm(e.target)); m.cerrar(); toast('Destinatario actualizado', 'ok'); libreta(); }
+        catch (err) { marcarErrores(e.target, err.detalles); errorToast(err); }
+      };
+    };
+  });
+  // Borrar un contacto (pedido 12-10): deja de aparecer en Guardados; sus envíos anteriores no cambian.
+  $$('[data-borrar-dest]').forEach((b) => {
+    b.onclick = async () => {
+      const d = lista.find((x) => String(x.id) === b.dataset.borrarDest);
+      const ok = await confirmar(`Borrar a ${d.nombre}`, d.envios
+        ? 'Dejará de aparecer en Guardados. Sus envíos anteriores no cambian y se pueden seguir viendo en Mis envíos.'
+        : 'Se borrará de Guardados con todas sus direcciones.', 'Borrar');
+      if (!ok) return;
+      try { await api(`/api/destinatarios/${d.id}`, { metodo: 'DELETE' }); toast(`${d.nombre} se borró de Guardados`, 'ok'); libreta(); }
+      catch (err) { errorToast(err); }
+    };
+  });
   $('#nuevo-dest').onclick = () => {
     const m = modal(html`<h2>Nuevo destinatario</h2><form class="pila" id="f-dest" novalidate>
       <label class="campo">Nombre completo *<input name="nombre"></label>
       <label class="campo">Teléfono móvil *<input name="telefono" placeholder="+56 9 1234 5678"></label>
-      <label class="campo">Correo<input name="correo" type="email"></label>
+      <label class="campo">Correo <small>${notaCorreoDestinatario()}</small><input name="correo" type="email" autocapitalize="none" maxlength="200"></label>
       <label class="campo">RUT<input name="rut"></label>
       <button class="btn">Guardar</button></form>`);
     $('#f-dest', m.el).onsubmit = async (e) => {

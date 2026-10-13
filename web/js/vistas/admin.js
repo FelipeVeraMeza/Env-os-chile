@@ -169,6 +169,10 @@ export async function tarifas() {
         <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="autoasignacion" ${op.autoasignacion ? html`checked` : ''}> Los repartidores pueden tomar envíos pagados sin asignar</label>
         <p class="muted">Si lo desactivas, el repartidor solo ve lo que administración le asigna.</p>
         <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="registro_clientes" ${op.registro_clientes ? html`checked` : ''}> Los clientes pueden crear su cuenta solos</label>
+        <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="aviso_destinatario" ${op.aviso_destinatario !== false ? html`checked` : ''}> Avisar por correo al destinatario cuando se crea su envío</label>
+        <p class="muted">${app.conf.recuperacion_por_correo ? 'Le llega el folio y el enlace de seguimiento, si el cliente anotó su correo.' : 'El correo automático aún no está configurado (RESEND_API_KEY): hasta entonces no se envía nada.'}</p>
+        <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="bolsas" ${op.bolsas ? html`checked` : ''}> Sección "Bolsas de envío" para los clientes</label>
+        <p class="muted">Desactivada = en pausa: los clientes no la ven. Tú puedes dejar listos los precios en <a href="#/bolsas">Bolsas</a>.</p>
         <label class="interruptor" style="margin-top:10px"><input type="checkbox" name="punto_courier" ${op.punto_courier ? html`checked` : ''}> Envío a puntos de otras compañías (Blue Express, Starken…)</label>
         <p class="muted">Desactivado = en pausa: los clientes solo pueden elegir entrega a domicilio.</p>
         <p class="muted">La foto de entrega es siempre obligatoria.</p>

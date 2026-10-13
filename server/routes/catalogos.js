@@ -95,6 +95,15 @@ configuracion.get('/publica', ruta(async (req, res) => {
   });
 }));
 
+// Logo de la empresa como imagen pública: los correos lo cargan desde aquí (Gmail no muestra imágenes incrustadas).
+configuracion.get('/logo.png', ruta(async (_req, res) => {
+  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec((await leerConfig()).negocio.logo_url || '');
+  if (!m) throw falla(404, 'No hay logo');
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(Buffer.from(m[1], 'base64'));
+}));
+
 configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, res) => {
   const clave = req.params.clave;
   // Solo claves propias: "constructor", "__proto__" o "toString" existen en todo objeto y no son configuración.
@@ -198,6 +207,8 @@ destinatarios.get('/', ruta(async (req, res) => {
   if (clienteId) { params.push(clienteId); cond.push(`d.cliente_id = $${params.length}`); }
   // Los titulares anonimizados no aparecen en la libreta (no se les puede volver a enviar); administración los ve con ?anonimizados=1.
   if (!(req.usuario.rol === 'admin' && req.query.anonimizados === '1')) cond.push('d.anonimizado_en IS NULL');
+  // Los contactos que el cliente borró de Guardados no aparecen (siguen en sus envíos anteriores).
+  cond.push('d.eliminado_en IS NULL');
   if (req.query.q) { params.push(patronBusqueda(req.query.q)); cond.push(`(d.nombre ILIKE $${params.length} OR d.telefono ILIKE $${params.length})`); }
   const { rows } = await query(
     `SELECT d.*, COALESCE(json_agg(json_build_object('id', di.id, 'alias', di.alias, 'calle', di.calle, 'numero', di.numero,
@@ -214,7 +225,7 @@ destinatarios.get('/', ruta(async (req, res) => {
 
 async function destinatarioPropio(req, id) {
   const d = await uno('SELECT * FROM destinatario WHERE id = $1', [id]);
-  if (!d || (req.usuario.rol === 'cliente' && d.cliente_id !== req.usuario.id)) throw falla(404, 'Destinatario no encontrado');
+  if (!d || (req.usuario.rol === 'cliente' && (d.cliente_id !== req.usuario.id || d.eliminado_en))) throw falla(404, 'Destinatario no encontrado');
   return d;
 }
 
@@ -286,6 +297,25 @@ destinatarios.patch('/:id', ruta(async (req, res) => {
     `UPDATE destinatario SET nombre = $1, telefono = $2, correo = $3, rut = $4, notas = $5, actualizado_en = now() WHERE id = $6 RETURNING *`,
     [b.nombre.trim(), normalizarTelefono(b.telefono), b.correo || null, normalizarRut(b.rut), b.notas || null, d.id]);
   res.json(act);
+}));
+
+// Borrar un contacto de Guardados (pedido 12-10). Si nunca se le envió nada se borra del todo; si tiene envíos se
+// oculta: esos envíos lo siguen necesitando (historial, etiqueta, seguimiento y entregas en curso).
+destinatarios.delete('/:id', ruta(async (req, res) => {
+  const d = await destinatarioPropio(req, idNumerico(req.params.id));
+  if (d.eliminado_en) throw falla(404, 'Destinatario no encontrado');
+  const borrado = await transaccion(async (db) => {
+    const { rows: [{ n }] } = await db.query('SELECT count(*)::int AS n FROM envio WHERE destinatario_id = $1', [d.id]);
+    if (n) {
+      await db.query('UPDATE destinatario SET eliminado_en = now(), actualizado_en = now() WHERE id = $1', [d.id]);
+      return false;
+    }
+    await db.query('DELETE FROM direccion WHERE destinatario_id = $1', [d.id]);
+    await db.query('DELETE FROM destinatario WHERE id = $1', [d.id]);
+    return true;
+  });
+  await auditar(req, borrado ? 'borrar' : 'ocultar', 'destinatario', d.id);
+  res.json({ ok: true, borrado });
 }));
 
 // Agregar una nueva dirección (p. ej. cuando el destinatario se cambia de casa).

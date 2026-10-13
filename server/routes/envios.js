@@ -20,6 +20,8 @@ import { generarEtiquetasPdf, generarQrPng, generarTicketPdf, urlQr } from '../l
 import { COMPROBANTE_EN_REVISION, PAGO_EN_LINEA_APAGADO, cerrarCobrosAbiertos, iniciarPago, registrarComprobante, registrarComprobanteLote, registrarEventoPago, registrarPagoManual } from '../lib/pagos.js';
 import { registrarEvento } from '../lib/seguridad.js';
 import { requiereRol } from '../middleware/auth.js';
+import { EMAIL, avisarDestinatario } from '../lib/aviso-destinatario.js';
+import { correoConfigurado } from '../lib/correo.js';
 
 export const envios = Router();
 
@@ -114,6 +116,9 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
     if (dueno) b.destinatario_id = dueno.destinatario_id;
   }
   if (!b.destinatario_id) Object.assign(errores, prefijar('destinatario', validarDestinatario(b.destinatario)));
+  // Correo del destinatario elegido de Guardados (pedido 12-10): se completa o corrige para avisarle del envío.
+  const correoDestinatario = String(b.destinatario_correo ?? '').trim();
+  if (b.destinatario_id && correoDestinatario && (correoDestinatario.length > 200 || !EMAIL.test(correoDestinatario))) errores.destinatario_correo = 'Correo inválido';
   // Dirección de RETIRO (dónde el repartidor recoge el paquete). Si no viene, se usa la guardada del cliente.
   let retiro = b.retiro && typeof b.retiro === 'object' ? b.retiro : null;
   if (!retiro) {
@@ -150,18 +155,23 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   const envio = await transaccion(async (db) => {
     let destinatarioId = b.destinatario_id ? Number(b.destinatario_id) : null;
     if (destinatarioId) {
-      const { rows } = await db.query('SELECT id, anonimizado_en FROM destinatario WHERE id = $1 AND cliente_id = $2', [destinatarioId, clienteId]);
-      if (!rows[0]) throw falla(422, 'Destinatario no encontrado en la libreta del cliente');
+      const { rows } = await db.query('SELECT id, anonimizado_en, eliminado_en FROM destinatario WHERE id = $1 AND cliente_id = $2', [destinatarioId, clienteId]);
+      if (!rows[0] || rows[0].eliminado_en) throw falla(422, 'Destinatario no encontrado en la libreta del cliente');
       // Un titular anonimizado (Ley 21.719) no recibe envíos nuevos: se le volvería a asociar una dirección y datos.
       if (rows[0].anonimizado_en) throw falla(409, 'Este destinatario fue anonimizado: crea uno nuevo para enviarle', { destinatario_id: 'Anonimizado' });
+      if (correoDestinatario) await db.query('UPDATE destinatario SET correo = $1, actualizado_en = now() WHERE id = $2', [correoDestinatario, destinatarioId]);
     } else {
       const d = b.destinatario;
       // Si el cliente ya tiene en su libreta a esta persona (mismo nombre y teléfono), se reutiliza: antes cada envío
       // creaba otro registro igual y la libreta se llenaba de repetidos.
       const { rows: [existente] } = await db.query(
-        `SELECT id FROM destinatario WHERE cliente_id = $1 AND telefono = $2 AND lower(btrim(nombre)) = lower($3) AND anonimizado_en IS NULL
+        `SELECT id FROM destinatario WHERE cliente_id = $1 AND telefono = $2 AND lower(btrim(nombre)) = lower($3) AND anonimizado_en IS NULL AND eliminado_en IS NULL
          ORDER BY id LIMIT 1`, [clienteId, normalizarTelefono(d.telefono), d.nombre.trim()]);
-      if (existente) destinatarioId = existente.id;
+      if (existente) {
+        destinatarioId = existente.id;
+        // El correo que se escribió ahora (si viene) reemplaza al guardado: es el que se usará para avisarle.
+        if (d.correo) await db.query('UPDATE destinatario SET correo = $1, actualizado_en = now() WHERE id = $2', [d.correo, existente.id]);
+      }
       else {
         const { rows: [nuevo] } = await db.query(
           `INSERT INTO destinatario (cliente_id, nombre, telefono, correo, rut, notas) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
@@ -225,8 +235,16 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   });
 
   await auditar(req, 'crear', 'envio', envio.id, { folio: envio.folio, tarifa: envio.tarifa_total });
-  res.status(201).json(presentar(envio, req.usuario));
+  res.status(201).json({ ...presentar(envio, req.usuario), aviso_destinatario: avisoDestinatario(envio, conf) });
 }));
+
+// Pedido 12-10: al confirmar el envío se avisa por correo al destinatario con el enlace de seguimiento. El correo sale
+// en segundo plano (no demora la respuesta); se responde si corresponde avisar para que la pantalla lo diga.
+function avisoDestinatario(envio, conf) {
+  if (!envio.folio || !envio.destinatario_correo || !correoConfigurado() || conf.operacion.aviso_destinatario === false) return false;
+  avisarDestinatario(envio.id);
+  return true;
+}
 
 function prefijar(prefijo, errores) {
   return Object.fromEntries(Object.entries(errores).map(([k, v]) => [`${prefijo}.${k}`, v]));
@@ -525,7 +543,8 @@ envios.post('/:id/confirmar', requiereRol('admin', 'cliente'), ruta(async (req, 
   if (envio.estado !== 'borrador') throw falla(409, 'El envío ya fue confirmado');
   const folio = await transaccion((db) => confirmar(db, envio.id, req.usuario.id));
   await auditar(req, 'confirmar', 'envio', envio.id, { folio });
-  res.json(presentar(await cargarEnvio(envio.id), req.usuario));
+  const confirmado = await cargarEnvio(envio.id);
+  res.json({ ...presentar(confirmado, req.usuario), aviso_destinatario: avisoDestinatario(confirmado, await leerConfig()) });
 }));
 
 envios.post('/:id/asignar', requiereRol('admin'), ruta(async (req, res) => {

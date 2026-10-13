@@ -27,7 +27,8 @@ const PASOS = [
   ['pago', 'DELETE FROM pago'],
   ['adjunto', 'DELETE FROM adjunto'],
   ['envio', 'DELETE FROM envio'],
-  ['folio_contador', 'DELETE FROM folio_contador'],
+  // Solo el contador de los envíos: los pedidos de bolsas se conservan y sus folios BOL no deben repetirse.
+  ['folio_contador', "DELETE FROM folio_contador WHERE prefijo = 'ENV'"],
   // Después de los envíos (que apuntan a ellas): direcciones, destinatarios y el retiro guardado de cada cliente.
   ...(conDestinatarios ? [
     ['direccion', 'DELETE FROM direccion'],
@@ -38,6 +39,7 @@ const PASOS = [
 ];
 const SELECCION = {
   costo: 'SELECT * FROM costo WHERE envio_id IS NOT NULL OR pago_id IS NOT NULL OR reclamo_id IS NOT NULL',
+  folio_contador: "SELECT * FROM folio_contador WHERE prefijo = 'ENV'",
   retiro_guardado: `SELECT id, retiro_calle, retiro_numero, retiro_depto, retiro_referencia, retiro_comuna_id FROM usuario
     WHERE retiro_calle IS NOT NULL OR retiro_comuna_id IS NOT NULL`,
 };

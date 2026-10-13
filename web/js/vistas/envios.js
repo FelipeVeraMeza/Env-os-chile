@@ -182,7 +182,8 @@ export async function detalle(id) {
         <div class="card">
           <div class="card-titulo"><h2>Destino</h2><div class="fila"><a class="btn sec chico" href="${e.mapas.google}" target="_blank" rel="noopener">Google Maps</a><a class="btn sec chico" href="${e.mapas.waze}" target="_blank" rel="noopener">Waze</a></div></div>
           ${e.tipo_destino === 'punto_courier' ? html`<div class="aviso" style="margin-bottom:10px">Entrega en punto <b>${e.courier_empresa}</b>: ${e.courier_punto}${e.courier_codigo ? ` · código ${e.courier_codigo}` : ''}</div>` : ''}
-          <p><b>${e.destinatario_nombre}</b> · <span class="nowrap">${e.destinatario_telefono}</span></p>
+          <p><b>${e.destinatario_nombre}</b> · <span class="nowrap">${e.destinatario_telefono}</span>${e.destinatario_correo ? html` · ${e.destinatario_correo}` : ''}</p>
+          ${e.aviso_destinatario_en ? html`<p class="sub">✉️ Se le avisó por correo con el enlace de seguimiento (${fechaHora(e.aviso_destinatario_en)})</p>` : ''}
           <p>${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}<br><b style="font-size:1.2rem">${e.comuna_nombre}</b> <span class="muted">· ${e.region}</span></p>
           ${e.folio && e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar al destinatario por WhatsApp</a>` : ''}
           ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}

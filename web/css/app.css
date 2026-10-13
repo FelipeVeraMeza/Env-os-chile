@@ -556,3 +556,9 @@ input[type="file"]::file-selector-button {
 .foto-entrega.lista { border-style: solid; border-color: rgba(52, 211, 153, .6); background: rgba(52, 211, 153, .1); }
 .foto-entrega.lista .icono-foto { display: none; }
 .foto-entrega.falta { border-color: var(--error); background: rgba(255, 107, 138, .12); }
+
+/* Bolsas de envío (pedido 11-10): casillas numéricas dentro de las tablas de pedido y de precios. */
+.cantidad-bolsa, .celda-num { max-width: 110px; min-height: 38px; text-align: right; }
+.cantidad-bolsa { max-width: 76px; }
+.tabla-bolsas th, .tabla-bolsas td { padding: 10px 8px; }
+.tabla-bolsas td:first-child { white-space: normal; }

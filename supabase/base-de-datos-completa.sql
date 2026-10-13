@@ -5,7 +5,7 @@
 --  CÓMO USARLO: Supabase → SQL Editor → New query → pegar TODO este archivo → Run.
 --  Se puede ejecutar más de una vez: si la base ya existe, no hace nada.
 --
---  Crea: 18 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
+--  Crea: 20 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
 --  dentro de Santiago), tarifas ($3.500 base, +$1.000 horario especial, 20 kg / 60 cm),
 --  reglas de operación (3 intentos, 5 min de espera) y el bucket privado de fotos y boletas.
 --  Los usuarios los crea la app en su primer arranque (ADMIN_EMAIL / ADMIN_PASSWORD en Railway).
@@ -822,6 +822,108 @@ END
 $migracion$;
 
 -- ---------------------------------------------------------------------------
+-- Migración 018_aviso_destinatario_y_borrar_contactos.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '018_aviso_destinatario_y_borrar_contactos.sql') THEN
+    -- Pedido del cliente del 12-10-2026: al crear un envío se avisa por correo al destinatario con el enlace de seguimiento.
+    ALTER TABLE envio ADD COLUMN IF NOT EXISTS aviso_destinatario_en TIMESTAMPTZ;
+
+    -- Pedido del cliente del 12-10-2026: el cliente puede borrar contactos de Guardados. Si el contacto ya tiene envíos,
+    -- se oculta (los envíos lo siguen necesitando para el historial, la etiqueta y el seguimiento); si no, se borra.
+    ALTER TABLE destinatario ADD COLUMN IF NOT EXISTS eliminado_en TIMESTAMPTZ;
+    INSERT INTO schema_migracion (nombre) VALUES ('018_aviso_destinatario_y_borrar_contactos.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
+-- Migración 019_bolsas.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '019_bolsas.sql') THEN
+    -- Pedido del cliente del 11-10-2026: sección "Bolsas" donde el cliente pide bolsas de envío por color y medida.
+    -- El 12-10 el cliente la dejó en pausa: queda apagada (operacion.bolsas = false) hasta que la active en Tarifas y reglas.
+    -- Cada color tiene su precio; se parte con las fucsia (paquetes de 100) y más adelante se agregan negro, blanco, etc.
+    -- Los precios los define administración (igual que las tarifas de envío).
+    CREATE TABLE IF NOT EXISTS bolsa_producto (
+      id             SERIAL PRIMARY KEY,
+      color          TEXT NOT NULL,
+      medida         TEXT NOT NULL,                       -- ancho x alto en cm, p. ej. "17x30"
+      unidades       INTEGER NOT NULL DEFAULT 100 CHECK (unidades BETWEEN 1 AND 10000), -- bolsas por paquete
+      precio         INTEGER NOT NULL CHECK (precio BETWEEN 1 AND 10000000),         -- precio de venta del paquete
+      costo          INTEGER CHECK (costo IS NULL OR costo BETWEEN 0 AND 10000000),  -- lo que le cuesta a la empresa (solo administración)
+      activo         BOOLEAN NOT NULL DEFAULT TRUE,
+      orden          INTEGER NOT NULL DEFAULT 0,
+      creado_en      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (color, medida, unidades)
+    );
+    ALTER TABLE bolsa_producto ENABLE ROW LEVEL SECURITY;
+
+    -- Precios al costo de la lista del proveedor (11-10) + $2.000 por paquete para cubrir el IVA, como pidió el cliente.
+    INSERT INTO bolsa_producto (color, medida, unidades, costo, precio, orden) VALUES
+      ('Fucsia', '17x30', 100, 2150, 4150, 1),
+      ('Fucsia', '20x30', 100, 2500, 4500, 2),
+      ('Fucsia', '25x35', 100, 3750, 5750, 3),
+      ('Fucsia', '30x42', 100, 5450, 7450, 4),
+      ('Fucsia', '35x45', 100, 6800, 8800, 5),
+      ('Fucsia', '40x55', 100, 9400, 11400, 6),
+      ('Fucsia', '45x60', 100, 11250, 13250, 7),
+      ('Fucsia', '60x80', 100, 23500, 25500, 8)
+    ON CONFLICT (color, medida, unidades) DO NOTHING;
+
+    -- Pedido de bolsas: se paga por transferencia con comprobante (como los envíos) y administración lo aprueba y entrega.
+    CREATE TABLE IF NOT EXISTS pedido_bolsas (
+      id                  SERIAL PRIMARY KEY,
+      folio               TEXT NOT NULL UNIQUE,              -- BOL-2026-000001
+      cliente_id          INTEGER NOT NULL REFERENCES usuario(id),
+      estado              TEXT NOT NULL DEFAULT 'pendiente'
+                            CHECK (estado IN ('pendiente', 'en_revision', 'pagado', 'entregado', 'anulado')),
+      total               INTEGER NOT NULL CHECK (total > 0),
+      entrega_direccion   TEXT NOT NULL,
+      entrega_comuna_id   INTEGER NOT NULL REFERENCES comuna(id),
+      observaciones       TEXT,
+      comprobante_ruta    TEXT,
+      comprobante_mime    TEXT,
+      comprobante_nombre  TEXT,
+      comprobante_referencia TEXT,
+      comprobante_subido_en  TIMESTAMPTZ,
+      motivo_rechazo      TEXT,
+      motivo_anulacion    TEXT,
+      pagado_en           TIMESTAMPTZ,
+      entregado_en        TIMESTAMPTZ,
+      anulado_en          TIMESTAMPTZ,
+      revisado_por        INTEGER REFERENCES usuario(id) ON DELETE SET NULL,
+      creado_en           TIMESTAMPTZ NOT NULL DEFAULT now(),
+      actualizado_en      TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS pedido_bolsas_cliente_idx ON pedido_bolsas (cliente_id, creado_en DESC);
+    CREATE INDEX IF NOT EXISTS pedido_bolsas_estado_idx ON pedido_bolsas (estado, creado_en DESC);
+    ALTER TABLE pedido_bolsas ENABLE ROW LEVEL SECURITY;
+
+    -- Cada línea guarda el color, la medida y el precio del momento: si después cambia el precio, el pedido no cambia.
+    CREATE TABLE IF NOT EXISTS pedido_bolsas_item (
+      id              SERIAL PRIMARY KEY,
+      pedido_id       INTEGER NOT NULL REFERENCES pedido_bolsas(id) ON DELETE CASCADE,
+      bolsa_id        INTEGER REFERENCES bolsa_producto(id) ON DELETE SET NULL,
+      color           TEXT NOT NULL,
+      medida          TEXT NOT NULL,
+      unidades        INTEGER NOT NULL,
+      precio_unitario INTEGER NOT NULL,
+      cantidad        INTEGER NOT NULL CHECK (cantidad BETWEEN 1 AND 100),
+      subtotal        INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS pedido_bolsas_item_pedido_idx ON pedido_bolsas_item (pedido_id);
+    ALTER TABLE pedido_bolsas_item ENABLE ROW LEVEL SECURITY;
+    INSERT INTO schema_migracion (nombre) VALUES ('019_bolsas.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
 -- Zona "Santiago" y 346 comunas (solo si la tabla está vacía)
 -- ---------------------------------------------------------------------------
 INSERT INTO zona (nombre, tarifa, color, orden) VALUES ('Santiago', 3500, '#1d4ed8', 1)
@@ -1190,7 +1292,7 @@ $comunas$;
 INSERT INTO config (clave, valor) VALUES
   ('negocio', '{"nombre":"Tu Empresa de Envíos","rut":"","telefono":"","correo":"","logo_url":"","whatsapp":""}'::jsonb),
   ('tarifas', '{"base":3500,"peso_estandar_kg":10,"dim_estandar_cm":40,"recargo_sobredimension":2000,"peso_max_kg":20,"dim_max_cm":60,"recargo_horario_especial":1000}'::jsonb),
-  ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":false,"registro_clientes":true,"qr_destino":"google","autoasignacion":true,"punto_courier":false,"horario_retiro":"Agenda hasta las 23:59 y retiramos tu paquete al día siguiente entre las 9:00 y las 13:00 hrs."}'::jsonb),
+  ('operacion', '{"intentos_max":3,"espera_max_min":5,"gps_obligatorio":false,"registro_clientes":true,"qr_destino":"google","autoasignacion":true,"punto_courier":false,"horario_retiro":"Agenda hasta las 23:59 y retiramos tu paquete al día siguiente entre las 9:00 y las 13:00 hrs.","aviso_destinatario":true,"bolsas":false}'::jsonb),
   ('ticket', '{"pie":"Conserve este ticket. Consultas y reclamos indicando el folio."}'::jsonb),
   ('listas', '{"couriers":["Blue Express","Starken","Chilexpress","Correos de Chile","Otra"],"franjas":["08:00 – 10:00","10:00 – 13:00","13:00 – 16:00","16:00 – 19:00","19:00 – 21:00","21:00 – 23:00"]}'::jsonb),
   ('pagos', '{"proveedor":"simulado","en_linea":false}'::jsonb),

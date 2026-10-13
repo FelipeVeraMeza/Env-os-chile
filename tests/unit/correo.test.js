@@ -35,3 +35,12 @@ test('si Resend rechaza el envío, el error dice por qué', async () => {
   globalThis.fetch = async () => new Response('{"message":"domain not verified"}', { status: 403 });
   await assert.rejects(enviarCorreo({ para: 'a@b.cl', asunto: 'x', texto: 'y' }), /403.*domain not verified/);
 });
+
+test('con html, Resend recibe también la versión con la marca (y el texto plano)', async () => {
+  process.env.RESEND_API_KEY = 're_prueba';
+  let cuerpo;
+  globalThis.fetch = async (_url, opciones) => { cuerpo = JSON.parse(opciones.body); return new Response('{"id":"1"}', { status: 200 }); };
+  await enviarCorreo({ para: 'ana@correo.cl', asunto: 'Envío', texto: 'Hola', html: '<p>Hola</p>' });
+  assert.equal(cuerpo.html, '<p>Hola</p>');
+  assert.equal(cuerpo.text, 'Hola');
+});
