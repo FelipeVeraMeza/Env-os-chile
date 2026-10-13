@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      URL: ${{ vars.URL_MONITOREO || 'https://www.jfenvios.cl' }}
+      URL: ${{ vars.URL_MONITOREO || 'https://www.optienvia.cl' }}
     steps:
       # El certificado HTTPS lo emite Railway solo para los dominios agregados en Settings → Networking → Custom Domain.
       # Si el dominio no está ahí (o el DNS apunta a otro servicio), el navegador muestra NET::ERR_CERT_COMMON_NAME_INVALID.
