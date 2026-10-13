@@ -51,9 +51,13 @@ export async function api(ruta, { metodo = 'GET', json, form, blob = false } = {
   if (json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(json); }
   if (form) body = form;
   let res;
+  // Límite de tiempo (pedido 13-10): una consulta colgada dejaba la app esperando para siempre. Las subidas de archivos
+  // (fotos, comprobantes) tienen más margen por si la señal es lenta.
+  const limite = form ? 120_000 : 30_000;
   try {
-    res = await fetch(`${urlApi()}${ruta}`, { method: metodo, headers, body });
-  } catch {
+    res = await fetch(`${urlApi()}${ruta}`, { method: metodo, headers, body, signal: AbortSignal.timeout?.(limite) });
+  } catch (err) {
+    if (err?.name === 'TimeoutError') throw new ErrorApi(0, { error: 'El servidor está tardando demasiado en responder. Revisa tu conexión e inténtalo de nuevo.' });
     throw new ErrorApi(0, { error: `No hay conexión con el servidor (${urlApi() || 'mismo origen'}). Revisa tu conexión a internet.` });
   }
   if (blob && res.ok) return res.blob();

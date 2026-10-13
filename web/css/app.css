@@ -562,3 +562,13 @@ input[type="file"]::file-selector-button {
 .cantidad-bolsa { max-width: 76px; }
 .tabla-bolsas th, .tabla-bolsas td { padding: 10px 8px; }
 .tabla-bolsas td:first-child { white-space: normal; }
+
+/* Arranque de la app (pedido 13-10): pantalla de carga en vez de los textos de relleno. */
+.iniciando .shell { grid-template-columns: minmax(0, 1fr); }
+.iniciando .menu { display: none; }
+.iniciando .topbar-der { visibility: hidden; }
+.iniciando:not(.marca-lista) .marca { visibility: hidden; }
+.pantalla-carga { min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; color: var(--texto-2); animation: aparecer .4s ease .15s both; }
+.pantalla-carga img { width: 88px; height: 88px; border-radius: 22px; object-fit: contain; background: var(--blanco); padding: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, .35); }
+.pantalla-carga .cargando { width: 26px; height: 26px; }
+.pantalla-carga p { margin: 0; font-weight: 600; }

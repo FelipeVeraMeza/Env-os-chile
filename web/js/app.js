@@ -386,8 +386,19 @@ async function estadoConexion() {
   }
 }
 
+// Se mantiene "iniciando": sin menú ni "Modo demo" arriba, solo la marca y el aviso.
+function pantallaSinConexion(err) {
+  console.error('[app] no se pudo cargar la configuración:', err);
+  montar($('#vista'), html`<div class="pantalla-carga">
+    <h2 style="margin:0">No pudimos conectar con la plataforma</h2>
+    <p class="sub" style="max-width:420px;text-align:center">Revisa tu conexión a internet o inténtalo de nuevo en unos minutos.</p>
+    <button class="btn" id="reintentar">Reintentar</button></div>`);
+  $('#reintentar').onclick = () => location.reload();
+}
+
 // La demo publicada puede estar protegida con una clave (DEMO_CLAVE en Railway).
 function pedirClaveDemo(conf) {
+  document.body.classList.remove('iniciando');
   $('#marca-nombre').textContent = conf.negocio.nombre;
   $('#estado-api').className = 'punto-estado ok';
   montar($('#vista'), html`<div class="hero" style="max-width:560px"><h1>Acceso a la demo</h1>
@@ -433,8 +444,13 @@ async function iniciar() {
     $('#marca-nombre').textContent = conf.negocio.nombre;
     document.title = `${conf.negocio.nombre} · Envíos`;
     if (conf.negocio.logo_url) document.querySelector('.marca img').src = conf.negocio.logo_url;
+    // La próxima visita muestra el nombre y el logo al instante, mientras carga (js/marca.js).
+    try { localStorage.setItem('envios.marca', JSON.stringify({ nombre: conf.negocio.nombre, logo: conf.negocio.logo_url || '' })); } catch { /* sin almacenamiento */ }
   } catch (err) {
     $('#estado-api').className = 'punto-estado error';
+    // Sin servidor no hay app que mostrar: en vez de dejar la pantalla de carga (o vacía) para siempre, se ofrece
+    // reintentar. En desarrollo se sigue igual, para poder elegir otro servidor con el botón de arriba.
+    if (!modoDesarrollo()) return pantallaSinConexion(err);
     errorToast(err);
   }
   if (!conSesion()) app.usuario = app.perfiles.find((p) => p.id === perfilActual()) || null;
@@ -444,6 +460,7 @@ async function iniciar() {
   window.addEventListener('hashchange', enrutar);
   vigilarTeclado();
   enrutar();
+  document.body.classList.remove('iniciando');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   vigilarVersion();
 }

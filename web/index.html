@@ -31,13 +31,15 @@
   <link rel="modulepreload" href="js/vistas/publico.js">
   <link rel="modulepreload" href="js/vistas/cuenta.js">
   <link rel="modulepreload" href="js/vistas/soporte.js">
+  <link rel="modulepreload" href="js/vistas/bolsas.js">
 </head>
-<body>
+<!-- "iniciando": mientras carga la app se ve una pantalla de carga, no los textos de relleno (pedido 13-10) -->
+<body class="iniciando">
   <div id="app" class="shell">
     <header class="topbar">
       <a class="marca" href="#/">
         <img src="icons/icono.svg" alt="" width="56" height="56">
-        <span><strong id="marca-nombre">Tu Empresa de Envíos</strong><small>Gestión de envíos</small></span>
+        <span><strong id="marca-nombre"></strong><small>Gestión de envíos</small></span>
       </a>
       <div class="topbar-der">
         <span class="chip-demo" title="Sin inicio de sesión: elige un perfil para recorrer la plataforma">Modo demo</span>
@@ -53,9 +55,16 @@
       </div>
     </header>
     <nav class="menu" id="menu" aria-label="Navegación principal"></nav>
-    <main id="vista" class="vista" tabindex="-1"></main>
+    <main id="vista" class="vista" tabindex="-1">
+      <div class="pantalla-carga" role="status">
+        <img id="logo-carga" alt="" hidden>
+        <span class="cargando"></span>
+        <p>Cargando…</p>
+      </div>
+    </main>
   </div>
   <div id="modal-raiz"></div>
   <div id="toasts" aria-live="polite"></div>
+  <script src="js/marca.js"></script>
 </body>
 </html>
