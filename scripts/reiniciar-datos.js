@@ -14,7 +14,8 @@ import { validarClave } from '../server/lib/seguridad.js';
 
 // Tablas con datos de operación (se vacían). comuna, zona, config y schema_migracion se conservan.
 const TABLAS = ['usuario', 'destinatario', 'direccion', 'folio_contador', 'envio', 'adjunto', 'envio_estado', 'pago', 'pago_evento',
-  'link_pago', 'reclamo_seguro', 'costo', 'auditoria', 'evento_seguridad', 'alerta_seguridad', 'pedido_bolsas', 'pedido_bolsas_item'];
+  'link_pago', 'reclamo_seguro', 'costo', 'auditoria', 'evento_seguridad', 'alerta_seguridad', 'pedido_bolsas', 'pedido_bolsas_item',
+  'mensaje_soporte', 'soporte_mensaje'];
 
 const arg = (nombre) => {
   const i = process.argv.indexOf(`--${nombre}`);
@@ -66,6 +67,7 @@ try {
 
   const rutas = (await pool.query('SELECT ruta FROM adjunto')).rows.map((r) => r.ruta);
   // Comprobantes de los pedidos de bolsas (la tabla puede no existir si la base aún no tiene la migración 018).
+  if (tablas.includes('soporte_mensaje')) rutas.push(...(await pool.query('SELECT adjunto_ruta FROM soporte_mensaje WHERE adjunto_ruta IS NOT NULL')).rows.map((r) => r.adjunto_ruta));
   if (tablas.includes('pedido_bolsas')) rutas.push(...(await pool.query('SELECT comprobante_ruta FROM pedido_bolsas WHERE comprobante_ruta IS NOT NULL')).rows.map((r) => r.comprobante_ruta));
   const hash = mantener ? null : await bcrypt.hash(clave, 10);
   const cliente = await pool.connect();

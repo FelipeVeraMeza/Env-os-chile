@@ -73,6 +73,8 @@ const RUTAS = [
   [/^#\/usuarios$/, () => admin.usuarios(), 'admin'],
   [/^#\/seguridad$/, () => admin.seguridad(), 'admin'],
   [/^#\/ajustes$/, () => admin.ajustes(), 'admin'],
+  [/^#\/soporte\/caso\/([\w-]+)$/, (m) => soporte.casoPublico(m[1])],
+  [/^#\/soporte\/(\d+)$/, (m) => soporte.conversacion(Number(m[1])), ['admin', 'cliente', 'repartidor']],
   [/^#\/soporte$/, () => (app.usuario.rol === 'admin' ? soporte.bandeja() : soporte.misMensajes()), ['admin', 'cliente', 'repartidor']],
   [/^#\/bolsas$/, () => (app.usuario.rol === 'admin' ? bolsas.admin() : bolsasActivas() ? bolsas.cliente() : ir('#/inicio')), ['admin', 'cliente']],
 ];
@@ -88,7 +90,8 @@ async function enrutar() {
   const rol = app.usuario?.rol;
   document.body.classList.toggle('sin-sesion', !rol);
   // Pantallas que no requieren sesión: seguimiento público, recuperar/restablecer contraseña y registro de clientes.
-  const publica = /^#\/(seguimiento|restablecer|recuperar|registro|pagar)/.test(hash);
+  // También el enlace privado de un caso de soporte (pedido 13-10): quien escribió sin cuenta ve ahí la respuesta.
+  const publica = /^#\/(seguimiento|restablecer|recuperar|registro|pagar|soporte\/caso\/)/.test(hash);
   if (!rol && !publica) return conSesion() ? pantallaLogin() : pantallaSinPerfil();
   const ruta = RUTAS.find(([re, , roles]) => re.test(hash) && (!roles || [].concat(roles).includes(rol)));
   if (!ruta) return ir(INICIO[rol] || '#/seguimiento');
@@ -124,10 +127,11 @@ async function enrutar() {
   if (conSesion() && app.usuario?.debe_cambiar_clave && !$('#f-clave-nueva')) dialogoCambiarClave({ obligatorio: true });
 }
 
-// Mensajes de soporte sin responder y pedidos de bolsas por atender (solo administración): los números los completa
-// actualizarContadores(). En el celular, "Más" muestra la suma de lo que quedó dentro de esa hoja.
+// Números junto al menú: casos de soporte por responder y pedidos de bolsas por atender (administración) o respuestas
+// de soporte sin ver (cliente y repartidor, pedido 13-10). Los completa actualizarContadores(). En el celular, "Más"
+// muestra la suma de lo que quedó dentro de esa hoja.
 const CONTADORES = { '#/soporte': 'data-contador-soporte', '#/bolsas': 'data-contador-bolsas' };
-const contador = (h) => (CONTADORES[h] && app.usuario?.rol === 'admin' ? html`<span class="contador" ${CONTADORES[h]} hidden></span>` : '');
+const contador = (h) => (CONTADORES[h] && app.usuario && (h === '#/soporte' || app.usuario.rol === 'admin') ? html`<span class="contador" ${CONTADORES[h]} hidden></span>` : '');
 
 export async function actualizarContadores() {
   const [nSoporte, nBolsas] = await Promise.all([soporte.actualizarContadorSoporte(), bolsas.actualizarContadorBolsas()]);
@@ -141,7 +145,7 @@ function pintarMenu(hash) {
   const ocultos = items.filter(([, , , cls]) => cls === 'solo-escritorio');
   montar($('#menu'), html`<div class="titulo-menu">${app.usuario?.nombre || ''}</div>${items.map(([h, ic, txt, cls]) => html`
     <a href="${h}" class="${[hash.startsWith(h) ? 'activo' : '', cls].filter(Boolean).join(' ')}">${icono(ic)}<span>${txt}</span>${contador(h)}</a>`)}
-    <button type="button" class="solo-movil ${ocultos.some(([h]) => hash.startsWith(h)) ? 'activo' : ''}" id="btn-mas" aria-label="Más opciones">${raw('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>')}<span>Más</span>${app.usuario?.rol === 'admin' ? html`<span class="contador" data-contador-mas hidden></span>` : ''}</button>`);
+    <button type="button" class="solo-movil ${ocultos.some(([h]) => hash.startsWith(h)) ? 'activo' : ''}" id="btn-mas" aria-label="Más opciones">${raw('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>')}<span>Más</span>${app.usuario ? html`<span class="contador" data-contador-mas hidden></span>` : ''}</button>`);
   $('#btn-mas').onclick = hojaMas;
   actualizarContadores();
 }

@@ -63,11 +63,12 @@ export function crearApp() {
   const soloMedir = (req) => config.entorno !== 'production' && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.ip);
   const limite = (nombre, max) => limitarPeticiones(nombre, max, { soloMedir });
   app.use('/api/auth/login', limite('login', 20));
-  app.use(['/api/seguimiento', '/q', '/api/pago-publico'], limite('publico', config.limites.publico));
+  app.use(['/api/seguimiento', '/q', '/api/pago-publico', '/api/soporte/caso'], limite('publico', config.limites.publico));
   app.use('/api', (req, res, next) => (req.is('multipart/form-data') ? limite('subidas', 30)(req, res, next) : next()));
   // Mensajes a soporte sin sesión (pedido 09-10): pocos por minuto, para que nadie llene la bandeja de administración.
+  // También las respuestas desde el enlace privado del caso (pedido 13-10).
   const limiteSoporte = limite('soporte', 10);
-  app.use('/api/soporte', (req, res, next) => (req.method === 'POST' && req.path === '/' ? limiteSoporte(req, res, next) : next()));
+  app.use('/api/soporte', (req, res, next) => (req.method === 'POST' && (req.path === '/' || req.path.startsWith('/caso/')) ? limiteSoporte(req, res, next) : next()));
   const limiteApi = limite('api', config.limites.api);
   // El seguimiento público ya tiene su límite más estricto: no se le aplica (ni se le sobrescriben las cabeceras) el general.
   app.use('/api', (req, res, next) => (req.path.startsWith('/seguimiento') || req.path.startsWith('/pago-publico') ? next() : limiteApi(req, res, next)));

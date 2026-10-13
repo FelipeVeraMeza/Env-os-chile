@@ -572,3 +572,17 @@ input[type="file"]::file-selector-button {
 .pantalla-carga img { width: 88px; height: 88px; border-radius: 22px; object-fit: contain; background: var(--blanco); padding: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, .35); }
 .pantalla-carga .cargando { width: 26px; height: 26px; }
 .pantalla-carga p { margin: 0; font-weight: 600; }
+
+/* Soporte como conversación (pedido 13-10): burbujas de chat, notas internas y fotos adjuntas. */
+.hilo { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
+.burbuja { max-width: min(560px, 88%); padding: 10px 14px; border-radius: 16px; background: var(--superficie-2); border: 1px solid var(--borde); }
+.burbuja.propio { align-self: flex-end; background: rgba(224, 33, 138, .16); border-color: rgba(224, 33, 138, .4); border-bottom-right-radius: 4px; }
+.burbuja.otro { align-self: flex-start; border-bottom-left-radius: 4px; }
+.burbuja.interna { background: rgba(251, 191, 36, .12); border: 1px dashed rgba(251, 191, 36, .6); }
+.burbuja .meta { font-size: .78rem; color: var(--texto-3); }
+.burbuja .texto-mensaje { margin-top: 4px; overflow-wrap: anywhere; }
+.adjunto-img { display: block; margin-top: 8px; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.adjunto-img img { display: block; max-width: 100%; max-height: 260px; border-radius: 12px; background: rgba(255, 255, 255, .06); min-width: 80px; min-height: 60px; }
+.caso-soporte { color: inherit; text-decoration: none; }
+.caso-soporte.sin-leer { border-color: rgba(224, 33, 138, .6); box-shadow: 0 0 0 1px rgba(224, 33, 138, .35); }
+.caso-soporte .der { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
