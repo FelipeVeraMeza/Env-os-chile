@@ -93,3 +93,26 @@ test('CP-89 · Un repartidor con envíos en curso no se puede desactivar (RF-05)
   assert.equal(r.status, 409);
   assert.ok(r.datos.detalles.envios_pendientes >= 1);
 });
+
+test('CP-90 · Cada persona edita sus datos personales; el teléfono nuevo sale en la etiqueta', async () => {
+  const u = await usuarioConClave('cliente');
+  const ok = await login(u.correo, u.clave);
+  const cambio = await peticion('POST', '/api/auth/cambiar-clave', { sesion: conToken(ok.datos.token), json: { actual: u.clave, nueva: 'Propia.Clave.2026' } });
+  const sesion = conToken(cambio.datos.token);
+  const r = await peticion('PATCH', '/api/auth/perfil', { sesion, json: { nombre: '  Empresa QA  ', telefono: '987654321', rut: '11.111.111-1' } });
+  assert.equal(r.status, 200, JSON.stringify(r.datos));
+  assert.equal(r.datos.nombre, 'Empresa QA');
+  assert.equal(r.datos.telefono, '+56 9 8765 4321');
+  assert.equal(r.datos.rut, '11.111.111-1');
+  assert.deepEqual((await peticion('GET', '/api/auth/perfil', { sesion })).datos, r.datos);
+  // Solo nombre, teléfono y RUT: el correo y el perfil no se tocan desde aquí.
+  const otro = await peticion('PATCH', '/api/auth/perfil', { sesion, json: { correo: 'otro@qa.test', rol: 'admin' } });
+  assert.equal(otro.status, 200);
+  assert.equal(otro.datos.correo, u.correo);
+  assert.equal(otro.datos.rol, 'cliente');
+  const malo = await peticion('PATCH', '/api/auth/perfil', { sesion, json: { telefono: '123', rut: '1-1', nombre: '' } });
+  assert.equal(malo.status, 422);
+  assert.deepEqual(Object.keys(malo.datos.detalles).sort(), ['nombre', 'rut', 'telefono']);
+  // Un cliente no puede quedar sin teléfono: es el contacto del remitente en la etiqueta.
+  assert.equal((await peticion('PATCH', '/api/auth/perfil', { sesion, json: { telefono: '' } })).status, 422);
+});

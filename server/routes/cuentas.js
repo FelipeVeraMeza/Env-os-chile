@@ -94,6 +94,37 @@ auth.post('/cerrar-sesiones', autenticar, ruta(async (req, res) => {
   res.json({ token: firmarSesion(act) });
 }));
 
+// Datos personales propios: nombre, teléfono y RUT. El teléfono y el RUT del cliente salen como remitente en la
+// etiqueta (se leen al imprimirla), así que el cambio también se ve en las etiquetas de sus envíos.
+// El correo y el perfil siguen a cargo de administración (el correo es con lo que se inicia sesión).
+const CAMPOS_PERFIL = ['nombre', 'telefono', 'rut'];
+const DATOS_PERFIL = 'id, nombre, correo, rol, telefono, rut';
+auth.get('/perfil', autenticar, ruta(async (req, res) => {
+  res.json(await uno(`SELECT ${DATOS_PERFIL} FROM usuario WHERE id = $1`, [req.usuario.id]));
+}));
+auth.patch('/perfil', autenticar, ruta(async (req, res) => {
+  const b = {};
+  for (const k of CAMPOS_PERFIL) if (req.body?.[k] !== undefined && req.body[k] !== null) b[k] = String(req.body[k]);
+  const errores = validarUsuario(b, false);
+  if (req.usuario.rol === 'cliente' && b.telefono !== undefined && !b.telefono.trim()) errores.telefono = 'Teléfono móvil chileno obligatorio (+56 9…)';
+  exigirSinErrores(errores);
+  const antes = await uno(`SELECT ${DATOS_PERFIL} FROM usuario WHERE id = $1`, [req.usuario.id]);
+  const nuevo = {
+    ...(b.nombre !== undefined && { nombre: b.nombre.trim() }),
+    ...(b.telefono !== undefined && { telefono: normalizarTelefono(b.telefono) }),
+    ...(b.rut !== undefined && { rut: normalizarRut(b.rut) }),
+  };
+  const cambios = Object.keys(nuevo).filter((k) => nuevo[k] !== antes[k]);
+  if (!cambios.length) return res.json(antes);
+  const params = cambios.map((k) => nuevo[k]);
+  const u = await uno(`UPDATE usuario SET ${cambios.map((k, i) => `${k} = $${i + 1}`).join(', ')} WHERE id = $${params.length + 1} RETURNING ${DATOS_PERFIL}`,
+    [...params, req.usuario.id]);
+  await auditar(req, 'editar_perfil', 'usuario', u.id, Object.fromEntries(cambios.map((k) => [k, nuevo[k]])));
+  await registrarEvento(req, 'usuario_modificado', { nivel: 'info', detalle: { usuario: u.id, correo: u.correo, cambios, via: 'perfil_propio',
+    antes: Object.fromEntries(cambios.map((k) => [k, antes[k]])) } });
+  res.json(u);
+}));
+
 // ---------- Recuperar la contraseña (RF-02) ----------
 // Una contraseña nueva siempre: queda con hash, cierra todas las sesiones abiertas e invalida los enlaces anteriores.
 async function fijarPassword(id, password, { debeCambiar = false } = {}) {

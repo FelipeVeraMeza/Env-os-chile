@@ -1,6 +1,6 @@
 // Cuentas reales (AUTH_MODE=jwt): ingreso, registro, recuperación y cambio de contraseña (RF-01, RF-02, RF-03, RF-56).
 import { app } from '../app.js';
-import { fijarToken, post } from '../api.js';
+import { fijarToken, get, patch, post } from '../api.js';
 import { $, datosForm, errorToast, html, marcarErrores, montar, toast } from '../ui.js';
 
 const tarjeta = (titulo, texto, cuerpo) => html`<div class="card cuenta-card" style="max-width:440px;margin:24px auto">
@@ -12,12 +12,12 @@ function entrar({ token }) {
   location.reload();
 }
 
-async function enviar(form, ruta, datos, alTerminar) {
+async function enviar(form, ruta, datos, alTerminar, llamar = post) {
   const boton = form.querySelector('button[type=submit], button:not([type])');
   boton.disabled = true;
   marcarErrores(form, {});
   try {
-    alTerminar(await post(ruta, datos));
+    alTerminar(await llamar(ruta, datos));
   } catch (err) {
     marcarErrores(form, err.detalles);
     errorToast(err);
@@ -104,10 +104,18 @@ export function restablecer(token) {
   };
 }
 
-export function miCuenta() {
+export async function miCuenta() {
   const u = app.usuario;
   const real = app.conf?.auth_mode === 'jwt';
+  const p = await get('/api/auth/perfil').catch(() => ({ ...u }));
   montar($('#vista'), html`<div class="encabezado"><div><h1>Mi cuenta</h1><p>${u.nombre} · ${u.correo || ''}</p></div></div>
+    <form class="card pila" id="f-perfil" style="max-width:480px" novalidate><h2>Mis datos</h2>
+      <label class="campo">Nombre o empresa *<input name="nombre" autocomplete="name" value="${p.nombre || ''}"></label>
+      <label class="campo">Teléfono móvil${u.rol === 'cliente' ? ' *' : ''}<input name="telefono" type="tel" autocomplete="tel" placeholder="+56 9 1234 5678" value="${p.telefono || ''}"></label>
+      <label class="campo">RUT <small>(opcional)</small><input name="rut" placeholder="12.345.678-5" value="${p.rut || ''}"></label>
+      <label class="campo">Correo <small>(para cambiarlo, pídelo a administración)</small><input value="${p.correo || ''}" disabled></label>
+      <button class="btn" type="submit">Guardar mis datos</button>
+      ${u.rol === 'cliente' ? html`<p class="muted">Tu nombre, teléfono y RUT salen como remitente en la etiqueta de tus envíos.</p>` : ''}</form>
     ${real ? html`<form class="card pila" id="f-clave" style="max-width:480px" novalidate><h2>Cambiar contraseña</h2>
       <label class="campo">Contraseña actual<input name="actual" type="password" autocomplete="current-password"></label>
       <label class="campo">Nueva contraseña <small>(mínimo 8)</small><input name="nueva" type="password" autocomplete="new-password"></label>
@@ -116,6 +124,14 @@ export function miCuenta() {
       <p class="muted">Al cambiarla se cierra la sesión en tus otros dispositivos.</p></form>
     <button class="btn sec" id="salir">Cerrar sesión</button>`
     : html`<div class="aviso">La demo no usa contraseñas: se entra eligiendo un perfil. Con el inicio de sesión real (AUTH_MODE=jwt) aquí se cambia la contraseña y se cierra la sesión.</div>`}`);
+  $('#f-perfil').onsubmit = (e) => {
+    e.preventDefault();
+    enviar(e.target, '/api/auth/perfil', datosForm(e.target), (r) => {
+      Object.assign(app.usuario, { nombre: r.nombre });
+      toast('Datos actualizados', 'ok');
+      miCuenta();
+    }, patch);
+  };
   if (!real) return;
   $('#f-clave').onsubmit = (e) => {
     e.preventDefault();
