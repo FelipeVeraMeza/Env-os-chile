@@ -12,7 +12,7 @@ const crear = async (extra = {}, sesion = esc.cliente) => {
   assert.equal(r.status, 201, JSON.stringify(r.datos));
   return r.datos;
 };
-const sinMedidas = (extra = {}) => ({ peso_kg: undefined, largo_cm: undefined, ancho_cm: undefined, alto_cm: undefined, descripcion_producto: undefined, ...extra });
+const sinMedidas = (extra = {}) => ({ peso_kg: undefined, largo_cm: undefined, ancho_cm: undefined, alto_cm: undefined, ...extra });
 
 test('CP-180 · La dirección de retiro es obligatoria, queda en el envío y se recuerda para el próximo', async () => {
   const sin = await peticion('POST', '/api/envios', { sesion: esc.clienteB, json: { ...datosEnvio(esc.comuna.id), retiro: undefined, confirmar: true } });

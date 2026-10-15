@@ -194,6 +194,7 @@ export async function detalle(id) {
           <h2>Paquete y tarifa</h2>
           ${e.descripcion_producto ? html`<p>${e.descripcion_producto}</p>` : ''}
           <p class="sub">${textoPaquete(e)}${e.observaciones ? ` · ${e.observaciones}` : ''}</p>
+          ${e.declara_sin_peligrosas_en ? html`<p class="sub">✔ Declaró que no contiene mercancías peligrosas (${fechaHora(e.declara_sin_peligrosas_en)})</p>` : ''}
           <div class="desglose">
             <div><span>Tarifa base</span><span>${clp(e.tarifa_base)}</span></div>
             ${e.recargo_bultos ? html`<div><span>Bultos adicionales</span><span>${clp(e.recargo_bultos)}</span></div>` : ''}
@@ -225,7 +226,15 @@ export async function detalle(id) {
 
   $('#pagar')?.addEventListener('click', () => pagar(e, () => detalle(id)));
   $('#transferir')?.addEventListener('click', () => subirComprobante(e, () => detalle(id)));
-  $('#revisar-comprobante')?.addEventListener('click', () => revisarComprobante(comprobanteDe(e), () => detalle(id)));
+  // Un comprobante del carrito paga varios envíos (pedido 15-10): se abre con todos, con el precio de cada uno y el total.
+  // Antes se abría solo con este envío y, al escribir el monto de la transferencia, decía que "sobraba" dinero.
+  $('#revisar-comprobante')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    const grupo = (await get('/api/cobranza/comprobantes').catch(() => [])).find((c) => c.envios?.some((v) => v.envio_id === e.id));
+    btn.disabled = false;
+    revisarComprobante(grupo || comprobanteDe(e), () => detalle(id));
+  });
   $('#link-pago')?.addEventListener('click', () => linkPago(e));
   $('#reclamar')?.addEventListener('click', () => formReclamo(e, boletas, () => detalle(id)));
   enlazarAcciones(e, () => detalle(id));
@@ -375,7 +384,8 @@ function tarjetaTransferencia(e, esAdmin) {
     return html`<div class="card"><div class="card-titulo"><h2>Pago por transferencia</h2>${badgePago('en_revision')}</div>
       ${esAdmin
         ? html`<p class="sub">El cliente subió el comprobante el ${fechaHora(c.creado_en)}${c.referencia ? ` · N° de operación ${c.referencia}` : ''}. Revísalo contra la cartola antes de aprobar.</p>
-          <button class="btn" id="revisar-comprobante" style="margin-top:10px">Revisar comprobante</button>`
+          ${c.lote_folios?.length > 1 ? html`<div class="aviso" style="margin:8px 0">Este comprobante paga <b>${c.lote_folios.length} envíos</b> juntos: ${listaCorta(c.lote_folios, 6)}. Al revisarlo verás todos, con el precio de cada uno y el total.</div>` : ''}
+          <button class="btn" id="revisar-comprobante" style="margin-top:10px">Revisar comprobante${c.lote_folios?.length > 1 ? ` (${c.lote_folios.length} envíos)` : ''}</button>`
         : html`<div class="aviso">Recibimos tu comprobante el ${fechaHora(c.creado_en)}. <b>Está pendiente de aprobación</b>: cuando administración lo apruebe el repartidor podrá retirar tu envío.</div>
           <a class="sub" href="${archivo(c.comprobante_url)}" target="_blank" rel="noopener">Ver el comprobante enviado</a>`}
     </div>`;
@@ -650,7 +660,8 @@ export function revisarComprobante(c, alTerminar) {
       if (aprobar) await post(`/api/cobranza/comprobantes/${c.id}/aprobar`, { referencia: f.referencia.value });
       else await post(`/api/cobranza/comprobantes/${c.id}/rechazar`, { motivo: f.motivo.value });
       m.cerrar();
-      toast(aprobar ? `Pago de ${c.folio} aprobado: ya se puede asignar y retirar` : 'Comprobante rechazado: el cliente verá el motivo', 'ok');
+      const cuales = envios.length > 1 ? `${envios.length} envíos` : envios[0].folio;
+      toast(aprobar ? `Pago de ${cuales} aprobado: ya se puede asignar y retirar` : `Comprobante rechazado (${cuales}): el cliente verá el motivo`, 'ok');
       alTerminar?.();
     } catch (err) { marcarErrores(f, err.detalles); errorToast(err); }
   };

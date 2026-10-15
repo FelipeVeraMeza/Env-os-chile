@@ -275,8 +275,9 @@ export function validarPaquete(p, tarifas = CONFIG_POR_DEFECTO.tarifas) {
   const conTamano = p.tamano !== undefined && p.tamano !== null && p.tamano !== '';
   if (conTamano && !TAMANOS[p.tamano]) errores.tamano = 'Elige estándar o sobredimensionado';
   const vacio = (v) => v === undefined || v === null || v === '' || (typeof v === 'number' && Number.isNaN(v));
-  if (!conTamano && (!p.descripcion_producto || !String(p.descripcion_producto).trim())) {
-    errores.descripcion_producto = 'Describe el producto';
+  // Obligatorio siempre (pedido 15-10): antes, con tamaño declarado, se podía dejar vacío.
+  if (!p.descripcion_producto || !String(p.descripcion_producto).trim()) {
+    errores.descripcion_producto = 'Cuenta brevemente qué envías';
   } else if (excede(p.descripcion_producto, LARGOS.descripcion_producto)) errores.descripcion_producto = `Máximo ${LARGOS.descripcion_producto} caracteres`;
   if (excede(p.observaciones, LARGOS.observaciones)) errores.observaciones = `Máximo ${LARGOS.observaciones} caracteres`;
   const bultos = entero(p.bultos ?? 1);

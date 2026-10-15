@@ -45,7 +45,7 @@ export async function tomarCapturas({ url, credenciales, ejecutable, log = conso
       confirmar: true, destinatario: { nombre: 'Ignacio Morales', telefono: '+56 9 6677 8899' },
       direccion: { calle: 'Av. Grecia', numero: '2150', comuna_id: comunas.find((c) => c.nombre === 'Ñuñoa').id, referencia: 'Casa con reja blanca' },
       retiro: { calle: 'Av. Irarrázaval', numero: '3401', comuna_id: comunas.find((c) => c.nombre === 'Ñuñoa').id },
-      descripcion_producto: 'Cafetera', peso_kg: 3, largo_cm: 35, ancho_cm: 30, alto_cm: 25, valor_declarado: 49990,
+      descripcion_producto: 'Cafetera', declara_sin_peligrosas: true, peso_kg: 3, largo_cm: 35, ancho_cm: 30, alto_cm: 25, valor_declarado: 49990,
     });
     // Pago por transferencia: el cliente sube el comprobante y administración lo aprueba.
     const fd = new FormData();
@@ -131,7 +131,7 @@ export async function tomarCapturas({ url, credenciales, ejecutable, log = conso
   };
   const paso3 = async (p) => {
     await paso2(p); await p.click('#siguiente'); await p.waitForSelector('input[name="descripcion_producto"]');
-    await p.fill('input[name="descripcion_producto"]', 'Polera de algodón (2 unidades)'); await p.fill('input[name="peso_kg"]', '0.8');
+    await p.fill('input[name="descripcion_producto"]', 'Polera de algodón (2 unidades)'); await p.check('input[name="declara_sin_peligrosas"]'); await p.fill('input[name="peso_kg"]', '0.8');
     for (const [k, v] of [['largo_cm', '30'], ['ancho_cm', '25'], ['alto_cm', '8'], ['valor_declarado', '25980']]) await p.fill(`input[name="${k}"]`, v);
     await p.waitForTimeout(900);
   };

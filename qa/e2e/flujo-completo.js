@@ -76,6 +76,7 @@ try {
     await c.click('#siguiente');
     await c.check('[name=tamano][value=estandar]');
     await c.fill('[name=descripcion_producto]', 'Libros y cuadernos');
+    await c.check('[name=declara_sin_peligrosas]');
     await c.fill('[name=bultos]', '2');
     await c.click('#siguiente');
     await foto(c, 'cliente-resumen');

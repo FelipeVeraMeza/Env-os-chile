@@ -286,8 +286,10 @@ export async function nuevo() {
       <div class="grid g2">
         <label class="campo">Bultos *<input name="bultos" type="number" step="1" inputmode="numeric" min="1" max="100" value="${p.bultos || 1}">
           <small>La cantidad de bultos no cambia el precio</small></label>
-        <label class="campo">¿Qué envías? <small>(opcional)</small><input name="descripcion_producto" value="${p.descripcion_producto || ''}" placeholder="Ej. Zapatillas, documentos"></label>
+        <label class="campo">¿Qué envías? * <small>(descripción breve)</small><input name="descripcion_producto" value="${p.descripcion_producto || ''}" maxlength="200" required placeholder="Ej. Zapatillas, documentos"></label>
       </div>
+      <div class="campo declaracion"><label class="casilla"><input type="checkbox" name="declara_sin_peligrosas" ${p.declara_sin_peligrosas ? html`checked` : ''}>
+        <span><b>Declaro que mi envío no contiene mercancías peligrosas *</b><small>Inflamables, explosivos, gases, corrosivos, tóxicos, baterías sueltas o productos prohibidos.</small></span></label></div>
       <div class="card" style="box-shadow:none;background:rgba(224,33,138,.08);border-color:rgba(224,33,138,.35);margin-top:16px">
         <h3>Seguro del envío</h3>
         <div class="grid g2">
@@ -319,7 +321,8 @@ export async function nuevo() {
         <div><div class="muted">${w.tipo_destino === 'punto_courier' ? `Punto ${w.courier.courier_empresa}` : 'Dirección'}</div>
           ${w.tipo_destino === 'punto_courier' ? html`<b>${w.courier.courier_punto}</b><br>` : ''}${dir.calle} ${dir.numero}${dir.depto ? ', ' + dir.depto : ''} · <b>${dir.comuna_nombre}</b></div>
         <div><div class="muted">Retiro</div>${w.retiro.calle} ${w.retiro.numero}${w.retiro.depto ? ', ' + w.retiro.depto : ''} · <b>${nombreComuna(w.retiro.comuna_id)}</b></div>
-        <div><div class="muted">Paquete</div>${p.descripcion_producto ? `${p.descripcion_producto} · ` : ''}${textoPaquete({ ...p, bultos: p.bultos || 1 })}</div>
+        <div><div class="muted">Paquete</div>${p.descripcion_producto ? `${p.descripcion_producto} · ` : ''}${textoPaquete({ ...p, bultos: p.bultos || 1 })}
+          <div class="sub">✔ Declaraste que no contiene mercancías peligrosas</div></div>
         <div><div class="muted">Seguro</div>${Number(p.valor_declarado) > 0 ? html`Valor declarado ${clp(p.valor_declarado)} · ${w.boleta ? html`boleta adjunta ✔` : html`<span style="color:var(--alerta)">sin boleta (la necesitarás para la gestión del seguro)</span>`}` : 'Sin valor declarado'}</div>
         ${p.horario_especial ? html`<div><div class="muted">Horario especial</div>${p.franja_horaria}</div>` : ''}
       </div>
@@ -436,6 +439,11 @@ export async function nuevo() {
       grupo.addEventListener('change', () => grupo.classList.remove('grupo-error'), { once: true });
       toast('Marca si tu paquete es estándar o sobredimensionado', 'error');
       return false;
+    }
+    if (w.paso === P.paquete) {
+      if (!String(w.paquete.descripcion_producto || '').trim()) e.descripcion_producto = 'Cuenta brevemente qué envías';
+      if (!w.paquete.declara_sin_peligrosas) e.declara_sin_peligrosas = 'Debes marcar la declaración para continuar';
+      if (Object.keys(e).length) toast(Object.values(e)[0], 'error');
     }
     return !marcarErrores(form(), e);
   }

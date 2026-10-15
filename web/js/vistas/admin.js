@@ -537,10 +537,12 @@ export async function cobranza(rango = {}) {
         </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay envíos por cobrar ✔</p>`}</div>
     <div class="card" style="margin-top:16px"><div class="card-titulo"><h2>Comprobantes de transferencia por revisar</h2><span class="sub">${comprobantes.length ? `${comprobantes.length} · ${clp(r.en_revision.monto)}` : ''}</span></div>
       ${comprobantes.length ? html`<p class="sub" style="margin-bottom:10px">El envío no se asigna ni se retira hasta que apruebes su pago. Compara cada comprobante con la cartola del banco.</p>
-        <div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table class="tabla-cards"><thead><tr><th>Enviado</th><th>Folio</th><th>Cliente</th><th class="num">Monto</th><th>N° operación</th><th>Acción</th></tr></thead>
+        <div class="tabla-wrap" tabindex="0" role="region" aria-label="Tabla (desliza para ver más)"><table class="tabla-cards"><thead><tr><th>Enviado</th><th>Envíos que paga</th><th>Cliente</th><th class="num">Total</th><th>N° operación</th><th>Acción</th></tr></thead>
         <tbody>${comprobantes.map((c) => html`<tr>
-          <td data-label="Enviado">${fechaHora(c.creado_en)}</td><td data-label="Folio" class="mono"><a href="#/envio/${c.envio_id}">${c.folio}</a></td>
-          <td data-label="Cliente">${c.cliente_nombre}</td><td data-label="Monto" class="num">${clp(c.monto)}</td>
+          <td data-label="Enviado">${fechaHora(c.creado_en)}</td>
+          <td data-label="Envíos que paga"><!-- Pedido 15-10: el precio de cada envío, no solo el folio, para comparar con lo pagado. -->
+            <div class="envios-comprobante">${(c.envios || [{ envio_id: c.envio_id, folio: c.folio, monto: c.monto }]).map((v) => html`<a class="mono" href="#/envio/${v.envio_id}">${v.folio}</a><span class="num">${clp(v.monto)}</span>`)}</div></td>
+          <td data-label="Cliente">${c.cliente_nombre}</td><td data-label="Total" class="num"><b>${clp(c.monto)}</b>${c.envios?.length > 1 ? html`<div class="sub">${c.envios.length} envíos</div>` : ''}</td>
           <td data-label="N° operación">${c.referencia || html`<span class="muted">—</span>`}${c.usado_en.length ? html`<div><span class="badge e-fallido ajustable" title="${c.usado_en.join(', ')}">Ya usado en ${listaCorta(c.usado_en)}</span></div>` : ''}</td>
           <td data-label="Acción"><button class="btn chico" data-revisar-comprobante="${c.id}">Revisar</button></td>
         </tr>`)}</tbody></table></div>` : html`<p class="sub">No hay comprobantes pendientes ✔</p>`}

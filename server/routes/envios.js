@@ -150,6 +150,8 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
   }
   const { paquete, tarifa, errores: erroresCot } = await cotizar({ ...b, comuna_id: comunaId }, req.usuario, conf);
   Object.assign(errores, erroresCot);
+  // Declaración obligatoria (pedido 15-10): el envío no contiene mercancías peligrosas.
+  if (b.declara_sin_peligrosas !== true && b.declara_sin_peligrosas !== 'true') errores.declara_sin_peligrosas = 'Debes declarar que tu envío no contiene mercancías peligrosas';
   exigirSinErrores(errores);
 
   const envio = await transaccion(async (db) => {
@@ -211,8 +213,8 @@ envios.post('/', requiereRol('admin', 'cliente'), ruta(async (req, res) => {
       `INSERT INTO envio (token_qr, cliente_id, destinatario_id, direccion_id, comuna_id, tipo_destino, courier_empresa, courier_punto,
          courier_codigo, descripcion_producto, bultos, peso_kg, largo_cm, ancho_cm, alto_cm, valor_declarado, horario_especial,
          franja_horaria, tarifa_base, recargo_bultos, recargo_horario, tarifa_total, observaciones, creado_por, recargo_sobredimension,
-         tamano, retiro_calle, retiro_numero, retiro_depto, retiro_referencia, retiro_comuna_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) RETURNING id`,
+         tamano, retiro_calle, retiro_numero, retiro_depto, retiro_referencia, retiro_comuna_id, declara_sin_peligrosas_en)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,now()) RETURNING id`,
       [crypto.randomBytes(18).toString('base64url'), clienteId, destinatarioId, direccionId, Number(comunaId), paquete.tipo_destino,
         paquete.courier_empresa, paquete.courier_punto, paquete.courier_codigo, paquete.descripcion_producto, paquete.bultos,
         paquete.peso_kg, paquete.largo_cm, paquete.ancho_cm, paquete.alto_cm, paquete.valor_declarado, paquete.horario_especial,

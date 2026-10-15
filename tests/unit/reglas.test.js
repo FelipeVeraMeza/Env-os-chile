@@ -167,7 +167,10 @@ test('rechazar un comprobante exige un motivo que el cliente pueda leer', () => 
 test('paquete con tamaño declarado (estándar / sobredimensionado): sin peso ni medidas, y precio según la opción', async () => {
   const { calcularTarifa: tarifa, validarPaquete: validar, validarRetiro, textoPaquete, CONFIG_POR_DEFECTO: conf } = await import('../../server/lib/reglas.js');
   const t = conf.tarifas;
-  assert.deepEqual(validar({ tamano: 'estandar', bultos: 3 }), {}, 'con tamaño no se pide peso, medidas ni descripción');
+  assert.deepEqual(validar({ tamano: 'estandar', bultos: 3, descripcion_producto: 'Ropa' }), {}, 'con tamaño no se pide peso ni medidas');
+  // Pedido 15-10: "¿Qué envías?" es obligatorio también con tamaño declarado.
+  assert.ok(validar({ tamano: 'estandar', bultos: 3 }).descripcion_producto, 'la descripción siempre es obligatoria');
+  assert.ok(validar({ tamano: 'estandar', bultos: 3, descripcion_producto: '   ' }).descripcion_producto);
   assert.ok(validar({ tamano: 'enorme', bultos: 1 }).tamano);
   assert.ok(validar({ bultos: 1 }).peso_kg, 'sin tamaño, se siguen pidiendo peso y medidas');
   assert.ok(validar({ tamano: 'estandar', bultos: 1, peso_kg: 25 }).peso_kg, 'si viene un peso sobre el máximo, igual se rechaza');

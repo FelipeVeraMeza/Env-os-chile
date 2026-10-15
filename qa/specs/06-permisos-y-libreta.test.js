@@ -48,7 +48,7 @@ test('CP-64 · Libreta: el destinatario queda registrado y admite varias direcci
   assert.equal(nueva.status, 201);
   const otra = await peticion('POST', '/api/envios', {
     sesion: esc.cliente,
-    json: { destinatario_id: dest.id, direccion_id: nueva.datos.id, descripcion_producto: 'Libro', bultos: 1, peso_kg: 1, largo_cm: 20, ancho_cm: 15, alto_cm: 5, valor_declarado: 15000 },
+    json: { destinatario_id: dest.id, direccion_id: nueva.datos.id, descripcion_producto: 'Libro', declara_sin_peligrosas: true, bultos: 1, peso_kg: 1, largo_cm: 20, ancho_cm: 15, alto_cm: 5, valor_declarado: 15000 },
   });
   assert.equal(otra.status, 201, JSON.stringify(otra.datos));
   assert.equal(otra.datos.calle, 'Irarrázaval');
@@ -61,7 +61,7 @@ test('CP-65 · Un cliente no puede usar la libreta de otro cliente', async () =>
   const dest = lib.datos[0];
   const r = await peticion('POST', '/api/envios', {
     sesion: esc.clienteB,
-    json: { destinatario_id: dest.id, direccion_id: dest.direcciones[0].id, descripcion_producto: 'X', bultos: 1, peso_kg: 1, largo_cm: 1, ancho_cm: 1, alto_cm: 1 },
+    json: { destinatario_id: dest.id, direccion_id: dest.direcciones[0].id, descripcion_producto: 'X', declara_sin_peligrosas: true, bultos: 1, peso_kg: 1, largo_cm: 1, ancho_cm: 1, alto_cm: 1 },
   });
   assert.equal(r.status, 422);
 });

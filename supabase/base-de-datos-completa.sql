@@ -5,7 +5,7 @@
 --  CÓMO USARLO: Supabase → SQL Editor → New query → pegar TODO este archivo → Run.
 --  Se puede ejecutar más de una vez: si la base ya existe, no hace nada.
 --
---  Crea: 21 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
+--  Crea: 22 migraciones, seguridad RLS, 346 comunas de Chile (34 en cobertura
 --  dentro de Santiago), tarifas ($3.500 base, +$1.000 horario especial, 20 kg / 60 cm),
 --  reglas de operación (3 intentos, 5 min de espera) y el bucket privado de fotos y boletas.
 --  Los usuarios los crea la app en su primer arranque (ADMIN_EMAIL / ADMIN_PASSWORD en Railway).
@@ -991,6 +991,20 @@ BEGIN
     CREATE UNIQUE INDEX IF NOT EXISTS mensaje_soporte_token_idx ON mensaje_soporte (token);
     CREATE INDEX IF NOT EXISTS mensaje_soporte_no_leido_idx ON mensaje_soporte (usuario_id) WHERE no_leido_cliente;
     INSERT INTO schema_migracion (nombre) VALUES ('020_soporte_conversacion.sql');
+  END IF;
+END
+$migracion$;
+
+-- ---------------------------------------------------------------------------
+-- Migración 021_declaracion_mercancias_peligrosas.sql
+-- ---------------------------------------------------------------------------
+DO $migracion$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_migracion WHERE nombre = '021_declaracion_mercancias_peligrosas.sql') THEN
+    -- Nuevo envío (pedido 15-10-2026): el cliente declara, de forma obligatoria, que no envía mercancías peligrosas.
+    -- Se guarda cuándo lo declaró (vacío en los envíos creados antes de este cambio).
+    ALTER TABLE envio ADD COLUMN IF NOT EXISTS declara_sin_peligrosas_en TIMESTAMPTZ;
+    INSERT INTO schema_migracion (nombre) VALUES ('021_declaracion_mercancias_peligrosas.sql');
   END IF;
 END
 $migracion$;

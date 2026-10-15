@@ -36,7 +36,7 @@ const comuna = (await (await fetch(`${URL_APP}/api/comunas?cobertura=1&q=Provide
 const sufijo = Date.now().toString(36);
 const crearEnvio = (extra = {}) => api(CLIENTE, 'POST', '/api/envios', { json: {
   destinatario: { nombre: `UI Verificación ${sufijo}`, telefono: '+56 9 6000 1111' }, direccion: { calle: 'Av. Providencia', numero: '100', comuna_id: comuna },
-  descripcion_producto: 'Verificación de interfaz', bultos: 1, peso_kg: 1, largo_cm: 10, ancho_cm: 10, alto_cm: 10, valor_declarado: 20000, confirmar: true, ...extra,
+  descripcion_producto: 'Verificación de interfaz', declara_sin_peligrosas: true, bultos: 1, peso_kg: 1, largo_cm: 10, ancho_cm: 10, alto_cm: 10, valor_declarado: 20000, confirmar: true, ...extra,
 } });
 async function subirComprobante(id) {
   const fd = new FormData();
