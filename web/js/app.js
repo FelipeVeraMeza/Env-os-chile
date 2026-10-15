@@ -190,6 +190,7 @@ function hojaCuenta(ocultos, hash) {
     <div class="cuenta-resumen"><span class="avatar">${iniciales(app.usuario.nombre)}</span>
       <div><b>${app.usuario.nombre}</b><div class="sub">${app.usuario.correo} · ${ROL_TXT[app.usuario.rol]}</div></div></div>
     <div class="hoja-lista" style="margin-top:8px">
+      <a href="#/cuenta" class="${hash.startsWith('#/cuenta') ? 'activo' : ''}">${icono('usuarios')}Mis datos (nombre, teléfono, RUT)</a>
       <button class="item" id="cambiar-clave">${icono('llave')}Cambiar contraseña</button>
       <button class="item" id="cerrar-todas">${icono('candado')}Cerrar sesión en mis otros dispositivos</button>
       <button class="item" id="cerrar-sesion">${icono('salir')}Cerrar sesión</button>
