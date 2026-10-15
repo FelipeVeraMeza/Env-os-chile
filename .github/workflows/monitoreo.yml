@@ -12,13 +12,30 @@ jobs:
   salud:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      URL: ${{ vars.URL_MONITOREO || 'https://www.optienvia.cl' }}
     steps:
+      # El certificado HTTPS lo emite Railway solo para los dominios agregados en Settings → Networking → Custom Domain.
+      # Si el dominio no está ahí (o el DNS apunta a otro servicio), el navegador muestra NET::ERR_CERT_COMMON_NAME_INVALID.
+      - name: Revisar certificado HTTPS
+        run: |
+          host=$(echo "$URL" | sed -E 's#^https?://##; s#/.*##')
+          cert=$(echo | openssl s_client -connect "$host:443" -servername "$host" 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName -enddate 2>/dev/null || true)
+          echo "$cert"
+          if [ -z "$cert" ]; then echo "::error::No se pudo leer el certificado de $host"; exit 1; fi
+          if ! echo | openssl s_client -connect "$host:443" -servername "$host" -verify_hostname "$host" -verify_return_error >/dev/null 2>&1; then
+            echo "::error::El certificado no es válido para $host. Revisa en Railway → Settings → Networking que el dominio esté agregado y con el certificado emitido, y que el CNAME apunte a ese servicio."
+            exit 1
+          fi
+          vence=$(echo "$cert" | sed -n 's/^notAfter=//p')
+          dias=$(( ($(date -d "$vence" +%s) - $(date +%s)) / 86400 ))
+          echo "El certificado vence en $dias días ($vence)"
+          if [ "$dias" -lt 10 ]; then echo "::warning::El certificado de $host vence en $dias días y no se ha renovado"; fi
+
       - name: Revisar /api/health
-        env:
-          URL: ${{ vars.URL_MONITOREO || 'https://www.jfenvios.cl' }}
         run: |
           for intento in 1 2 3; do
-            respuesta=$(curl -s -m 20 "$URL/api/health" || true)
+            respuesta=$(curl -sS -m 20 "$URL/api/health" 2>&1 || true)
             echo "Intento $intento: $respuesta"
             if echo "$respuesta" | grep -q '"ok":true'; then exit 0; fi
             sleep 20
