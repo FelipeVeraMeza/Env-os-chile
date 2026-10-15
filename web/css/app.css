@@ -492,6 +492,9 @@ input[type="file"]::file-selector-button {
 .flechas-ruta .btn-icono { width: 36px; height: 36px; font-size: .8rem; }
 /* Flecha de orden de ruta sin efecto (primera o última parada de su sección). */
 .flechas-ruta .btn-icono:disabled { opacity: .3; cursor: default; }
+/* Posición escrita a mano (pedido 15-10): escribe 5 y la parada pasa a ser la 5.ª. */
+.flechas-ruta .pos-ruta { width: 44px; min-height: 36px; padding: 4px 2px; text-align: center; font-weight: 700; font-size: 1rem; -moz-appearance: textfield; appearance: textfield; }
+.flechas-ruta .pos-ruta::-webkit-inner-spin-button, .flechas-ruta .pos-ruta::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 /* Orden de entrega en la ruta del repartidor (pedido 07-10): 1.º … último. */
 .badge.orden-ruta { background: var(--degradado-btn); color: var(--blanco); font-weight: 800; }
 /* Revisión de pagos (pedido 07-10): comprobante a la izquierda, envíos y cuadre del total a la derecha. */

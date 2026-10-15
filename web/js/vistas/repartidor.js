@@ -137,19 +137,22 @@ export async function ruta() {
   // cada sección se numera desde 1. Antes la numeración era una sola y saltaba (1, 3, 4 arriba y 2 abajo).
   const secciones = [enRuta.map((e) => e.id), porRetirar.map((e) => e.id)];
   const seccionDe = (id) => secciones.find((l) => l.includes(id));
-  const mover = async (id, paso) => {
+  // Lleva la parada a la posición j de su sección (las demás se corren): con las flechas o escribiendo el número.
+  const moverA = async (id, j) => {
     const lista = seccionDe(id);
     const i = lista.indexOf(id);
-    const j = i + paso;
-    if (j < 0 || j >= lista.length) return;
-    [lista[i], lista[j]] = [lista[j], lista[i]];
+    j = Math.min(Math.max(j, 0), lista.length - 1);
+    if (i === j) return;
+    lista.splice(j, 0, ...lista.splice(i, 1));
     try { await put('/api/envios/ruta/orden', { ids: secciones.flat() }); ruta(); } catch (err) { errorToast(err); }
   };
   const flechas = (e) => {
     const lista = seccionDe(e.id);
     const i = lista.indexOf(e.id);
+    // Pedido 15-10: escribir el número para mover la parada de una vez (del 1.º al 5.º sin tocar la flecha 4 veces).
     return html`<div class="flechas-ruta"><button class="btn-icono" data-mover="${e.id}" data-paso="-1" aria-label="Subir parada ${i + 1}" ${i === 0 ? html`disabled` : ''}>▲</button>
-    <span class="sub">${i + 1}</span><button class="btn-icono" data-mover="${e.id}" data-paso="1" aria-label="Bajar parada ${i + 1}" ${i === lista.length - 1 ? html`disabled` : ''}>▼</button></div>`;
+    <input class="pos-ruta" data-posicion="${e.id}" type="number" inputmode="numeric" min="1" max="${lista.length}" value="${i + 1}" aria-label="Posición de la parada (1 a ${lista.length})" ${lista.length < 2 ? html`disabled` : ''}>
+    <button class="btn-icono" data-mover="${e.id}" data-paso="1" aria-label="Bajar parada ${i + 1}" ${i === lista.length - 1 ? html`disabled` : ''}>▼</button></div>`;
   };
   // Qué paquete va primero y cuál al final (pedido 07-10).
   const ordinal = (e) => {
@@ -196,7 +199,22 @@ export async function ruta() {
       <div class="lista-envios" id="lista-disponibles">${disponibles.items.length ? disponibles.items.slice(0, 10).map(libre) : vacio('No hay envíos nuevos por tomar.')}</div>
       ${disponibles.total > 10 ? html`<button class="btn sec ancho" id="ver-disponibles" style="margin-top:12px">Ver los ${disponibles.total - 10} restantes</button>` : ''}</div>`
     : html`<p class="muted" style="text-align:center">Administración te asigna los envíos: aparecerán aquí cuando te asignen uno.</p>`}`);
-  $$('[data-mover]').forEach((b) => { b.onclick = () => mover(Number(b.dataset.mover), Number(b.dataset.paso)); });
+  $$('[data-mover]').forEach((b) => {
+    b.onclick = () => { const id = Number(b.dataset.mover); moverA(id, seccionDe(id).indexOf(id) + Number(b.dataset.paso)); };
+  });
+  $$('[data-posicion]').forEach((inp) => {
+    const id = Number(inp.dataset.posicion);
+    const aplicar = () => {
+      const n = parseInt(inp.value, 10);
+      const actual = seccionDe(id).indexOf(id) + 1;
+      // Vacío, el mismo puesto o fuera de rango que termina en el mismo puesto (p. ej. 99 siendo ya el último): se deja como estaba.
+      if (!Number.isInteger(n) || Math.min(Math.max(n, 1), seccionDe(id).length) === actual) { inp.value = actual; return; }
+      moverA(id, n - 1);
+    };
+    inp.onfocus = () => inp.select();
+    inp.onchange = aplicar; // al salir del campo o al tocar "Ir"/Enter en el teclado del teléfono
+    inp.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } };
+  });
   $('#retirar-paquetes')?.addEventListener('click', () => retirarPaquetes(aRetirar, ruta));
   // Un solo toque (pedido 07-10): todos los que ya tomó, pagados y de hoy, quedan retirados sin elegirlos uno por uno.
   $('#retirar-todos')?.addEventListener('click', async (ev) => {
