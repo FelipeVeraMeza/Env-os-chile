@@ -26,8 +26,11 @@ seguimiento.get('/:folio', ruta(async (req, res) => {
      FROM envio e JOIN comuna c ON c.id = e.comuna_id WHERE e.folio = $1`, [folio]);
   if (!e) throw falla(404, 'No encontramos un envío con ese folio');
   // Sin los avisos que no cambian el estado (cambio de destino, retiro reagendado): no son públicos.
+  // En cada intento fallido: cuándo llegó el repartidor (espera) y si hay foto (pedido 22-10).
   const { rows } = await query(
-    'SELECT estado_nuevo AS estado, motivo, fecha FROM envio_estado WHERE envio_id = $1 AND estado_anterior IS DISTINCT FROM estado_nuevo ORDER BY fecha, id', [e.id]);
+    `SELECT h.estado_nuevo AS estado, h.motivo, h.fecha, h.llegada_en,
+            EXISTS (SELECT 1 FROM adjunto a WHERE a.envio_estado_id = h.id AND a.tipo = 'foto_fallido') AS foto
+     FROM envio_estado h WHERE h.envio_id = $1 AND h.estado_anterior IS DISTINCT FROM h.estado_nuevo ORDER BY h.fecha, h.id`, [e.id]);
   const conf = await leerConfig();
   delete e.id;
   // Cada paso dice en qué intento va; el motivo es solo el general (sin el detalle del repartidor).
@@ -37,31 +40,38 @@ seguimiento.get('/:folio', ruta(async (req, res) => {
 // Foto del paquete al crearlo (pedido 09-10): quien recibe compara si llegó en las mismas condiciones. Los folios son
 // correlativos y la foto puede mostrar la etiqueta con nombre y dirección, así que no es pública: se pide los últimos
 // 4 dígitos del teléfono de quien recibe. Tras 10 intentos fallidos en una hora el folio se bloquea (aunque cambie la IP).
+// Con "intento" (pedido 22-10) entrega la foto que sacó el repartidor en ese intento fallido (1 = el primero).
 const INTENTOS_FOTO = 10;
 seguimiento.post('/:folio/foto', ruta(async (req, res) => {
   const folio = folioValido(req.params.folio);
   const clave = String(req.body?.clave ?? '').replace(/\D/g, '');
+  const intento = req.body?.intento === undefined || req.body?.intento === null || req.body?.intento === '' ? null : Number(req.body.intento);
+  if (intento !== null && (!Number.isInteger(intento) || intento < 1 || intento > 60)) throw falla(422, 'Intento inválido', { intento: 'Inválido' });
   if (clave.length !== 4) throw falla(422, 'Escribe los últimos 4 dígitos del teléfono de quien recibe', { clave: 'Escribe 4 dígitos' });
   const { fallidos } = await uno(
     `SELECT count(*)::int AS fallidos FROM evento_seguridad
      WHERE tipo = 'foto_seguimiento_fallida' AND detalle->>'folio' = $1 AND fecha > now() - interval '1 hour'`, [folio]);
   if (fallidos >= INTENTOS_FOTO) throw falla(429, 'Demasiados intentos con este folio. Inténtalo en una hora.');
-  const e = await uno(
-    `SELECT e.id, d.telefono,
-            (SELECT a.ruta FROM adjunto a WHERE a.envio_id = e.id AND a.tipo = 'foto_paquete' ORDER BY a.id LIMIT 1) AS ruta,
-            (SELECT a.mime FROM adjunto a WHERE a.envio_id = e.id AND a.tipo = 'foto_paquete' ORDER BY a.id LIMIT 1) AS mime
-     FROM envio e JOIN destinatario d ON d.id = e.destinatario_id WHERE e.folio = $1`, [folio]);
+  const e = await uno('SELECT e.id, d.telefono FROM envio e JOIN destinatario d ON d.id = e.destinatario_id WHERE e.folio = $1', [folio]);
   if (!e) throw falla(404, 'No encontramos un envío con ese folio');
   const digitos = String(e.telefono || '').replace(/\D/g, '');
   if (digitos.length < 4 || digitos.slice(-4) !== clave) {
     await registrarEvento(req, 'foto_seguimiento_fallida', { usuarioId: null, detalle: { folio } });
     throw falla(403, 'Los dígitos no coinciden con el teléfono de quien recibe', { clave: 'No coinciden con el teléfono de quien recibe' });
   }
-  if (!e.ruta) throw falla(404, 'Este envío no tiene foto del paquete');
-  const contenido = await leerArchivo(e.ruta);
+  const foto = intento === null
+    ? await uno("SELECT ruta, mime FROM adjunto WHERE envio_id = $1 AND tipo = 'foto_paquete' ORDER BY id LIMIT 1", [e.id])
+    : await uno(
+      `SELECT a.ruta, a.mime FROM adjunto a
+       WHERE a.tipo = 'foto_fallido' AND a.envio_estado_id = (
+         SELECT h.id FROM envio_estado h WHERE h.envio_id = $1 AND h.estado_nuevo = 'fallido' AND h.estado_anterior IS DISTINCT FROM h.estado_nuevo
+         ORDER BY h.fecha, h.id OFFSET $2 LIMIT 1)
+       ORDER BY a.id LIMIT 1`, [e.id, intento - 1]);
+  if (!foto) throw falla(404, intento === null ? 'Este envío no tiene foto del paquete' : 'Ese intento no tiene foto');
+  const contenido = await leerArchivo(foto.ruta);
   if (!contenido) throw falla(410, 'La foto ya no está disponible');
-  await auditar(req, 'foto_seguimiento', 'envio', e.id);
-  res.setHeader('Content-Type', e.mime);
+  await auditar(req, 'foto_seguimiento', 'envio', e.id, intento === null ? undefined : { intento });
+  res.setHeader('Content-Type', foto.mime);
   res.setHeader('Cache-Control', 'private, no-store');
   res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self' data:");
   res.setHeader('X-Content-Type-Options', 'nosniff');

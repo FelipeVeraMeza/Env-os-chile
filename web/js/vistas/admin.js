@@ -177,6 +177,7 @@ export async function tarifas() {
         <p class="muted">Desactivado = en pausa: los clientes solo pueden elegir entrega a domicilio.</p>
         <p class="muted">La foto de entrega es siempre obligatoria.</p>
         <label class="campo" style="margin-top:10px">Horario de retiro <small>(lo ve el cliente al crear un envío y en su inicio)</small><input name="horario_retiro" maxlength="200" value="${op.horario_retiro || ''}"></label>
+        <label class="campo" style="margin-top:10px">Horario de atención <small>(inicio de sesión, seguimiento y soporte)</small><input name="horario_atencion" maxlength="200" value="${op.horario_atencion || ''}" placeholder="Lunes a viernes de 9:00 a 20:30 hrs."></label>
         <button class="btn" style="margin-top:10px">Guardar reglas</button>
       </form>
     </div>

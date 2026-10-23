@@ -133,6 +133,10 @@ configuracion.put('/:clave', autenticar, requiereRol('admin'), ruta(async (req, 
   // Valores que dejarían la operación sin sentido (sin intentos, sin espera, montos con decimales).
   if (clave === 'operacion') {
     for (const k of ['intentos_max', 'espera_max_min']) if (!Number.isInteger(nuevo[k]) || nuevo[k] < 1 || nuevo[k] > 60) errores[k] = 'Debe ser un número entero entre 1 y 60';
+    for (const k of ['horario_retiro', 'horario_atencion']) {
+      nuevo[k] = String(nuevo[k] ?? '').trim();
+      if (nuevo[k].length > 200) errores[k] = 'Máximo 200 caracteres';
+    }
   }
   if (clave === 'tarifas') {
     for (const k of ['base', 'recargo_sobredimension', 'recargo_horario_especial']) if (!errores[k] && (!Number.isInteger(nuevo[k]) || nuevo[k] > 10_000_000)) errores[k] = 'Pesos enteros';

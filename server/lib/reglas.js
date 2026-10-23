@@ -75,6 +75,8 @@ export const CONFIG_POR_DEFECTO = {
     punto_courier: false,
     // Horario de retiro que ve el cliente al crear un envío y en su inicio (pedido 07-10). Se edita en Tarifas y reglas.
     horario_retiro: 'Agenda hasta las 23:59 y retiramos tu paquete al día siguiente entre las 9:00 y las 13:00 hrs.',
+    // Horario de atención del servicio (pedido 19-10): se muestra en el inicio de sesión, el seguimiento y soporte.
+    horario_atencion: 'Lunes a viernes de 9:00 a 20:30 hrs.',
     // Al confirmar un envío se avisa por correo al destinatario con el enlace de seguimiento (pedido 12-10).
     aviso_destinatario: true,
     // Sección "Bolsas de envío" (pedido 11-10). En pausa por pedido del cliente (12-10): los clientes no la ven hasta activarla.
@@ -125,8 +127,16 @@ export function validarMotivoRechazo(motivo) {
 }
 
 // ---------- Seguimiento público con los intentos de entrega (pedido 07-10) ----------
-// filas: [{ estado, motivo, fecha }] en orden. Cada salida a ruta es un intento; los fallidos dicen el motivo general
-// (nunca el detalle que escribe el repartidor, que puede traer datos personales). La devolución explica por qué.
+// filas: [{ estado, motivo, fecha, llegada_en?, foto? }] en orden. Cada salida a ruta es un intento; los fallidos dicen
+// el motivo general (nunca el detalle que escribe el repartidor, que puede traer datos personales), cuánto esperó el
+// repartidor en el destino y si sacó foto (pedido 22-10). La devolución explica por qué.
+export function textoEspera(llegadaEn, fecha) {
+  if (!llegadaEn || !fecha) return null;
+  const seg = (new Date(fecha).getTime() - new Date(llegadaEn).getTime()) / 1000;
+  if (!Number.isFinite(seg) || seg < 0) return null;
+  return seg < 60 ? 'El repartidor esperó menos de 1 minuto en el destino' : `El repartidor esperó ${Math.floor(seg / 60)} min en el destino`;
+}
+
 export function historialPublico(filas, intentosMax = 3) {
   let intento = 0;
   let fallidos = 0;
@@ -139,7 +149,8 @@ export function historialPublico(filas, intentosMax = 3) {
     }
     if (h.estado === 'fallido') {
       fallidos += 1;
-      return { ...base, intento: fallidos, label: `Intento ${fallidos} de ${intentosMax}: no se pudo entregar`, detalle: MOTIVOS_FALLO[codigo] || null };
+      return { ...base, intento: fallidos, label: `Intento ${fallidos} de ${intentosMax}: no se pudo entregar`, detalle: MOTIVOS_FALLO[codigo] || null,
+        espera: textoEspera(h.llegada_en, h.fecha), foto: Boolean(h.foto) };
     }
     if (h.estado === 'reagendado') return { ...base, label: `Reagendado para el intento ${fallidos + 1} de ${intentosMax}` };
     if (h.estado === 'entregado') return { ...base, intento, label: intento > 1 ? `Entregado en el intento ${intento}` : 'Entregado' };

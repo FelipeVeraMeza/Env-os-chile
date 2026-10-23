@@ -3,7 +3,7 @@ import { archivo, enviarForm, get, post, put } from '../api.js';
 import {
   $, $$, badge, comprimirFoto, confirmar, errorToast, esqueleto, fechaHora, hoyISO, html, icono, modal, montar, mostrarBlob, obtenerGps, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { avisoWhatsapp, direccionTexto, fechaRetiroTexto, retiroTexto, textoIntento, textoPaquete } from './comun.js';
+import { avisoWhatsapp, direccionTexto, esperaTexto, fechaRetiroTexto, retiroTexto, textoIntento, textoPaquete } from './comun.js';
 import { enviarPendientes, entregaPendiente, guardarCopia, guardarEntrega, leerCopia } from '../sin-conexion.js';
 
 // Sin señal se muestra lo último que se vio con conexión (y se avisa).
@@ -127,8 +127,11 @@ export async function ruta() {
     offline = true;
   }
   const [activos, hechos, disponibles] = datos;
-  const enRuta = activos.items.filter((e) => e.estado === 'en_ruta');
-  const porRetirar = activos.items.filter((e) => e.estado !== 'en_ruta');
+  // Un reagendado (siguiente intento) ya está en manos del repartidor: va con los "En ruta" para salir a entregarlo
+  // sin marcarlo retirado otra vez (pedido 22-10).
+  const aEntregar = (e) => ['en_ruta', 'reagendado'].includes(e.estado);
+  const enRuta = activos.items.filter(aEntregar);
+  const porRetirar = activos.items.filter((e) => !aEntregar(e));
   // Paquetes que todavía hay que ir a buscar (no los reintentos, que ya están en manos del repartidor).
   const aRetirar = porRetirar.filter((e) => e.estado === 'asignado');
   // Los que se pueden marcar de una vez: pagados y sin retiro agendado para otro día.
@@ -164,7 +167,7 @@ export async function ruta() {
   const tarjeta = (e) => html`<div class="parada">${flechas(e)}<a class="item-envio" href="${enlace(e)}">
     <div><div class="fila">${ordinal(e) ? html`<span class="badge orden-ruta">${ordinal(e)}</span>` : ''}<span class="folio">${e.folio}</span>${e.horario_especial ? html`<span class="badge e-en_ruta">${e.franja_horaria}</span>` : ''}
       ${e.tipo_destino === 'punto_courier' ? html`<span class="badge e-asignado">${e.courier_empresa}</span>` : ''}</div>
-      ${e.estado !== 'en_ruta' && e.retiro_calle ? html`<div class="sub">Retirar en: <b>${retiroTexto(e)}</b></div>` : ''}
+      ${e.estado === 'asignado' && e.retiro_calle ? html`<div class="sub">Retirar en: <b>${retiroTexto(e)}</b></div>` : ''}
       ${e.estado === 'asignado' && e.retiro_fecha ? html`<div class="aviso alerta" style="margin-top:6px;padding:6px 10px">Retiro reagendado: <b>${fechaRetiroTexto(e)}</b></div>` : ''}
       <div style="font-size:1.05rem;font-weight:700">${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}</div>
       <div class="dir">${e.comuna_nombre.toUpperCase()} · ${e.destinatario_nombre}</div></div>
@@ -185,14 +188,14 @@ export async function ruta() {
       <div class="fila"><span class="badge" style="background:rgba(255,255,255,.2)">${enRuta.length} en ruta</span><span class="badge" style="background:rgba(255,255,255,.2)">${porRetirar.length} por retirar</span><span class="badge" style="background:rgba(255,255,255,.2)">${hechos.total} cerrados hoy</span>${disponibles.total ? html`<span class="badge" style="background:rgba(255,255,255,.2)">${disponibles.total} disponibles</span>` : ''}</div></section>
     ${offline ? '' : html`<div style="margin-bottom:16px">
       <!-- Sin lector de QR (pedido 09-10): la etiqueta ya no trae QR; el mapa se abre con los botones de la ruta. -->
-      <button class="btn grande ancho" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente</button></div>`}
+      <button class="btn grande ancho" id="optimizar" ${enRuta.length + porRetirar.length > 1 ? '' : html`disabled`}>Ordenar ruta automáticamente…</button></div>`}
     ${!offline && aRetirar.length ? html`<div class="grid g2" style="margin-bottom:16px;grid-template-columns:minmax(0,2fr) minmax(0,1fr)">
       <button class="btn blanco grande" id="retirar-todos" ${listosRetirar.length ? '' : html`disabled`}>📦 Ya retiré todos (${listosRetirar.length})</button>
       <button class="btn sec grande" id="retirar-paquetes">Elegir cuáles</button></div>
       ${aRetirar.length > listosRetirar.length ? html`<p class="muted" style="margin:-8px 0 16px">${aRetirar.length - listosRetirar.length} de ${aRetirar.length} por retirar no se pueden marcar todavía: sin pagar o con retiro agendado para otro día.</p>` : ''}`
     : !offline && disponibles.items.length ? html`<div class="aviso" style="margin-bottom:16px">Para marcar paquetes retirados, primero tómalos: toca <b>Tomar todos</b> en "Disponibles para tomar" (más abajo). Después aparece <b>Ya retiré todos</b>.</div>` : ''}
     <div class="card"><div class="card-titulo"><h2>En ruta</h2>${botonesMaps(enRuta.map(lugarEntrega))}</div>
-      ${enRuta.length > 1 ? html`<p class="sub" style="margin-bottom:10px">Entrega en este orden: primero el 1.º y al final el último. Toca "Ordenar ruta automáticamente" para recalcularlo desde donde estás.</p>` : ''}<div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
+      ${enRuta.length > 1 ? html`<p class="sub" style="margin-bottom:10px">Entrega en este orden: primero el 1.º y al final el último. Toca "Ordenar ruta automáticamente" para recalcularlo desde donde estás (más corta, circular o por distancia).</p>` : ''}<div class="lista-envios">${enRuta.length ? enRuta.map(tarjeta) : vacio('No tienes envíos en ruta.')}</div></div>
     <div class="card"><div class="card-titulo"><h2>Por retirar / reintentar</h2>${botonesMaps(porRetirar.filter((e) => !retiroOtroDia(e)).map(lugarParada))}</div><div class="lista-envios">${porRetirar.length ? porRetirar.map(tarjeta) : vacio('Sin envíos pendientes de retiro.')}</div></div>
     ${disponibles.autoasignacion || esAdmin ? html`<div class="card"><div class="card-titulo"><div><h2>Disponibles para tomar</h2><span class="sub">Pagados y sin repartidor</span></div>
       ${!offline && disponibles.total > 1 ? html`<button class="btn chico" id="tomar-todos">Tomar todos (${Math.min(disponibles.total, 100)})</button>` : ''}</div>
@@ -230,17 +233,8 @@ export async function ruta() {
     } catch (err) { errorToast(err); ruta(); }
   });
   // Ordena la ruta sola desde donde está el repartidor (si el teléfono da la ubicación; si no, desde el centro).
-  $('#optimizar')?.addEventListener('click', async (ev) => {
-    const btn = ev.currentTarget;
-    btn.disabled = true;
-    btn.textContent = 'Ordenando…';
-    const ubic = await Promise.race([obtenerGps().catch(() => null), new Promise((r) => { setTimeout(() => r(null), 6000); })]);
-    try {
-      const r = await post('/api/envios/ruta/optimizar', ubic ? { lat: ubic.lat, lon: ubic.lon } : {});
-      toast(r.con_gps ? 'Ruta ordenada desde tu ubicación' : 'Ruta ordenada (sin GPS: desde el centro de Santiago)', 'ok');
-      ruta();
-    } catch (err) { errorToast(err); btn.disabled = false; btn.textContent = 'Ordenar ruta automáticamente'; }
-  });
+  // Pedido 22-10: el repartidor elige cómo: la más corta, circular (vuelve a donde partió) o por distancia.
+  $('#optimizar')?.addEventListener('click', () => elegirOrden(ruta));
   // Los disponibles se muestran de a 10: con muchos, la ruta propia quedaba perdida al final de una lista larga.
   $('#ver-disponibles')?.addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
@@ -277,6 +271,35 @@ export async function ruta() {
   });
 }
 
+// ---------- Formas de ordenar la ruta (pedido 22-10) ----------
+const MODOS_RUTA = [
+  ['corta', 'La más corta', 'Recomendada: el recorrido con menos kilómetros desde donde estás.'],
+  ['circular', 'Circular', 'Parte desde donde estás, da la vuelta por Santiago y la última parada queda cerca del punto de partida.'],
+  ['cerca_lejos', 'De la más cercana a la más lejana', 'Empiezas por lo que está más cerca de ti y terminas en lo más lejos.'],
+  ['lejos_cerca', 'De la más lejana a la más cercana', 'Partes por lo más lejos y vas volviendo hacia donde estás.'],
+];
+
+function elegirOrden(alTerminar) {
+  const m = modal(html`<h2>Ordenar ruta</h2>
+    <p class="sub">Elige cómo ordenar tus paradas. Se calcula desde tu ubicación (si el teléfono la da; si no, desde el centro de Santiago).</p>
+    <div class="pila" style="margin-top:12px">${MODOS_RUTA.map(([k, t, d]) => html`<button type="button" class="btn sec ancho modo-ruta" data-modo="${k}">
+      <span><b>${t}</b><small>${d}</small></span></button>`)}</div>`);
+  $$('[data-modo]', m.el).forEach((b) => {
+    b.onclick = async () => {
+      $$('[data-modo]', m.el).forEach((x) => { x.disabled = true; });
+      b.querySelector('b').textContent = 'Ordenando…';
+      const ubic = await Promise.race([obtenerGps().catch(() => null), new Promise((r) => { setTimeout(() => r(null), 6000); })]);
+      try {
+        const r = await post('/api/envios/ruta/optimizar', { modo: b.dataset.modo, ...(ubic ? { lat: ubic.lat, lon: ubic.lon } : {}) });
+        m.cerrar();
+        const nombre = MODOS_RUTA.find(([k]) => k === r.modo)?.[1] || 'Ruta';
+        toast(r.con_gps ? `${nombre}: ruta ordenada desde tu ubicación` : `${nombre}: ruta ordenada (sin GPS: desde el centro de Santiago)`, 'ok');
+        alTerminar();
+      } catch (err) { errorToast(err); m.cerrar(); }
+    };
+  });
+}
+
 // ================= Detalle para el repartidor: acciones grandes para usar en la calle =================
 let temporizador = null;
 
@@ -296,7 +319,8 @@ export async function detalleRepartidor(id) {
   }
   const guardada = await entregaPendiente(e.id);
   const op = app.conf.operacion;
-  const antesDeRetirar = ['asignado', 'reagendado'].includes(e.estado);
+  // Solo "Por retirar": un reagendado ya se retiró (el paquete sigue con el repartidor hasta el último intento).
+  const antesDeRetirar = e.estado === 'asignado';
   const espera = op.espera_max_min * 60;
   const segundosDesdeLlegada = () => (e.llegada_en ? Math.floor((Date.now() - new Date(e.llegada_en).getTime()) / 1000) : null);
 
@@ -325,7 +349,8 @@ export async function detalleRepartidor(id) {
       <div style="font-size:1.8rem;font-weight:900;letter-spacing:.02em">${e.comuna_nombre.toUpperCase()}</div>
       ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}
       <p><b>${e.destinatario_nombre}</b> · <a href="tel:${e.destinatario_telefono.replace(/\s/g, '')}">${e.destinatario_telefono}</a></p>
-      ${e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar por WhatsApp</a>` : ''}
+      <!-- Magenta para que se distinga (pedido 22-10): el cliente sigue su envío con el enlace que va en el mensaje. -->
+      ${e.destinatario_telefono ? html`<a class="btn magenta ancho" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">${icono('whatsapp')} Avisar al cliente por WhatsApp</a>` : ''}
       <div class="grid g2" style="margin-top:12px">
         <a class="btn blanco grande" href="${e.mapas.google}" target="_blank" rel="noopener">Ir con Google Maps</a>
         <a class="btn azul grande" href="${e.mapas.waze}" target="_blank" rel="noopener">Ir con Waze</a>
@@ -340,7 +365,16 @@ export async function detalleRepartidor(id) {
       ${antesDeRetirar ? html`<p class="muted">Revisa que los bultos coincidan antes de retirar. Esta información no va impresa en la etiqueta.</p>` : ''}
     </div>
     <div id="acciones"></div>
-    <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${e.historial.map((h) => html`<li><b>${ESTADOS[h.estado_nuevo]}</b>${h.motivo ? html` · <span class="sub">${h.motivo}</span>` : ''}<div class="cuando">${fechaHora(h.fecha)}</div></li>`)}</ol></div>`);
+    <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${e.historial.map((h) => {
+      const foto = e.adjuntos.find((a) => a.tipo === 'foto_fallido' && a.envio_estado_id === h.id);
+      // El motivo de un fallido se guarda con su código ("nadie_en_domicilio — detalle"): se muestra con su nombre.
+      const [codigo, ...resto] = String(h.motivo || '').split(' — ');
+      const motivo = [app.conf.motivos_fallo?.[codigo] || codigo, ...resto].filter(Boolean).join(' — ');
+      return html`<li><b>${ESTADOS[h.estado_nuevo]}</b>${motivo ? html` · <span class="sub">${motivo}</span>` : ''}
+        ${h.estado_nuevo === 'fallido' && esperaTexto(h) ? html`<div class="sub">⏱ ${esperaTexto(h)}</div>` : ''}
+        ${foto ? html`<a href="${archivo(foto.url)}" target="_blank" rel="noopener"><img class="foto-mini" src="${archivo(foto.url)}" alt="Foto del intento fallido" style="margin-top:6px"></a>` : ''}
+        <div class="cuando">${fechaHora(h.fecha)}</div></li>`;
+    })}</ol></div>`);
 
   const acciones = $('#acciones');
   const recargar = () => detalleRepartidor(id);
@@ -350,7 +384,7 @@ export async function detalleRepartidor(id) {
       <p>La registraste sin conexión el ${fechaHora(guardada.hora)}. Se enviará sola apenas vuelva internet; no tienes que hacer nada más.</p>
       <button class="btn sec" id="reintentar">Enviar ahora</button></div>`);
     $('#reintentar').onclick = async () => { await enviarPendientes(); recargar(); };
-  } else if (['asignado', 'reagendado'].includes(e.estado)) {
+  } else if (e.estado === 'asignado') {
     const pagado = e.estado_pago === 'pagado';
     montar(acciones, html`<div class="card">
       ${pagado ? '' : html`<div class="aviso alerta" style="margin-bottom:12px">Este envío <b>no está pagado</b>: no se puede retirar hasta que el cliente pague.</div>`}
@@ -358,8 +392,11 @@ export async function detalleRepartidor(id) {
     $('#retirar').onclick = async () => {
       try { await post(`/api/envios/${id}/estado`, { estado: 'en_ruta' }); toast('Envío retirado. ¡Buen viaje!', 'ok'); recargar(); } catch (err) { errorToast(err); }
     };
-  } else if (e.estado === 'en_ruta') {
+  } else if (['en_ruta', 'reagendado'].includes(e.estado)) {
+    // Reagendado (pedido 22-10): el paquete no se devuelve hasta el último intento, así que sale directo a entregar
+    // (sin "Paquete retirado"). Al tocar "Llegué", entregar o "No se pudo entregar" queda "En ruta" para este intento.
     montar(acciones, html`<div class="card">
+      ${e.estado === 'reagendado' ? html`<div class="aviso" style="margin-bottom:12px"><b>Intento ${e.intentos + 1} de ${op.intentos_max}.</b> El paquete sigue contigo: sal a entregarlo.</div>` : ''}
       ${e.llegada_en ? html`
         <h2 style="text-align:center">Tiempo de espera</h2>
         <div class="cuenta-regresiva"><svg viewBox="0 0 120 120" width="150" height="150"><circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="10"/>
@@ -507,16 +544,44 @@ function fallido(e, segundosDesdeLlegada, espera, recargar) {
         return html`<label class="item-envio" style="cursor:${bloqueado ? 'not-allowed' : 'pointer'};opacity:${bloqueado ? 0.5 : 1}"><div>${v}${bloqueado ? html`<div class="muted">Disponible tras ${app.conf.operacion.espera_max_min} min desde "Llegué"</div>` : ''}</div>
           <input type="radio" name="motivo" value="${k}" ${bloqueado ? html`disabled` : ''} style="width:22px;min-height:22px"></label>`;
       })}
+      <!-- Foto obligatoria del intento (pedido 22-10): queda en el seguimiento bajo este intento fallido. -->
+      <label class="foto-entrega" id="zona-foto">
+        <input type="file" name="foto" accept="image/*" capture="environment" class="sr" required>
+        <span class="icono-foto">${icono('camara')}</span>
+        <b id="foto-titulo">Tomar foto del intento</b>
+        <small id="foto-nota">Obligatoria: por ejemplo, la puerta o el lugar. Se ve en el seguimiento.</small>
+        <img id="prev" alt="Vista previa de la foto" hidden>
+      </label>
+      ${e.llegada_en ? html`<p class="sub">⏱ Esperaste ${Math.floor(Math.max(0, segundosDesdeLlegada()) / 60)} min desde "Llegué": queda en el seguimiento.</p>` : ''}
       <label class="campo">Detalle<input name="detalle" placeholder="Opcional"></label>
       <div class="fila"><button type="button" class="btn sec" id="cancelar">Cancelar</button><button class="btn peligro grande">Registrar intento fallido</button></div>
     </form></div>`);
   $('#modal-raiz').append(cont);
   $('#cancelar', cont).onclick = () => cont.remove();
+  let foto = null;
+  $('input[name="foto"]', cont).onchange = async (ev) => {
+    const f = ev.target.files[0];
+    if (!f) return;
+    foto = await comprimirFoto(f);
+    const img = $('#prev', cont);
+    mostrarBlob(img, foto);
+    img.hidden = false;
+    $('#zona-foto', cont).classList.remove('falta');
+    $('#zona-foto', cont).classList.add('lista');
+    $('#foto-titulo', cont).textContent = '✔ Foto lista';
+    $('#foto-nota', cont).textContent = 'Toca para tomarla de nuevo';
+  };
   $('#f-fal', cont).onsubmit = async (ev) => {
     ev.preventDefault();
     const motivo = ev.target.motivo.value;
     if (!motivo) return toast('Selecciona un motivo', 'error');
-    if (!(await confirmar('¿Registrar intento fallido?', 'Quedará registrado con tu ubicación.'))) return;
+    if (!foto) {
+      const zona = $('#zona-foto', cont);
+      zona.classList.add('falta');
+      zona.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return toast('La foto del intento fallido es obligatoria', 'error');
+    }
+    if (!(await confirmar('¿Registrar intento fallido?', 'Quedará registrado con la foto y tu ubicación.'))) return;
     // Mientras se busca la ubicación (hasta 25 s) el botón queda tomado y avisa: antes no pasaba nada en pantalla
     // y un segundo toque enviaba el intento otra vez.
     const btn = $('button.peligro', ev.target);
@@ -526,7 +591,12 @@ function fallido(e, segundosDesdeLlegada, espera, recargar) {
     const u = await obtenerGps().catch(() => null);
     btn.textContent = 'Registrando…';
     try {
-      await post(`/api/envios/${e.id}/estado`, { estado: 'fallido', motivo, detalle: ev.target.detalle.value || undefined, ...(u ? { lat: u.lat, lon: u.lon } : {}) });
+      const fd = new FormData();
+      fd.append('foto', foto, 'intento-fallido.jpg');
+      fd.append('motivo', motivo);
+      if (ev.target.detalle.value) fd.append('detalle', ev.target.detalle.value);
+      if (u) { fd.append('lat', u.lat); fd.append('lon', u.lon); }
+      await enviarForm(`/api/envios/${e.id}/fallido`, fd);
       cont.remove();
       toast('Intento fallido registrado', 'ok');
       recargar();

@@ -26,10 +26,16 @@ export function enlaceWhatsappSoporte(texto = '') {
   return fono ? `https://wa.me/${fono}${texto ? `?text=${encodeURIComponent(texto)}` : ''}` : null;
 }
 
+// Horario de atención del servicio (pedido 19-10). Lo edita administración en Tarifas y reglas.
+export function horarioAtencion(estilo = '') {
+  const texto = app.conf?.operacion?.horario_atencion;
+  return texto ? html`<p class="sub horario-atencion" style="${estilo}">🕘 <span><b>Horario de atención:</b> ${texto}</span></p>` : '';
+}
+
 // Tarjeta "¿Necesitas ayuda?" para el inicio del cliente y la pantalla de soporte.
 export function tarjetaAyuda() {
   const wa = enlaceWhatsappSoporte(`Hola ${app.conf.negocio.nombre}, necesito ayuda con mis envíos.`);
-  return html`<div class="card ayuda"><div><h2>¿Necesitas ayuda?</h2><p class="sub">Escríbenos por cualquier problema con un envío, un pago o tu cuenta.</p></div>
+  return html`<div class="card ayuda"><div><h2>¿Necesitas ayuda?</h2><p class="sub">Escríbenos por cualquier problema con un envío, un pago o tu cuenta.</p>${horarioAtencion('margin-top:6px')}</div>
     <div class="fila"><button type="button" class="btn" data-soporte>${icono('soporte')} Escribir a soporte</button>
       ${wa ? html`<a class="btn sec" href="${wa}" target="_blank" rel="noopener">${icono('whatsapp')} WhatsApp</a>` : ''}</div></div>`;
 }
@@ -53,6 +59,7 @@ export async function dialogoSoporte({ folio = '', alEnviar } = {}) {
   const wa = enlaceWhatsappSoporte(`Hola ${app.conf?.negocio?.nombre || ''}, necesito ayuda${folio ? ` con el envío ${folio}` : ''}.`);
   const m = modal(html`<h2>Escribir a soporte</h2>
     <p class="sub">Tu mensaje llega a administración. ${conSesion ? 'Verás la respuesta en Soporte, dentro de tu cuenta.' : 'Te enviamos un número de caso y un enlace para ver la respuesta.'}</p>
+    ${horarioAtencion('margin-top:6px')}
     <form class="pila" id="f-soporte" novalidate>
       ${conSesion ? '' : html`<label class="campo">Nombre *<input name="nombre" autocomplete="name" maxlength="80"></label>
         <label class="campo">Correo o teléfono *<input name="contacto" autocomplete="email" maxlength="120" placeholder="nombre@correo.cl o +56 9 1234 5678">

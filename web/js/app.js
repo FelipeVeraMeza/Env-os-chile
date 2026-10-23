@@ -225,6 +225,7 @@ function pantallaLogin(mensaje) {
       ${app.conf.operacion?.registro_clientes ? html`<a class="btn sec ancho" href="#/registro">${icono('usuarios')} Crear cuenta de cliente</a>` : ''}
       <button type="button" class="btn sec ancho" data-soporte>${icono('soporte')} Escribir a soporte</button>
     </div>
+    ${soporte.horarioAtencion('margin-top:14px;justify-content:center;text-align:center')}
   </div></div>`);
   soporte.enlazarSoporte($('#vista'));
   const f = $('#f-login');

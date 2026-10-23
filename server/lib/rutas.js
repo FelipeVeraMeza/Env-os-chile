@@ -36,11 +36,29 @@ export function ubicar({ lat, lon, comuna }) {
   return CENTRO_COMUNA[comuna] || CENTRO;
 }
 
+// Formas de ordenar la ruta (pedido 22-10): la más corta (por defecto), una vuelta que termina cerca de donde partió,
+// o por distancia desde el repartidor (de la más cercana a la más lejana o al revés).
+export const MODOS_RUTA = {
+  corta: 'Más corta',
+  circular: 'Circular: vuelve al punto de partida',
+  cerca_lejos: 'De la más cercana a la más lejana',
+  lejos_cerca: 'De la más lejana a la más cercana',
+};
+
 // paradas: [{ id, lat, lon, comuna, calle }]. Devuelve los ids en el orden sugerido.
-export function optimizarRuta(paradas, inicio = null) {
+export function optimizarRuta(paradas, inicio = null, modo = 'corta') {
   if (paradas.length < 2) return paradas.map((p) => p.id);
   const pts = paradas.map((p) => ({ ...p, pos: ubicar(p), clave: `${p.comuna || ''}|${String(p.calle || '').toLowerCase()}` }));
   const origen = inicio && Number.isFinite(inicio[0]) && Number.isFinite(inicio[1]) ? inicio : CENTRO;
+  // Por distancia desde el repartidor: a igual distancia (misma comuna sin GPS) quedan juntas las de la misma calle.
+  if (modo === 'cerca_lejos' || modo === 'lejos_cerca') {
+    const signo = modo === 'cerca_lejos' ? 1 : -1;
+    return pts.sort((a, b) => {
+      const d = distanciaKm(origen, a.pos) - distanciaKm(origen, b.pos);
+      if (Math.abs(d) > 1e-9) return signo * d;
+      return a.clave.localeCompare(b.clave, 'es') || a.id - b.id;
+    }).map((p) => p.id);
+  }
   // Vecino más cercano; con empate de distancia (misma comuna sin GPS) gana la misma calle y luego el orden alfabético.
   const pendientes = [...pts];
   const orden = [];
@@ -56,8 +74,9 @@ export function optimizarRuta(paradas, inicio = null) {
     orden.push(actual);
   }
   // 2-opt: invierte tramos mientras acorte el recorrido total. Hasta 60 paradas (más allá el vecino más cercano
-  // ya es una buena ruta y el cálculo dejaría de ser instantáneo).
-  const largo = (r) => r.reduce((s, p, i) => s + distanciaKm(i ? r[i - 1].pos : origen, p.pos), 0);
+  // ya es una buena ruta y el cálculo dejaría de ser instantáneo). La ruta circular cuenta también la vuelta al origen.
+  const vuelta = (r) => (modo === 'circular' ? distanciaKm(r[r.length - 1].pos, origen) : 0);
+  const largo = (r) => r.reduce((s, p, i) => s + distanciaKm(i ? r[i - 1].pos : origen, p.pos), 0) + vuelta(r);
   let mejor = orden;
   let mejoro = orden.length <= 60;
   for (let vueltas = 0; mejoro && vueltas < 50; vueltas++) {

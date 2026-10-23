@@ -75,7 +75,7 @@ export async function detalleCompleto(envio, usuario) {
   const [historial, adjuntos, reclamos, pagos] = await Promise.all([
     query(`SELECT h.*, u.nombre AS usuario_nombre FROM envio_estado h LEFT JOIN usuario u ON u.id = h.usuario_id
            WHERE h.envio_id = $1 ORDER BY h.fecha, h.id`, [envio.id]),
-    query('SELECT id, tipo, nombre_original, mime, tamano, subido_en FROM adjunto WHERE envio_id = $1 ORDER BY id', [envio.id]),
+    query('SELECT id, tipo, nombre_original, mime, tamano, subido_en, envio_estado_id FROM adjunto WHERE envio_id = $1 ORDER BY id', [envio.id]),
     usuario.rol === 'repartidor' ? { rows: [] } : query('SELECT * FROM reclamo_seguro WHERE envio_id = $1 ORDER BY id DESC', [envio.id]),
     usuario.rol === 'repartidor' ? { rows: [] } : query(
       `SELECT p.id, p.proveedor, p.medio, p.monto, p.estado, p.referencia, p.creado_en, p.comprobante_adjunto_id, p.motivo_rechazo, p.revisado_en,
@@ -112,12 +112,15 @@ export function exigirSinConflicto(resultado) {
   return resultado;
 }
 
-export async function registrarEstado(db, { envioId, anterior, nuevo, motivo = null, usuarioId, lat = null, lon = null }) {
-  await db.query(
-    `INSERT INTO envio_estado (envio_id, estado_anterior, estado_nuevo, motivo, usuario_id, lat, lon)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [envioId, anterior, nuevo, motivo, usuarioId, lat, lon],
+// Devuelve el id del paso del historial (la foto de un intento fallido queda ligada a él).
+// llegadaEn: en un intento fallido, cuándo el repartidor tocó "Llegué al destino" (el seguimiento muestra la espera).
+export async function registrarEstado(db, { envioId, anterior, nuevo, motivo = null, usuarioId, lat = null, lon = null, llegadaEn = null }) {
+  const r = await db.query(
+    `INSERT INTO envio_estado (envio_id, estado_anterior, estado_nuevo, motivo, usuario_id, lat, lon, llegada_en)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [envioId, anterior, nuevo, motivo, usuarioId, lat, lon, llegadaEn],
   );
+  return r.rows?.[0]?.id ?? null;
 }
 
 export async function siguienteFolio(db, prefijo) {

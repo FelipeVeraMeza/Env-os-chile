@@ -1,5 +1,6 @@
+import { app } from '../app.js';
 import { api, get, post } from '../api.js';
-import { $, badge, clp, errorToast, fechaHora, html, icono, marcarErrores, montar, mostrarBlob, toast } from '../ui.js';
+import { $, $$, badge, clp, errorToast, fechaHora, html, icono, marcarErrores, montar, mostrarBlob, toast } from '../ui.js';
 import { enlazarSoporte } from './soporte.js';
 
 // Seguimiento por folio: muestra solo el estado, sin datos personales.
@@ -22,37 +23,46 @@ function avisoIntentos(s) {
 }
 
 // Foto del paquete al crearlo (pedido 09-10), debajo de "Creado": quien recibe compara si llegó en las mismas condiciones.
-// Por privacidad (la foto puede mostrar la etiqueta) se piden los últimos 4 dígitos del teléfono de quien recibe.
-const bloqueFoto = () => html`<div class="foto-seguimiento" id="foto-seg">
-  <div class="fila" style="gap:8px">${icono('camara')}<b>Foto del paquete al crearlo</b></div>
-  <p class="sub" style="margin:4px 0 8px">Compárala al recibirlo para ver que llegó en las mismas condiciones.</p>
-  <form class="fila" id="f-foto-seg" novalidate>
+// Foto de cada intento fallido (pedido 22-10), debajo de ese intento. Por privacidad (la foto puede mostrar la etiqueta o
+// la casa) se piden los últimos 4 dígitos del teléfono de quien recibe.
+const FOTOS = {
+  paquete: { titulo: 'Foto del paquete al crearlo', nota: 'Compárala al recibirlo para ver que llegó en las mismas condiciones.', alt: 'Foto del paquete al momento de crear el envío' },
+  fallido: { titulo: 'Foto del intento de entrega', nota: 'La sacó el repartidor en el lugar de entrega.', alt: 'Foto del intento de entrega fallido' },
+};
+const bloqueFoto = (tipo, intento = '') => html`<div class="foto-seguimiento" data-foto-seg="${tipo}" data-intento="${intento}">
+  <div class="fila" style="gap:8px">${icono('camara')}<b>${FOTOS[tipo].titulo}</b></div>
+  <p class="sub" style="margin:4px 0 8px">${FOTOS[tipo].nota}</p>
+  <form class="fila" novalidate>
     <label class="campo" style="flex:1;min-width:150px">Últimos 4 dígitos del teléfono de quien recibe
-      <input name="clave" inputmode="numeric" autocomplete="off" maxlength="4" pattern="\\d{4}" placeholder="1234"></label>
+      <input name="clave" inputmode="numeric" autocomplete="off" maxlength="4" pattern="\d{4}" placeholder="1234"></label>
     <button class="btn sec chico" style="align-self:flex-end;min-height:46px">Ver foto</button>
   </form>
 </div>`;
 
-function enlazarFoto(folio) {
-  const f = $('#f-foto-seg');
-  if (!f) return;
-  f.onsubmit = async (e) => {
-    e.preventDefault();
-    const clave = f.clave.value.replace(/\D/g, '');
-    if (marcarErrores(f, clave.length === 4 ? {} : { clave: 'Escribe 4 dígitos' })) return;
-    const btn = $('button', f);
-    btn.disabled = true;
-    try {
-      const foto = await api(`/api/seguimiento/${encodeURIComponent(folio)}/foto`, { metodo: 'POST', json: { clave }, blob: true });
-      const caja = $('#foto-seg');
-      montar(caja, html`<div class="fila" style="gap:8px">${icono('camara')}<b>Foto del paquete al crearlo</b></div>
-        <img class="foto-paquete" alt="Foto del paquete al momento de crear el envío">`);
-      mostrarBlob($('img', caja), foto);
-    } catch (err) {
-      if (!marcarErrores(f, err.detalles)) errorToast(err);
-      btn.disabled = false;
-    }
-  };
+function enlazarFotos(folio) {
+  $$('[data-foto-seg]').forEach((caja) => {
+    const f = $('form', caja);
+    const tipo = caja.dataset.fotoSeg;
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const clave = f.clave.value.replace(/\D/g, '');
+      if (marcarErrores(f, clave.length === 4 ? {} : { clave: 'Escribe 4 dígitos' })) return;
+      const btn = $('button', f);
+      btn.disabled = true;
+      try {
+        const json = { clave, ...(tipo === 'fallido' ? { intento: Number(caja.dataset.intento) } : {}) };
+        const foto = await api(`/api/seguimiento/${encodeURIComponent(folio)}/foto`, { metodo: 'POST', json, blob: true });
+        montar(caja, html`<div class="fila" style="gap:8px">${icono('camara')}<b>${FOTOS[tipo].titulo}</b></div>
+          <img class="foto-paquete" alt="${FOTOS[tipo].alt}">`);
+        mostrarBlob($('img', caja), foto);
+        // Con la clave correcta se pueden ver también las demás fotos sin escribirla de nuevo.
+        $$('[data-foto-seg] input[name="clave"]').forEach((i) => { if (!i.value) i.value = clave; });
+      } catch (err) {
+        if (!marcarErrores(f, err.detalles)) errorToast(err);
+        btn.disabled = false;
+      }
+    };
+  });
 }
 
 export async function seguimiento(folioInicial) {
@@ -71,12 +81,14 @@ export async function seguimiento(folioInicial) {
         <div class="card-titulo"><div><h2 class="mono">${s.folio}</h2><div class="sub">Destino: ${s.tipo_destino === 'punto_courier' ? `punto ${s.courier_empresa} · ` : ''}${s.comuna}</div></div>${badge(s.estado, s.estado_label)}</div>
         ${s.horario_especial ? html`<p class="sub">Horario especial: ${s.franja_horaria}</p>` : ''}
         ${avisoIntentos(s)}
-        <ol class="linea-tiempo" style="margin-top:14px">${s.historial.filter((h) => h.estado !== 'borrador').map((h, i, lista) => html`<li class="${['fallido', 'devuelto'].includes(h.estado) ? 'rechazo' : ''}"><b>${h.label}</b>${h.detalle ? html`<div class="sub">${h.detalle}</div>` : ''}<div class="cuando">${fechaHora(h.fecha)}</div>
-          ${s.foto_paquete && h.estado === 'creado' && lista.findIndex((x) => x.estado === 'creado') === i ? bloqueFoto() : ''}</li>`)}</ol>
-        <div class="fila entre ayuda-seguimiento"><span class="sub">¿Algún problema con este envío?</span>
+        <ol class="linea-tiempo" style="margin-top:14px">${s.historial.filter((h) => h.estado !== 'borrador').map((h, i, lista) => html`<li class="${['fallido', 'devuelto'].includes(h.estado) ? 'rechazo' : ''}"><b>${h.label}</b>${h.detalle ? html`<div class="sub">${h.detalle}</div>` : ''}
+          ${h.espera ? html`<div class="sub">⏱ ${h.espera}</div>` : ''}<div class="cuando">${fechaHora(h.fecha)}</div>
+          ${s.foto_paquete && h.estado === 'creado' && lista.findIndex((x) => x.estado === 'creado') === i ? bloqueFoto('paquete') : ''}
+          ${h.estado === 'fallido' && h.foto ? bloqueFoto('fallido', h.intento) : ''}</li>`)}</ol>
+        <div class="fila entre ayuda-seguimiento"><span class="sub">¿Algún problema con este envío?${app.conf?.operacion?.horario_atencion ? html`<br>🕘 Atención: ${app.conf.operacion.horario_atencion}` : ''}</span>
           <button type="button" class="btn sec chico" data-soporte data-folio="${s.folio}">${icono('soporte')} Escribir a soporte</button></div>
       </div>`);
-      enlazarFoto(s.folio);
+      enlazarFotos(s.folio);
       enlazarSoporte(res);
       if (location.hash !== `#/seguimiento/${s.folio}`) history.replaceState(null, '', `#/seguimiento/${s.folio}`);
     } catch (err) {

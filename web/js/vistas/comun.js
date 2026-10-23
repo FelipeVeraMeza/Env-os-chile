@@ -30,6 +30,14 @@ export function avisoWhatsapp(e, negocio) {
   return `https://wa.me/${fono}?text=${encodeURIComponent(`${texto}\nSigue tu envío: ${seguimiento}\n${negocio?.nombre || ''}`.trim())}`;
 }
 
+// Cuánto esperó el repartidor en el destino antes de un intento fallido (pedido 22-10): de "Llegué" al registro del fallido.
+export function esperaTexto(h) {
+  if (!h?.llegada_en || !h.fecha) return null;
+  const seg = (new Date(h.fecha).getTime() - new Date(h.llegada_en).getTime()) / 1000;
+  if (!Number.isFinite(seg) || seg < 0) return null;
+  return seg < 60 ? 'Esperó menos de 1 minuto en el destino' : `Esperó ${Math.floor(seg / 60)} min en el destino`;
+}
+
 export function direccionTexto(e) {
   return `${e.calle} ${e.numero}${e.depto ? `, ${e.depto}` : ''} · ${e.comuna_nombre}`;
 }

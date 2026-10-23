@@ -3,7 +3,7 @@ import { api, archivo, enviarForm, get, post, urlApi } from '../api.js';
 import {
   $, $$, abrirBlob, badge, badgePago, PAGO_TXT, botonCopiar, clp, comprimirFoto, confirmar, datosForm, errorToast, esqueleto, fechaHora, hoyISO, html, icono, listaCorta, marcarErrores, modal, montar, toast, vacio, ESTADOS,
 } from '../ui.js';
-import { avisoWhatsapp, comunasCobertura, fechaRetiroTexto, itemEnvio, opcionesComunas, retiroTexto, textoIntento, textoPaquete } from './comun.js';
+import { avisoWhatsapp, comunasCobertura, esperaTexto, fechaRetiroTexto, itemEnvio, opcionesComunas, retiroTexto, textoIntento, textoPaquete } from './comun.js';
 import { detalleRepartidor } from './repartidor.js';
 
 // ================= Registro de envíos (búsqueda, filtros, exportación) =================
@@ -58,7 +58,7 @@ export async function registro() {
       const r = await get(`/api/envios?${qs()}`);
       const paginas = Math.max(1, Math.ceil(r.total / r.limite));
       montar($('#resultado'), html`
-        <div class="fila entre" style="margin-bottom:10px"><span class="sub">${r.total} envío(s)</span>
+        <div class="fila entre" style="margin-bottom:10px"><span class="sub">${r.total} envío(s)${rol === 'admin' && !f.estado && !f.q ? ' · los anulados se ocultan 24 h después de anularse (filtro Estado → Anulado para verlos)' : ''}</span>
           ${paginas > 1 ? html`<div class="fila"><button class="btn sec chico" id="prev" ${f.pagina <= 1 ? html`disabled` : ''}>Anterior</button>
             <span class="sub">Página ${f.pagina} de ${paginas}</span><button class="btn sec chico" id="next" ${f.pagina >= paginas ? html`disabled` : ''}>Siguiente</button></div>` : ''}</div>
         <div class="lista-envios">${r.items.length ? r.items.map((e) => itemEnvio(e, { montos: rol !== 'repartidor' })) : html`<div class="card">${vacio('No hay envíos con estos filtros.')}</div>`}</div>`);
@@ -95,7 +95,12 @@ function lineaDeTiempo(e) {
     const motivo = [app.conf.motivos_fallo?.[codigo] || codigo, ...resto].filter(Boolean).join(' — ') || null;
     if (h.estado_anterior === h.estado_nuevo) return { titulo: titulo(h), detalle: h.motivo };
     if (h.estado_nuevo === 'en_ruta') { intento += 1; return { titulo: intento === 1 ? `En ruta (intento 1 de ${max})` : `En ruta: intento ${intento} de ${max}`, detalle: h.motivo }; }
-    if (h.estado_nuevo === 'fallido') { fallidos += 1; return { titulo: `Intento ${fallidos} de ${max}: no se pudo entregar`, detalle: motivo }; }
+    // Con la espera en el destino y la foto del intento (pedido 22-10).
+    if (h.estado_nuevo === 'fallido') {
+      fallidos += 1;
+      const foto = e.adjuntos.find((a) => a.tipo === 'foto_fallido' && a.envio_estado_id === h.id);
+      return { titulo: `Intento ${fallidos} de ${max}: no se pudo entregar`, detalle: motivo, espera: esperaTexto(h), foto };
+    }
     if (h.estado_nuevo === 'reagendado') return { titulo: `Reagendado para el intento ${fallidos + 1} de ${max}`, detalle: h.motivo };
     if (h.estado_nuevo === 'devuelto') return { titulo: 'Devuelto al remitente', detalle: fallidos >= max ? `Después de ${fallidos} intentos sin éxito${h.motivo ? ` · ${motivo}` : ''}` : motivo };
     if (h.estado_nuevo === 'entregado' && intento > 1) return { titulo: `Entregado en el intento ${intento}`, detalle: h.motivo };
@@ -129,8 +134,8 @@ export async function detalle(id) {
   const e = await get(`/api/envios/${id}`);
   const esAdmin = app.usuario.rol === 'admin';
   const nivel = nivelProgreso(e);
-  const fotos = e.adjuntos.filter((a) => ['foto_paquete', 'foto_entrega', 'firma_entrega'].includes(a.tipo));
-  const nombreFoto = (a) => ({ foto_entrega: 'Foto de entrega', firma_entrega: 'Firma de quien recibió', foto_paquete: 'Foto del paquete' })[a.tipo];
+  const fotos = e.adjuntos.filter((a) => ['foto_paquete', 'foto_entrega', 'firma_entrega', 'foto_fallido'].includes(a.tipo));
+  const nombreFoto = (a) => ({ foto_entrega: 'Foto de entrega', firma_entrega: 'Firma de quien recibió', foto_paquete: 'Foto del paquete', foto_fallido: 'Foto del intento fallido' })[a.tipo];
   // El pago manda: el cliente recibe el ticket cuando su pago está aprobado.
   // Reactivar (administración): solo si la última anulación fue la automática por falta de pago.
   const ultimaAnulacion = [...e.historial].reverse().find((h) => h.estado_nuevo === 'anulado');
@@ -138,7 +143,8 @@ export async function detalle(id) {
     && /^Anulado automáticamente/.test(ultimaAnulacion.motivo || '');
   const repetible = e.folio && ['admin', 'cliente'].includes(app.usuario.rol);
   // El cliente puede quitar de su cuenta un envío anulado; igual desaparece solo 24 h después (pedido 07-10).
-  const eliminable = app.usuario.rol === 'cliente' && e.estado === 'anulado';
+  // Administración también lo quita de su lista (pedido 22-10); lo sigue encontrando con el filtro "Anulado".
+  const eliminable = ['cliente', 'admin'].includes(app.usuario.rol) && e.estado === 'anulado';
   // Antes de que el repartidor retire el paquete se puede cambiar el destino (aunque esté pagado) y reagendar el retiro (pedido 07-10).
   const antesDelRetiro = ['admin', 'cliente'].includes(app.usuario.rol) && ['creado', 'asignado'].includes(e.estado);
   const puedeCambiarDestino = antesDelRetiro && e.tipo_destino === 'domicilio' && e.estado_pago !== 'en_revision';
@@ -162,13 +168,13 @@ export async function detalle(id) {
         ${e.ticket_url ? html`<a class="btn blanco" href="${enlaceTicket('80mm')}" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta 80 mm</a><a class="btn blanco" href="${enlaceTicket('a4')}" target="_blank" rel="noopener">${icono('imprimir')}Etiqueta A4</a>` : ''}
         ${reactivable ? html`<button class="btn" id="reactivar">Reactivar envío</button>` : ''}
         ${repetible ? html`<button class="btn sec" id="repetir" title="Crea un envío NUEVO con los mismos datos (retiro, destinatario, dirección y paquete). No es un reintento de entrega: los reintentos los hace el repartidor.">Crear envío igual</button>` : ''}
-        ${eliminable ? html`<button class="btn peligro" id="eliminar-anulado">Eliminar de mis envíos</button>` : ''}
+        ${eliminable ? html`<button class="btn peligro" id="eliminar-anulado">${esAdmin ? 'Eliminar de la lista' : 'Eliminar de mis envíos'}</button>` : ''}
         ${porPagar && app.conf.pagos.en_linea ? html`<button class="btn sec" id="link-pago" title="Enlace para que otra persona pague sin iniciar sesión">Link de pago</button><button class="btn sec" id="transferir">Pagar con transferencia</button><button class="btn" id="pagar">Pagar ${clp(e.tarifa_total)}</button>` : ''}
         ${porPagar && !app.conf.pagos.en_linea ? html`<button class="btn" id="transferir">Pagar ${clp(e.tarifa_total)} con transferencia</button>` : ''}
       </div>
     </div>
     ${e.vence_en ? html`<div class="aviso alerta" style="margin-top:12px">Si no se paga antes del <b>${fechaHora(e.vence_en)}</b>, el envío se anula solo.</div>` : ''}
-    ${eliminable ? html`<div class="aviso" style="margin-top:12px">Este envío está anulado: desaparece de tu lista 24 horas después de anularse, o puedes eliminarlo ahora.</div>` : ''}
+    ${eliminable ? html`<div class="aviso" style="margin-top:12px">Este envío está anulado: desaparece de ${esAdmin ? 'la lista de envíos' : 'tu lista'} 24 horas después de anularse, o puedes eliminarlo ahora.${esAdmin ? ' Lo sigues encontrando con el filtro "Anulado", buscando su folio y en cobranza.' : ''}</div>` : ''}
     ${reactivable ? html`<div class="aviso" style="margin-top:12px">Este envío se anuló solo por falta de pago. Puedes reactivarlo: tendrá ${app.conf.operacion.horas_sin_pago || 24} horas más para pagarse.</div>` : ''}
     ${!['anulado', 'devuelto'].includes(e.estado) ? html`<div class="progreso-envio">${PROGRESO.map(([, t], i) => html`<div class="${i < nivel ? 'on' : ''}">${t}</div>`)}</div>` : ''}
     <div class="grid g2" style="margin-top:18px;align-items:start">
@@ -185,7 +191,7 @@ export async function detalle(id) {
           <p><b>${e.destinatario_nombre}</b> · <span class="nowrap">${e.destinatario_telefono}</span>${e.destinatario_correo ? html` · ${e.destinatario_correo}` : ''}</p>
           ${e.aviso_destinatario_en ? html`<p class="sub">✉️ Se le avisó por correo con el enlace de seguimiento (${fechaHora(e.aviso_destinatario_en)})</p>` : ''}
           <p>${e.calle} ${e.numero}${e.depto ? ', ' + e.depto : ''}<br><b style="font-size:1.2rem">${e.comuna_nombre}</b> <span class="muted">· ${e.region}</span></p>
-          ${e.folio && e.destinatario_telefono ? html`<a class="btn sec chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">Avisar al destinatario por WhatsApp</a>` : ''}
+          ${e.folio && e.destinatario_telefono ? html`<a class="btn magenta chico" href="${avisoWhatsapp(e, app.conf.negocio)}" target="_blank" rel="noopener">${icono('whatsapp')} Avisar al destinatario por WhatsApp</a>` : ''}
           ${e.referencia ? html`<p class="sub">Ref.: ${e.referencia}</p>` : ''}
           ${puedeCambiarDestino ? html`<button class="btn sec chico" id="cambiar-destino" style="margin-top:10px">Cambiar dirección de destino</button>` : ''}
           ${esAdmin ? html`<p class="muted">Cliente: ${e.cliente_nombre}</p>` : ''}
@@ -220,7 +226,10 @@ export async function detalle(id) {
           <p>Entregado ${fechaHora(e.entregado_en)}${e.entrega_receptor ? ` · recibió ${e.entrega_receptor}` : ''}</p>
           ${e.entrega_lat ? html`<p class="sub">GPS: ${e.entrega_lat.toFixed(5)}, ${e.entrega_lon.toFixed(5)}${e.entrega_precision_m ? ` (±${Math.round(e.entrega_precision_m)} m)` : ''} · <a href="https://www.google.com/maps?q=${e.entrega_lat},${e.entrega_lon}" target="_blank" rel="noopener">ver en mapa</a></p>` : ''}</div>` : ''}
         ${fotos.length ? html`<div class="card"><h2>Fotos</h2><div class="fila">${fotos.map((a) => html`<a href="${archivo(a.url)}" target="_blank" rel="noopener" title="${nombreFoto(a)}"><img class="foto-mini${a.tipo === 'firma_entrega' ? ' firma-mini' : ''}" src="${archivo(a.url)}" alt="${nombreFoto(a)}"></a>`)}</div></div>` : ''}
-        <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${lineaDeTiempo(e).map((h) => html`<li class="${h.clase || ''}"><b>${h.titulo}</b>${h.detalle ? html` · <span class="sub">${h.detalle}</span>` : ''}<div class="cuando">${fechaHora(h.fecha)}${h.quien ? ` · ${h.quien}` : ''}</div></li>`)}</ol></div>
+        <div class="card"><h2>Historial</h2><ol class="linea-tiempo">${lineaDeTiempo(e).map((h) => html`<li class="${h.clase || ''}"><b>${h.titulo}</b>${h.detalle ? html` · <span class="sub">${h.detalle}</span>` : ''}
+          ${h.espera ? html`<div class="sub">⏱ ${h.espera}</div>` : ''}
+          ${h.foto ? html`<a href="${archivo(h.foto.url)}" target="_blank" rel="noopener"><img class="foto-mini" src="${archivo(h.foto.url)}" alt="Foto del intento fallido" style="margin-top:6px"></a>` : ''}
+          <div class="cuando">${fechaHora(h.fecha)}${h.quien ? ` · ${h.quien}` : ''}</div></li>`)}</ol></div>
       </div>
     </div>`);
 
@@ -305,9 +314,11 @@ function enlazarAcciones(e, recargar) {
   $('#cambiar-destino')?.addEventListener('click', () => cambiarDestino(e, recargar));
   $('#reagendar-retiro')?.addEventListener('click', () => reagendarRetiro(e, recargar));
   $('#eliminar-anulado')?.addEventListener('click', async (ev) => {
-    if (!(await confirmar('¿Eliminar este envío?', `${e.folio} está anulado y dejará de aparecer en tu lista.`, 'Eliminar'))) return;
+    const esAdmin = app.usuario.rol === 'admin';
+    const lista = esAdmin ? 'la lista de envíos (sigue en el filtro "Anulado")' : 'tu lista';
+    if (!(await confirmar('¿Eliminar este envío?', `${e.folio} está anulado y dejará de aparecer en ${lista}.`, 'Eliminar'))) return;
     ev.target.disabled = true;
-    try { await post(`/api/envios/${e.id}/ocultar`); toast('Envío eliminado de tu lista', 'ok'); ir('#/envios'); } catch (err) { errorToast(err); ev.target.disabled = false; }
+    try { await post(`/api/envios/${e.id}/ocultar`); toast(esAdmin ? 'Envío quitado de la lista' : 'Envío eliminado de tu lista', 'ok'); ir('#/envios'); } catch (err) { errorToast(err); ev.target.disabled = false; }
   });
   $('#reactivar')?.addEventListener('click', async (ev) => {
     if (!(await confirmar('¿Reactivar el envío?', `${e.folio} vuelve a quedar creado y tiene ${app.conf.operacion.horas_sin_pago || 24} horas más para pagarse.`, 'Reactivar'))) return;

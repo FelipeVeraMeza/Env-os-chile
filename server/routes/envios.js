@@ -13,7 +13,7 @@ import {
   cargarEnvio, detalleCompleto, exigirAcceso, exigirSinConflicto, presentar, puedeVerTicket, registrarEstado, SELECT_ENVIO, siguienteFolio, tarifaDeComuna,
 } from '../lib/envios.js';
 import { conArchivo, firmarLote, subida, subidaEntrega, verificarLote, verificarTicket } from '../lib/archivos.js';
-import { optimizarRuta } from '../lib/rutas.js';
+import { MODOS_RUTA, optimizarRuta } from '../lib/rutas.js';
 import { INICIO_PLAZO, PREFIJO_VENCIDO } from '../lib/vencimientos.js';
 import { quitarExif } from '../lib/exif.js';
 import { generarEtiquetasPdf, generarQrPng, generarTicketPdf, urlQr } from '../lib/ticket.js';
@@ -268,7 +268,10 @@ const hoyChile = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Ameri
 // Cuándo se anuló el envío (último cambio a "anulado" en su historial).
 const ANULADO_EN = "COALESCE((SELECT max(h.fecha) FROM envio_estado h WHERE h.envio_id = e.id AND h.estado_nuevo = 'anulado'), e.actualizado_en)";
 
-function filtrosListado(req) {
+// ocultarAnulados (listado de administración y del repartidor, pedido 22-10): los anulados hacían ruido en la lista; se
+// ocultan 24 h después de anularse o antes si administración los elimina. Se siguen viendo al filtrar por "Anulado" o
+// al buscar su folio, y en cobranza, reportes y exportación.
+function filtrosListado(req, { ocultarAnulados = false } = {}) {
   const q = req.query;
   const cond = [];
   const params = [];
@@ -280,6 +283,9 @@ function filtrosListado(req) {
     cond.push(`NOT (e.estado = 'anulado' AND (e.oculto_cliente_en IS NOT NULL OR ${ANULADO_EN} < now() - interval '24 hours'))`);
   }
   if (req.usuario.rol === 'repartidor') cond.push(`e.repartidor_id = ${p(req.usuario.id)}`);
+  if (ocultarAnulados && req.usuario.rol !== 'cliente' && !q.q && !String(q.estado || '').split(',').includes('anulado')) {
+    cond.push(`NOT (e.estado = 'anulado' AND (e.oculto_admin_en IS NOT NULL OR ${ANULADO_EN} < now() - interval '24 hours'))`);
+  }
   if (q.estado) cond.push(`e.estado = ANY(${p(String(q.estado).split(','))})`);
   if (q.estado_pago) cond.push(`e.estado_pago = ${p(String(q.estado_pago))}`);
   if (q.comuna_id) cond.push(`e.comuna_id = ${p(idFiltro(q.comuna_id, 'comuna_id'))}`);
@@ -305,7 +311,7 @@ function filtrosListado(req) {
 }
 
 envios.get('/', ruta(async (req, res) => {
-  const { where, params } = filtrosListado(req);
+  const { where, params } = filtrosListado(req, { ocultarAnulados: true });
   const limite = Math.min(Math.max(Math.trunc(Number(req.query.limite)) || 20, 1), 100);
   const pagina = Math.min(Math.max(Math.trunc(Number(req.query.pagina)) || 1, 1), 100000);
   const total = await uno(
@@ -473,6 +479,8 @@ envios.post('/ruta/optimizar', requiereRol('repartidor', 'admin'), ruta(async (r
   const lat = Number(req.body?.lat);
   const lon = Number(req.body?.lon);
   const inicio = req.body?.lat != null && req.body?.lon != null && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? [lat, lon] : null;
+  const modo = req.body?.modo ?? 'corta';
+  if (!Object.hasOwn(MODOS_RUTA, modo)) throw falla(422, 'Forma de ordenar la ruta inválida', { modo: 'Inválida' });
   const { rows } = await query(
     `SELECT e.id, e.estado, di.lat, di.lon, di.calle, c.nombre AS comuna, e.retiro_calle, rc.nombre AS retiro_comuna, e.retiro_fecha
        FROM envio e JOIN direccion di ON di.id = e.direccion_id JOIN comuna c ON c.id = e.comuna_id
@@ -485,13 +493,15 @@ envios.post('/ruta/optimizar', requiereRol('repartidor', 'admin'), ruta(async (r
   // Los retiros reagendados para otro día (pedido 07-10) no entran en la ruta de hoy: van al final, por fecha.
   const hoy = hoyChile();
   const otroDia = (e) => e.estado === 'asignado' && e.retiro_fecha && e.retiro_fecha > hoy;
+  // Igual que la pantalla: el reagendado (siguiente intento) ya está en manos del repartidor y va con lo "En ruta".
+  const aEntregar = (e) => ['en_ruta', 'reagendado'].includes(e.estado);
   const ids = [
-    ...optimizarRuta(rows.filter((e) => e.estado === 'en_ruta').map(parada), inicio),
-    ...optimizarRuta(rows.filter((e) => e.estado !== 'en_ruta' && !otroDia(e)).map(parada), inicio),
+    ...optimizarRuta(rows.filter(aEntregar).map(parada), inicio, modo),
+    ...optimizarRuta(rows.filter((e) => !aEntregar(e) && !otroDia(e)).map(parada), inicio, modo),
     ...rows.filter(otroDia).sort((a, b) => a.retiro_fecha.localeCompare(b.retiro_fecha) || a.id - b.id).map((e) => e.id),
   ];
   if (ids.length) await guardarOrden(ids, req.usuario.id);
-  res.json({ ok: true, ids, con_gps: Boolean(inicio) });
+  res.json({ ok: true, ids, con_gps: Boolean(inicio), modo });
 }));
 
 // Escanear el QR de la etiqueta (pedido 03-10): el QR lleva el token del envío. El repartidor solo encuentra los
@@ -581,34 +591,78 @@ envios.post('/:id/asignar', requiereRol('admin'), ruta(async (req, res) => {
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
 }));
 
-// Cambio de estado genérico (retirar, fallido, reagendar, devolver, anular).
-envios.post('/:id/estado', ruta(async (req, res) => {
+// Reintento (pedido 22-10): tras un intento fallido el paquete sigue en manos del repartidor (no se devuelve hasta el
+// último intento), así que no se marca "retirado" otra vez. Al registrar la llegada, la entrega o un nuevo fallido de un
+// envío reagendado, sale solo a ruta ("En ruta: intento N") en la misma transacción.
+async function salirAReintento(db, envio, usuarioId) {
+  if (envio.estado !== 'reagendado') return;
+  exigirSinConflicto(await db.query(
+    "UPDATE envio SET estado = 'en_ruta', actualizado_en = now() WHERE id = $1 AND estado = 'reagendado' AND intentos = $2", [envio.id, envio.intentos]));
+  await registrarEstado(db, { envioId: envio.id, anterior: 'reagendado', nuevo: 'en_ruta', usuarioId, motivo: `Salió al intento ${envio.intentos + 1}` });
+}
+
+// Valida que un envío reagendado pueda salir a ruta (pagado) y devuelve el estado desde el que se sigue.
+function estadoDeSalida(envio, conf) {
+  if (envio.estado !== 'reagendado') return envio.estado;
+  validarTransicion({ actual: 'reagendado', nuevo: 'en_ruta', estadoPago: envio.estado_pago, intentos: envio.intentos, config: conf });
+  return 'en_ruta';
+}
+
+// Cambio de estado genérico (retirar, fallido, reagendar, devolver, anular). foto: la del intento fallido (pedido 22-10).
+async function cambiarEstado(req, res, { foto = null, exigirFoto = false } = {}) {
   const envio = await envioAccesible(req);
   const { estado: nuevo, motivo, detalle } = req.body || {};
   if (nuevo === 'entregado') throw falla(400, 'Para entregar usa /entregar (foto y GPS obligatorios)');
   if (nuevo === 'creado' && envio.estado === 'borrador') throw falla(400, 'Para confirmar usa /confirmar');
   if (!ESTADOS[nuevo]) throw falla(422, 'Estado inválido');
-  const permitido = rolPuedeTransicionar(req.usuario.rol, envio.estado, nuevo, {
+  const conf = await leerConfig();
+  // Un nuevo fallido de un envío reagendado sale antes a ruta (el repartidor ya tiene el paquete).
+  const desde = nuevo === 'fallido' && envio.estado === 'reagendado' ? 'en_ruta' : envio.estado;
+  const permitido = rolPuedeTransicionar(req.usuario.rol, desde, nuevo, {
     esDueno: envio.cliente_id === req.usuario.id, esAsignado: envio.repartidor_id === req.usuario.id, estadoPago: envio.estado_pago,
   });
   if (!permitido) throw falla(403, 'Tu perfil no puede realizar este cambio de estado');
 
-  const conf = await leerConfig();
-  validarTransicion({ actual: envio.estado, nuevo, estadoPago: envio.estado_pago, intentos: envio.intentos, config: conf, motivo, llegadaEn: envio.llegada_en });
+  if (desde !== envio.estado) estadoDeSalida(envio, conf);
+  validarTransicion({ actual: desde, nuevo, estadoPago: envio.estado_pago, intentos: envio.intentos, config: conf, motivo, llegadaEn: envio.llegada_en });
+  if (exigirFoto && !foto) throw falla(422, 'La foto del intento fallido es obligatoria', { foto: 'Obligatoria' });
+  if (foto && !MIME_IMAGEN.includes(foto.mimetype)) throw falla(422, 'La foto debe ser JPG, PNG o WebP', { foto: 'Formato inválido' });
   const ubic = nuevo === 'fallido' ? validarUbicacion(req.body, false) : null;
   const textoMotivo = [motivo, detalle].filter(Boolean).join(' — ') || null;
 
-  await transaccion(async (db) => {
+  const guardar = (archivo) => transaccion(async (db) => {
+    if (desde !== envio.estado) await salirAReintento(db, envio, req.usuario.id);
     const sets = ['estado = $1', 'actualizado_en = now()'];
     if (nuevo === 'fallido') sets.push('intentos = intentos + 1', 'llegada_en = NULL');
     if (nuevo === 'reagendado') sets.push('llegada_en = NULL');
     if (nuevo === 'creado') sets.push('repartidor_id = NULL', 'orden_ruta = NULL');
     exigirSinConflicto(await db.query(`UPDATE envio SET ${sets.join(', ')} WHERE id = $2 AND estado = $3 AND intentos = $4`,
-      [nuevo, envio.id, envio.estado, envio.intentos]));
-    await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo, motivo: textoMotivo, usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon });
+      [nuevo, envio.id, desde, envio.intentos]));
+    // La hora de llegada queda en el paso del intento fallido: el seguimiento muestra cuánto esperó el repartidor.
+    const pasoId = await registrarEstado(db, {
+      envioId: envio.id, anterior: desde, nuevo, motivo: textoMotivo, usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon,
+      llegadaEn: nuevo === 'fallido' ? envio.llegada_en : null,
+    });
+    if (archivo) {
+      await db.query(
+        `INSERT INTO adjunto (envio_id, tipo, nombre_original, mime, tamano, ruta, sha256, subido_por, envio_estado_id)
+         VALUES ($1, 'foto_fallido', $2, $3, $4, $5, $6, $7, $8)`,
+        [envio.id, foto.originalname, foto.mimetype, archivo.tamano, archivo.ruta, archivo.sha256, req.usuario.id, pasoId],
+      );
+    }
   });
-  await auditar(req, 'cambiar_estado', 'envio', envio.id, { de: envio.estado, a: nuevo, motivo: textoMotivo });
+  if (foto) await conArchivo(quitarExif(foto.buffer), foto.mimetype, guardar);
+  else await guardar(null);
+  await auditar(req, 'cambiar_estado', 'envio', envio.id, { de: envio.estado, a: nuevo, motivo: textoMotivo, ...(foto ? { con_foto: true } : {}) });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
+}
+
+envios.post('/:id/estado', ruta((req, res) => cambiarEstado(req, res)));
+
+// Intento fallido desde la app del repartidor (pedido 22-10): con foto obligatoria, que se ve en el seguimiento.
+envios.post('/:id/fallido', requiereRol('admin', 'repartidor'), subida.single('foto'), ruta((req, res) => {
+  req.body = { ...req.body, estado: 'fallido' };
+  return cambiarEstado(req, res, { foto: req.file || null, exigirFoto: true });
 }));
 
 // Reactivar un envío anulado automáticamente por falta de pago (pedido 03-10): vuelve a "creado" y el plazo de
@@ -624,7 +678,7 @@ envios.post('/:id/reactivar', requiereRol('admin'), ruta(async (req, res) => {
   if (envio.estado_pago !== 'pendiente') throw falla(409, 'El pago de este envío ya no está pendiente');
   await transaccion(async (db) => {
     exigirSinConflicto(await db.query(
-      "UPDATE envio SET estado = 'creado', reactivado_en = now(), aviso_vencimiento_en = NULL, oculto_cliente_en = NULL, actualizado_en = now() WHERE id = $1 AND estado = 'anulado'", [envio.id]));
+      "UPDATE envio SET estado = 'creado', reactivado_en = now(), aviso_vencimiento_en = NULL, oculto_cliente_en = NULL, oculto_admin_en = NULL, actualizado_en = now() WHERE id = $1 AND estado = 'anulado'", [envio.id]));
     await registrarEstado(db, { envioId: envio.id, anterior: 'anulado', nuevo: 'creado', motivo: `Reactivado por administración: tiene ${config.horasSinPago} horas más para pagar`, usuarioId: req.usuario.id });
   });
   await auditar(req, 'reactivar', 'envio', envio.id);
@@ -632,10 +686,12 @@ envios.post('/:id/reactivar', requiereRol('admin'), ruta(async (req, res) => {
 }));
 
 // El cliente elimina de su cuenta un envío anulado (pedido 07-10). Solo se oculta: administración lo sigue viendo.
-envios.post('/:id/ocultar', requiereRol('cliente'), ruta(async (req, res) => {
+// Administración también lo quita de su lista (pedido 22-10): sigue al filtrar por "Anulado" y en cobranza y reportes.
+envios.post('/:id/ocultar', requiereRol('cliente', 'admin'), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
   if (envio.estado !== 'anulado') throw falla(409, 'Solo se pueden eliminar los envíos anulados');
-  await query('UPDATE envio SET oculto_cliente_en = now() WHERE id = $1 AND oculto_cliente_en IS NULL', [envio.id]);
+  const columna = req.usuario.rol === 'admin' ? 'oculto_admin_en' : 'oculto_cliente_en';
+  await query(`UPDATE envio SET ${columna} = now() WHERE id = $1 AND ${columna} IS NULL`, [envio.id]);
   await auditar(req, 'ocultar_anulado', 'envio', envio.id);
   res.json({ ok: true });
 }));
@@ -746,9 +802,15 @@ envios.post('/:id/reagendar-retiro', requiereRol('admin', 'cliente'), ruta(async
 // El repartidor registra que llegó al destino: empieza la espera máxima (5 min).
 envios.post('/:id/llegada', requiereRol('admin', 'repartidor'), ruta(async (req, res) => {
   const envio = await envioAccesible(req);
-  if (envio.estado !== 'en_ruta') throw falla(409, 'Solo se registra la llegada de un envío en ruta');
+  if (!['en_ruta', 'reagendado'].includes(envio.estado)) throw falla(409, 'Solo se registra la llegada de un envío en ruta');
   const conf = await leerConfig();
-  const { rows: [act] } = await query('UPDATE envio SET llegada_en = COALESCE(llegada_en, now()), actualizado_en = now() WHERE id = $1 RETURNING llegada_en', [envio.id]);
+  estadoDeSalida(envio, conf);
+  // Un envío reagendado (siguiente intento) sale a ruta al llegar al destino: no se vuelve a marcar retirado.
+  const act = await transaccion(async (db) => {
+    await salirAReintento(db, envio, req.usuario.id);
+    const { rows } = await db.query('UPDATE envio SET llegada_en = COALESCE(llegada_en, now()), actualizado_en = now() WHERE id = $1 RETURNING llegada_en', [envio.id]);
+    return rows[0];
+  });
   await auditar(req, 'llegada', 'envio', envio.id);
   res.json({ llegada_en: act.llegada_en, espera_max_min: conf.operacion.espera_max_min });
 }));
@@ -758,7 +820,9 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subidaEntrega.f
   const envio = await envioAccesible(req);
   if (req.usuario.rol === 'repartidor' && envio.repartidor_id !== req.usuario.id) throw falla(403, 'El envío no está asignado a ti');
   const conf = await leerConfig();
-  validarTransicion({ actual: envio.estado, nuevo: 'entregado', estadoPago: envio.estado_pago, intentos: envio.intentos, config: conf });
+  // Un envío reagendado se entrega sin marcarlo retirado otra vez: sale a ruta en la misma transacción (pedido 22-10).
+  const desde = estadoDeSalida(envio, conf);
+  validarTransicion({ actual: desde, nuevo: 'entregado', estadoPago: envio.estado_pago, intentos: envio.intentos, config: conf });
   req.file = req.files?.foto?.[0];
   // Firma del destinatario en la pantalla (opcional, pedido 03-10): PNG dibujado en el teléfono del repartidor.
   const firma = req.files?.firma?.[0] || null;
@@ -779,6 +843,7 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subidaEntrega.f
   // La firma se guarda primero (si viene); la foto y el cambio de estado van en la misma transacción.
   const conFirma = (fn) => (firma ? conArchivo(firma.buffer, 'image/png', fn) : fn(null));
   await conFirma((archivoFirma) => conArchivo(quitarExif(req.file.buffer), req.file.mimetype, (archivo) => transaccion(async (db) => {
+    await salirAReintento(db, envio, req.usuario.id);
     await db.query(
       `INSERT INTO adjunto (envio_id, tipo, nombre_original, mime, tamano, ruta, sha256, subido_por)
        VALUES ($1, 'foto_entrega', $2, $3, $4, $5, $6, $7)`,
@@ -794,10 +859,10 @@ envios.post('/:id/entregar', requiereRol('admin', 'repartidor'), subidaEntrega.f
     exigirSinConflicto(await db.query(
       `UPDATE envio SET estado = 'entregado', entregado_en = COALESCE($7, now()), entrega_lat = $1, entrega_lon = $2, entrega_precision_m = $3,
          entrega_receptor = $4, actualizado_en = now() WHERE id = $5 AND estado = $6`,
-      [ubic?.lat ?? null, ubic?.lon ?? null, precision, receptor, envio.id, envio.estado, horaReal],
+      [ubic?.lat ?? null, ubic?.lon ?? null, precision, receptor, envio.id, desde, horaReal],
     ));
     const notas = [receptor && `Recibe: ${receptor}`, firma && 'con firma', horaReal && 'registrada sin conexión', !ubic && 'sin GPS'].filter(Boolean).join(' · ') || null;
-    await registrarEstado(db, { envioId: envio.id, anterior: envio.estado, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: notas });
+    await registrarEstado(db, { envioId: envio.id, anterior: desde, nuevo: 'entregado', usuarioId: req.usuario.id, lat: ubic?.lat, lon: ubic?.lon, motivo: notas });
   })));
   await auditar(req, 'entregar', 'envio', envio.id, { lat: ubic?.lat, lon: ubic?.lon });
   res.json(presentar(await cargarEnvio(envio.id), req.usuario));
